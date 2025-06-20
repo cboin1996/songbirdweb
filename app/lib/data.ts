@@ -1,4 +1,5 @@
-const BASE_URL = "http://localhost:8000";
+const API_HOST = process.env.API_HOST === undefined ? "localhost" : process.env.API_HOST
+const BASE_URL = `http://${API_HOST}:8000`;
 const DOWNLOAD_URL = `${BASE_URL}/download`;
 const TAGGING_URL = `${BASE_URL}/properties`;
 const ITUNES_SEARCH_URL = `${BASE_URL}/properties/itunes`;
