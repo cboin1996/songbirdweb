@@ -1,6 +1,8 @@
-import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import "./globals.css";
+import "../globals.css";
+
+import "../globals.css";
+import NavBar from "../components/navbar";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -12,10 +14,6 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-export const metadata: Metadata = {
-  title: "songbirdweb",
-  description: "web ui for downloading formatted songs, for free!",
-};
 
 export default function RootLayout({
   children,
@@ -23,12 +21,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body
+      <section
         className={`${geistSans.variable} ${geistMono.variable} antialiased p-8`}
       >
+        <NavBar></NavBar>
         {children}
-      </body>
-    </html>
+      </section>
   );
 }
