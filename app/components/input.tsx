@@ -1,6 +1,6 @@
 import { HTMLInputTypeAttribute } from "react";
 
-export default function Input({ placeholder, disabled, onChange, width, value, type }: { placeholder: string, disabled: any, onChange?: any, width: number, value?: any, type?: HTMLInputTypeAttribute }) {
+export default function Input({ placeholder, disabled, onChange, width, value, type }: { placeholder: string, disabled: any, onChange?: any, width?: number, value?: any, type?: HTMLInputTypeAttribute }) {
     return (
         <input
             type={type}

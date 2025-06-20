@@ -16,11 +16,11 @@ export default function Songs({ songs }: { songs: DownloadedSong[] }) {
         downloadFileError: "download error, try again",
         noSongSelected: "you must select a song",
     }
-    const initialActiveIndex: number | undefined = undefined
     const searchParams = useSearchParams()
 
     const [selected, setSelected] = useState(false);
-    const [activeIndex, setActiveIndex] = useState(initialActiveIndex);
+    const noActiveIndex = -1
+    const [activeIndex, setActiveIndex] = useState(noActiveIndex);
     const [status, setStatus] = useState(statuses.paste)
     const [text, setText] = useState('')
 
@@ -52,7 +52,7 @@ export default function Songs({ songs }: { songs: DownloadedSong[] }) {
 
     async function handleSongSelection() {
         setSelected(true);
-        if (activeIndex === undefined) {
+        if (activeIndex === noActiveIndex) {
             setStatus(statuses.noSongSelected)
             return
         }
@@ -68,7 +68,7 @@ export default function Songs({ songs }: { songs: DownloadedSong[] }) {
 
     async function handleSongDownload(e: React.ChangeEvent<HTMLFormElement>) {
         e.preventDefault()
-        if (activeIndex === undefined) {
+        if (activeIndex === noActiveIndex) {
             setStatus(statuses.noSongSelected)
             return
         }
@@ -96,13 +96,13 @@ export default function Songs({ songs }: { songs: DownloadedSong[] }) {
             }
         )
         setText("")
-        setActiveIndex(undefined)
+        setActiveIndex(noActiveIndex)
     }
 
     return (
         <div>
             {
-                activeIndex !== undefined ? (
+                activeIndex !== noActiveIndex ? (
                     <form className="flex flex-row gap-2">
                         <Input
                             placeholder={`${songs[activeIndex].properties.trackName} - ${songs[activeIndex].properties.artistName}`}
