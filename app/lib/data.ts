@@ -1,8 +1,8 @@
-const API_HOST = process.env.API_HOST === undefined ? "localhost" : process.env.API_HOST
-const BASE_URL = `http://${API_HOST}:8000`;
-const DOWNLOAD_URL = `${BASE_URL}/download`;
-const TAGGING_URL = `${BASE_URL}/properties`;
-const ITUNES_SEARCH_URL = `${BASE_URL}/properties/itunes`;
+export const API_HOST = process.env.NEXT_PUBLIC_API_HOST
+export const BASE_URL = `http://${API_HOST}:8000`;
+export const DOWNLOAD_URL = `${BASE_URL}/download`;
+export const TAGGING_URL = `${BASE_URL}/properties`;
+export const ITUNES_SEARCH_URL = `${BASE_URL}/properties/itunes`;
 
 export function isValidUrl(url: string) {
   try {
@@ -17,7 +17,7 @@ enum ResponseTypes {
   bytes,
   blob,
 }
-async function fetchData(args: {
+export async function fetchData(args: {
   url: string;
   method: string;
   body?: any;

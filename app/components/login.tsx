@@ -4,7 +4,7 @@ import { FaDove } from "react-icons/fa";
 import React, { useState } from 'react'
 import { useRouter } from "next/navigation";
 import Input from "./input";
-import Button from "./button";
+import { BASE_URL, fetchData } from "../lib/data";
 
 export default function Login() {
     const router = useRouter()
@@ -12,7 +12,8 @@ export default function Login() {
         sending: "sending",
         authorized: "authorized",
         unauthorized: "unauthorized",
-        login: "login"
+        login: "login",
+        error: "error occurred"
     }
     const [text, setText] = useState('')
     const [status, setStatus] = useState(statuses.login)
@@ -22,7 +23,8 @@ export default function Login() {
     async function handleSubmit(e: any) {
         e.preventDefault();
         setStatus(statuses.sending)
-        const resp = await fetch("http://localhost:8000/",
+        const resp = await fetch(
+            BASE_URL,
             {
                 method: "GET",
                 headers: {
@@ -30,12 +32,18 @@ export default function Login() {
                 }
             }
         )
+        if (resp === undefined) {
+            setStatus(statuses.error)
+            return
+        }
         if (resp.status === 401 || resp.status === 403) {
             setStatus(statuses.unauthorized)
+            return
         }
         if (resp.status === 200) {
             setStatus(statuses.authorized)
             router.push(`/download?apiKey=${text}`)
+            return
         }
 
     }
