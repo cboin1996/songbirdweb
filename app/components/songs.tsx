@@ -43,7 +43,7 @@ export default function Songs({ songs }: { songs: DownloadedSong[] }) {
         const url: string = window.URL.createObjectURL(result)
         const link: HTMLAnchorElement = document.createElement('a');
         link.href = url
-        link.download = `${song.properties.trackName} - ${song.properties.artistName}`
+        link.download = `${song.properties.trackName} - ${song.properties.artistName}.mp3`
         document.body.appendChild(link)
         link.click()
         document.body.removeChild(link)
