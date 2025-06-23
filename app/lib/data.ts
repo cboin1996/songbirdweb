@@ -1,4 +1,4 @@
-export const API_HOST = process.env.NEXT_PUBLIC_API_HOST
+export const API_HOST = process.env.NEXT_PUBLIC_API_HOST;
 export const BASE_URL = `http://${API_HOST}:8000`;
 export const DOWNLOAD_URL = `${BASE_URL}/download`;
 export const TAGGING_URL = `${BASE_URL}/properties`;
@@ -28,12 +28,15 @@ export async function fetchData(args: {
   try {
     const responseType =
       args.responseType === undefined ? ResponseTypes.json : args.responseType;
+    if (!args.validErrors) {
+      args.validErrors = [];
+    }
     const response = await fetch(args.url, {
       method: args.method,
       headers: args.headers,
       body: JSON.stringify(args.body),
     });
-    if (!response.ok && args.validErrors?.includes(response.status)) {
+    if (!response.ok || args.validErrors.includes(response.status)) {
       return undefined;
     }
     let data: any = {};
@@ -87,6 +90,7 @@ interface DownloadedSongIds {
 export async function downloadSongViaUrl(
   url: string,
   apiKey: string,
+  embedThumbnail: boolean = false,
 ): Promise<DownloadedSongIds> {
   const headers = {
     "x-api-key": apiKey,
@@ -98,6 +102,7 @@ export async function downloadSongViaUrl(
     method: "POST",
     body: {
       url: url,
+      embed_thumbnail: embedThumbnail,
     },
     headers: headers,
   });
@@ -114,7 +119,9 @@ export async function fetchPropertiesViaUrl(
   };
   // get song uuid for download if it exists
   const songs: DownloadedSongIds = await downloadSongViaUrl(url, apiKey);
-
+  if (songs === undefined) {
+    return [];
+  }
   const props: DownloadedSong[] = [];
   for (let songId of songs.song_ids) {
     const properties: Properties | undefined = await fetchData({

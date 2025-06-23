@@ -1,3 +1,4 @@
+'use client'
 import { useEffect, useState } from "react";
 import { DownloadedSong, downloadSongViaUrl, fetchSong, tagSong } from "../lib/data";
 import Song from "./song";
@@ -21,11 +22,12 @@ export default function Songs({ songs }: { songs: DownloadedSong[] }) {
     const [selected, setSelected] = useState(false);
     const noActiveIndex = -1
     const [activeIndex, setActiveIndex] = useState(noActiveIndex);
-    const [status, setStatus] = useState(statuses.paste)
+    const [status, setStatus] = useState("")
     const [text, setText] = useState('')
 
     const api_key = searchParams.get("apiKey")!.toString()
 
+    const displayDownloadInput = activeIndex !==  -1 && status !== ""
     const isDownloading = status === statuses.downloading || status === statuses.tagging
 
     // trigger handleSongSelection() on index selection change
@@ -102,7 +104,8 @@ export default function Songs({ songs }: { songs: DownloadedSong[] }) {
     return (
         <div>
             {
-                activeIndex !== noActiveIndex ? (
+                displayDownloadInput ? (
+                    <div>
                     <form className="flex flex-row gap-2">
                         <Input
                             placeholder={`${songs[activeIndex].properties.trackName} - ${songs[activeIndex].properties.artistName}`}
@@ -117,14 +120,20 @@ export default function Songs({ songs }: { songs: DownloadedSong[] }) {
                             text="download"
                         >
                         </Button>
-                        <p>{status}</p>
                     </form>
+                    <p>{status}</p>
+                    </div>
                 ) : (<div />)
             }
             <div className="grid 2xl:grid-cols-4 xl:grid-cols-3 lg:grid-cols-2 md:gap-8 rounded-2xl justify-items-stretch py-2">
                 {
+                    songs.length > 0 ? (
                     songs.map((
                         song: DownloadedSong, i) => <Song key={i} song={song} selected={activeIndex === i} onClick={() => setActiveIndex(i)}></Song>
+                    )
+                    ) :
+                    (
+                        <p>no songs found.</p>
                     )
                 }
             </div>

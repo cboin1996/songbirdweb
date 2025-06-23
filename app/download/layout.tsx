@@ -4,6 +4,7 @@ import "../globals.css";
 import "../globals.css";
 import NavBar from "../components/navbar";
 import { Suspense } from "react";
+import Search from "../components/search";
 
 const geistSans = Geist({
     variable: "--font-geist-sans",
@@ -16,16 +17,17 @@ const geistMono = Geist_Mono({
 });
 
 
-export default function RootLayout({
+export default function Layout({
     children,
 }: Readonly<{
     children: React.ReactNode;
 }>) {
     return (
         <section
-            className={`${geistSans.variable} ${geistMono.variable} antialiased p-8`}
+            className={`${geistSans.variable} ${geistMono.variable} antialiased`}
         >
             <NavBar></NavBar>
+            <Search></Search>
             <Suspense>
                 {children}
             </Suspense>

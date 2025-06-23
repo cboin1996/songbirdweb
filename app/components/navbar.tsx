@@ -8,11 +8,13 @@ export default function NavBar() {
         <nav className="flex flex-row justify-between">
             <div className="flex flex-row gap-2">
                 <p>songbird.</p>
-                <FaDove size="20" className="hover:text-sky-600" />
+                <Link href="/">
+                    <FaDove size="20" className="hover:text-sky-600" />
+                </Link>
             </div>
             <div>
                 <Link href="/">
-                    <Button text="Log out"/>
+                    <Button text="Log out" />
                 </Link>
             </div>
         </nav>
