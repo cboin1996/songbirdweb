@@ -111,7 +111,7 @@ export default function Songs({ songs }: { songs: DownloadedSong[] }) {
                             placeholder={`${songs[activeIndex].properties.trackName} - ${songs[activeIndex].properties.artistName}`}
                             disabled={isDownloading}
                             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setText(e.target.value)}
-                            width={64}
+                            width={96}
                             type="url"
                         />
                         <Button

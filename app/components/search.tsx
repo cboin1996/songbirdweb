@@ -58,8 +58,8 @@ export default function Search() {
         setText("")
     }
     return (
-        <div className="flex-row flex gap-2 py-4 md:justify-items-center">
-            <form onSubmit={handleSearch}>
+        <form onSubmit={handleSearch}>
+            <div className="flex-row flex gap-2 py-4 md:justify-items-center">
                 <Input
                     placeholder={getInputConfigs(mode).placeholder}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => setText(e.target.value)}
@@ -67,21 +67,20 @@ export default function Search() {
                     width={96}
                     type={getInputConfigs(mode).type}
                 />
-            </form>
-            <button onClick={resetSearch}>
-                <FaX className="-mx-8 text-gray-700 hover:bg-gray-500 rounded-lg"></FaX>
-            </button>
-            <Button
-                text={getInputConfigs(mode).buttonText}
-                disabled={text === ""}
-                onClick={handleSearch}
-            >
-            </Button>
-            <select name="mode" id="mode" value={mode} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setMode(e.target.value)}>
-                <option value={SONG_MODE}>{SONG_MODE}</option>
-                <option value={ALBUM_MODE}>{ALBUM_MODE}</option>
-                <option value={URL_MODE}>{URL_MODE}</option>
-            </select>
-        </div>
+                <button onClick={resetSearch} type="button">
+                    <FaX className="-mx-8 text-gray-700 hover:bg-gray-500 rounded-lg"></FaX>
+                </button>
+                <Button
+                    text={getInputConfigs(mode).buttonText}
+                    disabled={text === ""}
+                >
+                </Button>
+                <select name="mode" id="mode" value={mode} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setMode(e.target.value)}>
+                    <option value={SONG_MODE}>{SONG_MODE}</option>
+                    <option value={ALBUM_MODE}>{ALBUM_MODE}</option>
+                    <option value={URL_MODE}>{URL_MODE}</option>
+                </select>
+            </div>
+        </form>
     )
 }
