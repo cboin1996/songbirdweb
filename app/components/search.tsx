@@ -11,6 +11,8 @@ export default function Search() {
     const URL_MODE = "url"
     const searchParams = useSearchParams()
     const router = useRouter()
+    const { replace } = useRouter()
+    const pathname = usePathname()
     const [text, setText] = useState(searchParams.get("query") || "")
     const [mode, setMode] = useState(searchParams.get("mode") || SONG_MODE)
 
@@ -56,7 +58,19 @@ export default function Search() {
     function resetSearch(e: any) {
         e.preventDefault()
         setText("")
+        const params = new URLSearchParams(searchParams)
+        params.delete('query')
+        replace(`${pathname}?${params.toString()}`)
     }
+
+    function updateMode(e: any) {
+        e.preventDefault()
+        setMode(e.target.value)
+        const params = new URLSearchParams(searchParams)
+        params.set('mode', e.target.value)
+        replace(`${pathname}?${params.toString()}`)
+    }
+
     return (
         <form onSubmit={handleSearch}>
             <div className="flex-row flex gap-2 py-4 md:justify-items-center">
@@ -75,7 +89,7 @@ export default function Search() {
                     disabled={text === ""}
                 >
                 </Button>
-                <select name="mode" id="mode" value={mode} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setMode(e.target.value)}>
+                <select name="mode" id="mode" value={mode} onChange={(e) => updateMode(e)}>
                     <option value={SONG_MODE}>{SONG_MODE}</option>
                     <option value={ALBUM_MODE}>{ALBUM_MODE}</option>
                     <option value={URL_MODE}>{URL_MODE}</option>

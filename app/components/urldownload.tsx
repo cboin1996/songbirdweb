@@ -3,32 +3,30 @@ import { useEffect, useState } from "react";
 import { downloadSongViaUrl, fetchSong } from "../lib/data";
 import Button from "./button";
 
-export default function DownloadViaUrl({ query, apiKey }: { query: string | undefined, apiKey: string }) {
+export default function DownloadViaUrl({ query, apiKey }: { query: any, apiKey: string }) {
     const statuses = {
+        initial: "enter a url",
         downloading: "downloading",
         urlDownloadError: "error occurred while downloading",
         unspecifiedQuery: "you must fill a value",
         creatingLink: "creating download link",
         done: "download complete"
     }
-    const [status, setStatus] = useState(statuses.downloading)
-    const [queryValue, setQueryValue] = useState(query)
+    const [status, setStatus] = useState(statuses.initial)
     async function createDownloadFile(event?: any) {
-        if (query === undefined) {
-            setStatus(statuses.unspecifiedQuery)
+        if (query === "") {
             return
         }
+        setStatus(statuses.downloading);
         const result = await downloadSongViaUrl(query, apiKey, true)
-        if (result === undefined) {
+        const songId = result.song_ids[0]
+ 
+        const song = await fetchSong(songId, apiKey)
+        if (song === undefined) {
             setStatus(statuses.urlDownloadError)
             return
         }
-        if (result.song_ids.length === 0) {
-            setStatus(statuses.urlDownloadError)
-        }
-        const songId = result.song_ids[0]
         setStatus(statuses.creatingLink)
-        const song = await fetchSong(songId, apiKey)
         const url: string = window.URL.createObjectURL(song)
         const link: HTMLAnchorElement = document.createElement('a');
         link.href = url
@@ -42,7 +40,7 @@ export default function DownloadViaUrl({ query, apiKey }: { query: string | unde
 
     useEffect(() => {
         createDownloadFile()
-    }, [])
+    }, [query])
 
     return (
         <div>

@@ -1,6 +1,6 @@
-import { downloadSongViaUrl} from "../../lib/data";
+import { downloadSongViaUrl, fetchSong } from "../../lib/data";
 
-import React from "react"
+import React, { Suspense } from "react"
 import DownloadViaUrl from "../../components/urldownload";
 
 export default async function Page(props: {
@@ -13,7 +13,6 @@ export default async function Page(props: {
     const searchParams = await props.searchParams
     const apiKey = searchParams?.apiKey || ''
     const query = searchParams?.query || ''
- 
     return (
         <main>
             <DownloadViaUrl query={query} apiKey={apiKey}></DownloadViaUrl>

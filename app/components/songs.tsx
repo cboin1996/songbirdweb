@@ -5,9 +5,9 @@ import Song from "./song";
 import { useSearchParams } from "next/navigation";
 import Input from "../components/input"
 import Button from "../components/button"
+import { FaX } from "react-icons/fa6";
 
 export default function Songs({ songs }: { songs: DownloadedSong[] }) {
-    let error = ""
     let statuses = {
         paste: "enter a url",
         downloading: "downloading",
@@ -27,7 +27,7 @@ export default function Songs({ songs }: { songs: DownloadedSong[] }) {
 
     const api_key = searchParams.get("apiKey")!.toString()
 
-    const displayDownloadInput = activeIndex !==  -1 && status !== ""
+    const displayDownloadInput = activeIndex !==  -1
     const isDownloading = status === statuses.downloading || status === statuses.tagging
 
     // trigger handleSongSelection() on index selection change
@@ -50,6 +50,8 @@ export default function Songs({ songs }: { songs: DownloadedSong[] }) {
         link.click()
         document.body.removeChild(link)
         window.URL.revokeObjectURL(url)
+        setText("")
+        setActiveIndex(noActiveIndex)
     }
 
     async function handleSongSelection() {
@@ -97,8 +99,11 @@ export default function Songs({ songs }: { songs: DownloadedSong[] }) {
                 properties: song.properties
             }
         )
+    }
+
+    function resetText(e: any) {
+        e.preventDefault()
         setText("")
-        setActiveIndex(noActiveIndex)
     }
 
     return (
@@ -106,16 +111,19 @@ export default function Songs({ songs }: { songs: DownloadedSong[] }) {
             {
                 displayDownloadInput ? (
                     <div>
-                    <form className="flex flex-row gap-2">
+                    <form className="flex flex-row gap-2" onSubmit={handleSongDownload}>
                         <Input
                             placeholder={`${songs[activeIndex].properties.trackName} - ${songs[activeIndex].properties.artistName}`}
                             disabled={isDownloading}
                             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setText(e.target.value)}
+                            value={text}
                             width={96}
                             type="url"
                         />
+                        <button onClick={resetText} type="button">
+                            <FaX className="-mx-8 text-gray-700 hover:bg-gray-500 rounded-lg"></FaX>
+                        </button>
                         <Button
-                            onClick={handleSongDownload}
                             disabled={isDownloading || text === ""}
                             text="download"
                         >

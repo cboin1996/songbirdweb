@@ -27,8 +27,8 @@ export default function Layout({
             className={`${geistSans.variable} ${geistMono.variable} antialiased`}
         >
             <NavBar></NavBar>
-            <Search></Search>
             <Suspense>
+            <Search></Search>
                 {children}
             </Suspense>
         </section>
