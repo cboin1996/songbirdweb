@@ -58,6 +58,7 @@ export default function Login() {
                             placeholder="enter api key"
                             disabled={isSending}
                             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setText(e.target.value)}
+                            width={40}
                         />
                         <button className="disabled:text-sky-500"
                             onClick={handleSubmit}

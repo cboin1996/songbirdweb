@@ -81,7 +81,7 @@ export default function Search() {
                     placeholder={getInputConfigs(mode).placeholder}
                     onChange={(e: any) => setText(e.target.value)}
                     value={text}
-                    width={96}
+                    width={80}
                     type={getInputConfigs(mode).type}
                 />
                 <button onClick={resetSearch} type="button">

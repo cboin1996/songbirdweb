@@ -1,10 +1,14 @@
 import { HTMLInputTypeAttribute } from "react";
 
 export default function Input({ placeholder, disabled, onChange, width, value, type, defaultValue }: { placeholder: string, disabled?: any, onChange?: any, width?: number, value?: any, type?: HTMLInputTypeAttribute, defaultValue?: any }) {
+    const defaultWidth = 80
+    if (width === undefined) {
+        width = defaultWidth
+    }
     return (
         <input
             type={type}
-            className={`rounded-lg bg-gray-800 hover:outline hover:outline-sky-500 md:w-96 w-80 focus:outline invalid:outline-red-500`}
+            className={`rounded-lg bg-gray-800 hover:outline hover:outline-sky-500 md:w-96 w-${width} focus:outline invalid:outline-red-500`}
             placeholder={placeholder}
             disabled={disabled}
             onChange={onChange}
