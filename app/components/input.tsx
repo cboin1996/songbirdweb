@@ -4,7 +4,7 @@ export default function Input({ placeholder, disabled, onChange, classAttrs, val
     return (
         <input
             type={type}
-            className={`rounded-lg bg-gray-800 hover:outline hover:outline-sky-500 focus:outline invalid:outline-red-500 ${classAttrs}`}
+            className={`rounded-lg dark:bg-gray-800 bg-gray-200 hover:outline hover:outline-sky-500 focus:outline invalid:outline-red-500 ${classAttrs}`}
             placeholder={placeholder}
             disabled={disabled}
             onChange={onChange}

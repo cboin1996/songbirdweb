@@ -6,7 +6,7 @@ import { FaDownload } from "react-icons/fa";
 export default function Song({ song, selected, onClick }: { song: DownloadedSong, selected: boolean, onClick: any }) {
     const color = song.songId !== undefined ? "text-green-700" : "text-red-700"
     return (
-        <button onClick={onClick} disabled={selected} className="disabled:bg-gray-800 hover:bg-gray-800 rounded-md p-2">
+        <button onClick={onClick} disabled={selected} className="dark:disabled:bg-gray-800 dark:hover:bg-gray-900 hover:bg-gray-200 disabled:bg-gray-300 rounded-md p-2">
             <div className="flex flex-row justify-between">
                 <div className="flew-row flex rounded-lg">
                     <div>
