@@ -118,6 +118,7 @@ export default function Songs({ songs }: { songs: DownloadedSong[] }) {
                             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setText(e.target.value)}
                             value={text}
                             type="url"
+                            classAttrs="md:w-96 w-80"
                         />
                         <button onClick={resetText} type="button">
                             <FaX className="-mx-8 text-gray-700 hover:bg-gray-500 rounded-lg"></FaX>

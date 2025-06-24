@@ -81,8 +81,8 @@ export default function Search() {
                     placeholder={getInputConfigs(mode).placeholder}
                     onChange={(e: any) => setText(e.target.value)}
                     value={text}
-                    width={80}
                     type={getInputConfigs(mode).type}
+                    classAttrs="md:w-96 w-80"
                 />
                 <button onClick={resetSearch} type="button">
                     <FaX className="-mx-8 text-gray-700 hover:bg-gray-500 rounded-lg"></FaX>
