@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { downloadSongViaUrl, fetchSong } from "../lib/data";
 import Button from "./button";
+import Spinner from "./spinner";
 
 export default function DownloadViaUrl({ query, apiKey }: { query: any, apiKey: string }) {
     const statuses = {
@@ -13,6 +14,7 @@ export default function DownloadViaUrl({ query, apiKey }: { query: any, apiKey: 
         done: "download complete"
     }
     const [status, setStatus] = useState(statuses.initial)
+    const isDownloading = status === statuses.downloading
     async function createDownloadFile(event?: any) {
         if (query === "") {
             return
@@ -20,7 +22,7 @@ export default function DownloadViaUrl({ query, apiKey }: { query: any, apiKey: 
         setStatus(statuses.downloading);
         const result = await downloadSongViaUrl(query, apiKey, true)
         const songId = result.song_ids[0]
- 
+
         const song = await fetchSong(songId, apiKey)
         if (song === undefined) {
             setStatus(statuses.urlDownloadError)
@@ -47,11 +49,14 @@ export default function DownloadViaUrl({ query, apiKey }: { query: any, apiKey: 
             {
                 status === statuses.urlDownloadError ? (
                     <div className="flex flex-row gap-2">
-                    <p>{status}</p>
-                    <Button text="retry" onClick={createDownloadFile} disabled={status === statuses.downloading}></Button>
+                        <p>{status}</p>
+                        <Button text="retry" onClick={createDownloadFile} disabled={status === statuses.downloading}></Button>
                     </div>
                 ) : (
-                    <p>{status}</p>
+                    <div className="flex flex-row gap-2">
+                        <p>{status}</p>
+                        {isDownloading ? (<Spinner></Spinner>) : (<div></div>)}
+                    </div>
                 )
             }
         </div>
