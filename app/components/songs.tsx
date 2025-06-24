@@ -27,7 +27,7 @@ export default function Songs({ songs }: { songs: DownloadedSong[] }) {
 
     const api_key = searchParams.get("apiKey")!.toString()
 
-    const displayDownloadInput = activeIndex !==  -1
+    const displayDownloadInput = activeIndex !==  -1 && songs.length > 0
     const isDownloading = status === statuses.downloading || status === statuses.tagging
 
     // trigger handleSongSelection() on index selection change
@@ -117,7 +117,6 @@ export default function Songs({ songs }: { songs: DownloadedSong[] }) {
                             disabled={isDownloading}
                             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setText(e.target.value)}
                             value={text}
-                            width={96}
                             type="url"
                         />
                         <button onClick={resetText} type="button">

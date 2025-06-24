@@ -1,20 +1,21 @@
 'use client'
 import { usePathname, useSearchParams, useRouter } from "next/navigation"
-import React, { HTMLInputTypeAttribute, useState } from "react"
+import React, { HTMLInputTypeAttribute, useEffect, useState } from "react"
 import Button from "./button"
 import Input from "./input"
 import { FaX } from "react-icons/fa6"
+import { useDebouncedCallback } from "use-debounce"
 
 export default function Search() {
     const SONG_MODE = "song"
     const ALBUM_MODE = "album"
     const URL_MODE = "url"
     const searchParams = useSearchParams()
+    const [text, setText] = useState(searchParams.get('query')?.toString() || '')
+    const [mode, setMode] = useState(searchParams.get('mode')?.toString() || 'song')
     const router = useRouter()
     const { replace } = useRouter()
     const pathname = usePathname()
-    const [text, setText] = useState(searchParams.get("query") || "")
-    const [mode, setMode] = useState(searchParams.get("mode") || SONG_MODE)
 
     function getInputConfigs(mode: string) {
         let placeholder = " enter a song name"
@@ -45,6 +46,8 @@ export default function Search() {
     function handleSearch(event: any) {
         event.preventDefault()
         const params = new URLSearchParams(searchParams)
+        // we only support lookup via album mode
+        params.delete('lookup')
         if (text) {
             params.set('query', text)
             params.set('mode', mode)
@@ -60,23 +63,23 @@ export default function Search() {
         setText("")
         const params = new URLSearchParams(searchParams)
         params.delete('query')
+        params.delete('lookup')
+        params.delete('limit')
         replace(`${pathname}?${params.toString()}`)
     }
 
-    function updateMode(e: any) {
-        e.preventDefault()
-        setMode(e.target.value)
+    useEffect(() => {
         const params = new URLSearchParams(searchParams)
-        params.set('mode', e.target.value)
+        params.set('mode', mode)
         replace(`${pathname}?${params.toString()}`)
-    }
+    }, [mode])
 
     return (
         <form onSubmit={handleSearch}>
-            <div className="flex-row flex gap-2 py-4 md:justify-items-center">
+            <div className="flex-row flex gap-2 py-4 md:justify-items-center justify-items-stretch">
                 <Input
                     placeholder={getInputConfigs(mode).placeholder}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setText(e.target.value)}
+                    onChange={(e: any) => setText(e.target.value)}
                     value={text}
                     width={96}
                     type={getInputConfigs(mode).type}
@@ -89,7 +92,7 @@ export default function Search() {
                     disabled={text === ""}
                 >
                 </Button>
-                <select name="mode" id="mode" value={mode} onChange={(e) => updateMode(e)}>
+                <select name="mode" id="mode" value={mode} onChange={(e: any) => setMode(e.target.value)}>
                     <option value={SONG_MODE}>{SONG_MODE}</option>
                     <option value={ALBUM_MODE}>{ALBUM_MODE}</option>
                     <option value={URL_MODE}>{URL_MODE}</option>

@@ -7,24 +7,24 @@ export default async function Page(props: {
         query?: string,
         apiKey?: string,
         mode?: string
+        lookup?: boolean
+        limit?: number
     }>;
 }) {
     const searchParams = await props.searchParams
     const apiKey = searchParams?.apiKey || ''
     const query = searchParams?.query || ''
-    const mode = searchParams?.mode || 'song'
+    const lookup = searchParams?.lookup || false
+    const limit = searchParams?.limit || 10
     async function getSongProperties(query: string, apiKey: string) {
         if (query === '') {
             return []
         }
-        let properties: DownloadedSong[]
-        if (isValidUrl(query)) {
-            properties = await fetchPropertiesViaUrl(query, apiKey)
-        } else {
-            properties = await fetchPropertiesFromIndex(query, apiKey)
-            let itunesProperties = await fetchPropertiesFromItunes(query, apiKey)
-            properties.push(...itunesProperties)
-        }
+        let properties: DownloadedSong[] = []
+        // only search index if itunes direct lookup isn't used
+        properties = await fetchPropertiesFromIndex(query, apiKey)
+        let itunesProperties = await fetchPropertiesFromItunes(query, apiKey, lookup, limit)
+        properties.push(...itunesProperties)
         if (properties.length === 0 || properties === undefined) {
             return []
         }

@@ -83,6 +83,14 @@ export interface Properties {
   releaseDate: string;
   releaseDateKey: string;
 }
+
+export interface AlbumProps {
+    artistName: string,
+    collectionName: string,
+    trackCount: number,
+    collectionId: number
+}
+
 interface DownloadedSongIds {
   song_ids: string[];
 }
@@ -157,7 +165,10 @@ export async function fetchSong(id: string, apiKey: string): Promise<Blob> {
 export async function fetchPropertiesFromItunes(
   query: string,
   apiKey: string,
+  lookup: boolean = false,
+  limit: number = 10
 ): Promise<DownloadedSong[]> {
+
   // todo: search redis index endpoint
   const headers = {
     "x-api-key": apiKey,
@@ -165,6 +176,8 @@ export async function fetchPropertiesFromItunes(
   };
   const params = new URLSearchParams({
     query: query,
+    lookup: lookup.toString(),
+    limit: limit.toString()
   });
   const result: Properties[] = await fetchData({
     url: `${ITUNES_SEARCH_URL}?${params.toString()}`,
@@ -178,6 +191,30 @@ export async function fetchPropertiesFromItunes(
     });
   }
   return props;
+}
+
+export async function fetchAlbumFromItunes(
+  query: string,
+  apiKey: string,
+  lookup: boolean = false,
+): Promise<AlbumProps[]> {
+
+  // todo: search redis index endpoint
+  const headers = {
+    "x-api-key": apiKey,
+    "Content-Type": "application/json",
+  };
+  const params = new URLSearchParams({
+    query: query,
+    lookup: lookup.toString(),
+    mode: "album"
+  });
+  const result: AlbumProps[] = await fetchData({
+    url: `${ITUNES_SEARCH_URL}?${params.toString()}`,
+    method: "GET",
+    headers: headers,
+  });
+  return result;
 }
 
 interface IndexedProperties {
@@ -213,6 +250,9 @@ export async function fetchPropertiesFromIndex(
     method: "GET",
     headers: headers,
   });
+  if (result === undefined) {
+    return []
+  }
   const props: DownloadedSong[] = [];
   for (let doc of result.docs) {
     const parsedDoc: IndexedProperties = JSON.parse(doc.json);

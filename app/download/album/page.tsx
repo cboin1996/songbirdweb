@@ -1,6 +1,7 @@
-import { isValidUrl, fetchPropertiesViaUrl, fetchPropertiesFromItunes, DownloadedSong, fetchPropertiesFromIndex } from "../../lib/data"
+import { isValidUrl, fetchPropertiesViaUrl, fetchPropertiesFromItunes, DownloadedSong, fetchPropertiesFromIndex, fetchAlbumFromItunes, AlbumProps } from "../../lib/data"
 import React from "react"
 import SongsSelector from "../../components/songs"
+import Albums from "@/app/components/albums";
 
 export default async function Page(props: {
     searchParams?: Promise<{
@@ -17,12 +18,14 @@ export default async function Page(props: {
         if (query === '') {
             return []
         }
+        const properties: AlbumProps[] = await fetchAlbumFromItunes(query, apiKey, false)
+        return properties
     }
     const searchMatches = await getAlbumProperties(query, apiKey)
 
     return (
         <main>
-            <p>album mode not implemented yet</p>
+            <Albums albums={searchMatches}></Albums>
         </main>
     )
 }
