@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import Input from "../components/input"
 import Button from "../components/button"
 import { FaX } from "react-icons/fa6";
+import Spinner from "./spinner";
 
 export default function Songs({ songs }: { songs: DownloadedSong[] }) {
     let statuses = {
@@ -27,7 +28,7 @@ export default function Songs({ songs }: { songs: DownloadedSong[] }) {
 
     const api_key = searchParams.get("apiKey")!.toString()
 
-    const displayDownloadInput = activeIndex !==  -1 && songs.length > 0
+    const displayDownloadInput = activeIndex !== -1 && songs.length > 0
     const isDownloading = status === statuses.downloading || status === statuses.tagging
 
     // trigger handleSongSelection() on index selection change
@@ -79,7 +80,7 @@ export default function Songs({ songs }: { songs: DownloadedSong[] }) {
         const song = songs[activeIndex]
         setStatus(statuses.downloading)
         const result = await downloadSongViaUrl(text, api_key)
-        if (result.song_ids === undefined || result.song_ids.length === 0) {
+        if (result === undefined || result.song_ids === undefined || result.song_ids.length === 0) {
             setStatus(statuses.urlDownloadError)
             return
         }
@@ -111,38 +112,41 @@ export default function Songs({ songs }: { songs: DownloadedSong[] }) {
             {
                 displayDownloadInput ? (
                     <div>
-                    <form className="flex flex-row gap-2" onSubmit={handleSongDownload}>
-                        <Input
-                            placeholder={`${songs[activeIndex].properties.trackName} - ${songs[activeIndex].properties.artistName}`}
-                            disabled={isDownloading}
-                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setText(e.target.value)}
-                            value={text}
-                            type="url"
-                            classAttrs="md:w-96 w-80"
-                        />
-                        <button onClick={resetText} type="button">
-                            <FaX className="-mx-8 text-gray-700 hover:bg-gray-500 rounded-lg"></FaX>
-                        </button>
-                        <Button
-                            disabled={isDownloading || text === ""}
-                            text="download"
-                        >
-                        </Button>
-                    </form>
-                    <p>{status}</p>
+                        <form className="flex flex-row gap-2" onSubmit={handleSongDownload}>
+                            <Input
+                                placeholder={`${songs[activeIndex].properties.trackName} - ${songs[activeIndex].properties.artistName}`}
+                                disabled={isDownloading}
+                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setText(e.target.value)}
+                                value={text}
+                                type="url"
+                                classAttrs="md:w-96 w-80"
+                            />
+                            <button onClick={resetText} type="button">
+                                <FaX className="-mx-8 text-gray-700 hover:bg-gray-500 rounded-lg"></FaX>
+                            </button>
+                            <Button
+                                disabled={isDownloading || text === ""}
+                                text="download"
+                            >
+                            </Button>
+                        </form>
+                        <div className="flex flex-row gap-2">
+                            <p>{status}</p>
+                            {isDownloading ? (<Spinner></Spinner>) : (<div></div>)}
+                        </div>
                     </div>
                 ) : (<div />)
             }
             <div className="grid 2xl:grid-cols-4 xl:grid-cols-3 lg:grid-cols-2 md:gap-8 rounded-2xl justify-items-stretch py-2">
                 {
                     songs.length > 0 ? (
-                    songs.map((
-                        song: DownloadedSong, i) => <Song key={i} song={song} selected={activeIndex === i} onClick={() => setActiveIndex(i)}></Song>
-                    )
+                        songs.map((
+                            song: DownloadedSong, i) => <Song key={i} song={song} selected={activeIndex === i} onClick={() => setActiveIndex(i)}></Song>
+                        )
                     ) :
-                    (
-                        <p>no songs found.</p>
-                    )
+                        (
+                            <p>no songs found.</p>
+                        )
                 }
             </div>
         </div>
