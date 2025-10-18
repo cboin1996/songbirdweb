@@ -25,7 +25,7 @@ export default async function Page(props: {
 
     return (
         <main>
-            <Albums albums={searchMatches}></Albums>
+            {searchMatches !== undefined ? <Albums albums={searchMatches}></Albums> : <p>cannot fetch albums, error occured.</p> }
         </main>
     )
 }

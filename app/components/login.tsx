@@ -23,29 +23,32 @@ export default function Login() {
     async function handleSubmit(e: any) {
         e.preventDefault();
         setStatus(statuses.sending)
-        const resp = await fetch(
-            BASE_URL,
-            {
-                method: "GET",
-                headers: {
-                    "x-api-key": text
+        try {
+            const resp = await fetch(
+                BASE_URL,
+                {
+                    method: "GET",
+                    headers: {
+                        "x-api-key": text
+                    }
                 }
+            )
+            if (resp === undefined) {
+                setStatus(statuses.error)
+                return
             }
-        )
-        if (resp === undefined) {
+            if (resp.status === 401 || resp.status === 403) {
+                setStatus(statuses.unauthorized)
+                return
+            }
+            if (resp.status === 200) {
+                setStatus(statuses.authorized)
+                router.push(`/download?apiKey=${text}`)
+                return
+            }
+        } catch (error) {
             setStatus(statuses.error)
-            return
         }
-        if (resp.status === 401 || resp.status === 403) {
-            setStatus(statuses.unauthorized)
-            return
-        }
-        if (resp.status === 200) {
-            setStatus(statuses.authorized)
-            router.push(`/download?apiKey=${text}`)
-            return
-        }
-
     }
 
     return (

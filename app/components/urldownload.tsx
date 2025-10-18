@@ -21,6 +21,10 @@ export default function DownloadViaUrl({ query, apiKey }: { query: any, apiKey: 
         }
         setStatus(statuses.downloading);
         const result = await downloadSongViaUrl(query, apiKey, true)
+        if (result === undefined) {
+          setStatus(statuses.urlDownloadError);
+          return
+        }
         const songId = result.song_ids[0]
 
         const song = await fetchSong(songId, apiKey)
@@ -50,7 +54,6 @@ export default function DownloadViaUrl({ query, apiKey }: { query: any, apiKey: 
                 status === statuses.urlDownloadError ? (
                     <div className="flex flex-row gap-2">
                         <p>{status}</p>
-                        <Button text="retry" onClick={createDownloadFile} disabled={status === statuses.downloading}></Button>
                     </div>
                 ) : (
                     <div className="flex flex-row gap-2">
