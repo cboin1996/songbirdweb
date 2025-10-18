@@ -167,7 +167,7 @@ export async function fetchPropertiesFromItunes(
   apiKey: string,
   lookup: boolean = false,
   limit: number = 10
-): Promise<DownloadedSong[]> {
+): Promise<DownloadedSong[] | undefined> {
 
   // todo: search redis index endpoint
   const headers = {
@@ -185,7 +185,7 @@ export async function fetchPropertiesFromItunes(
     headers: headers,
   });
   if (result === undefined) {
-    return []
+    return
   }
   const props: DownloadedSong[] = [];
   for (let properties of result) {
