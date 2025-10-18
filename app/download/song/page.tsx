@@ -20,10 +20,16 @@ export default async function Page(props: {
         if (query === '') {
             return []
         }
-        let properties: DownloadedSong[] = []
+        let properties: DownloadedSong[] | undefined;
         // only search index if itunes direct lookup isn't used
         properties = await fetchPropertiesFromIndex(query, apiKey)
+        if (properties === undefined) {
+            return
+        }
         let itunesProperties = await fetchPropertiesFromItunes(query, apiKey, lookup, limit)
+        if (itunesProperties === undefined) {
+            return
+        }
         properties.push(...itunesProperties)
         if (properties.length === 0 || properties === undefined) {
             return []
@@ -34,7 +40,7 @@ export default async function Page(props: {
 
     return (
         <main>
-            <SongsSelector songs={searchMatches}></SongsSelector>
+            {searchMatches !== undefined ?<SongsSelector songs={searchMatches}></SongsSelector> : <p> cannot fetch songs, error occured. </p>}
         </main>
     )
 }

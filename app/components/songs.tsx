@@ -43,6 +43,10 @@ export default function Songs({ songs }: { songs: DownloadedSong[] }) {
         }
         // simply return the song if already downloaded
         const result = await fetchSong(song.songId, api_key)
+        if (result === undefined) {
+          setStatus(statuses.downloadFileError)
+          return
+        }
         const url: string = window.URL.createObjectURL(result)
         const link: HTMLAnchorElement = document.createElement('a');
         link.href = url
@@ -133,6 +137,7 @@ export default function Songs({ songs }: { songs: DownloadedSong[] }) {
                         <div className="flex flex-row gap-2">
                             <p>{status}</p>
                             {isDownloading ? (<Spinner></Spinner>) : (<div></div>)}
+                            { status === statuses.downloadFileError ? <Button text="retry" onClick={handleSongSelection} disabled={isDownloading}></Button> : <div/>}
                         </div>
                     </div>
                 ) : (<div />)
