@@ -2,7 +2,6 @@
 import { useEffect, useState } from "react";
 import { DownloadedSong, downloadSongViaUrl, fetchSong, tagSong } from "../lib/data";
 import Song from "./song";
-import { useSearchParams } from "next/navigation";
 import Input from "../components/input"
 import Button from "../components/button"
 import { FaX } from "react-icons/fa6";
@@ -18,7 +17,6 @@ export default function Songs({ songs }: { songs: DownloadedSong[] }) {
         downloadFileError: "download error, try again",
         noSongSelected: "you must select a song",
     }
-    const searchParams = useSearchParams()
 
     const [selected, setSelected] = useState(false);
     const noActiveIndex = -1
@@ -26,12 +24,9 @@ export default function Songs({ songs }: { songs: DownloadedSong[] }) {
     const [status, setStatus] = useState("")
     const [text, setText] = useState('')
 
-    const api_key = searchParams.get("apiKey")!.toString()
-
     const displayDownloadInput = activeIndex !== -1 && songs.length > 0
     const isDownloading = status === statuses.downloading || status === statuses.tagging
 
-    // trigger handleSongSelection() on index selection change
     useEffect(() => {
         handleSongSelection()
     }, [activeIndex])
@@ -41,11 +36,10 @@ export default function Songs({ songs }: { songs: DownloadedSong[] }) {
             setStatus(statuses.downloadFileError)
             return
         }
-        // simply return the song if already downloaded
-        const result = await fetchSong(song.songId, api_key)
+        const result = await fetchSong(song.songId)
         if (result === undefined) {
-          setStatus(statuses.downloadFileError)
-          return
+            setStatus(statuses.downloadFileError)
+            return
         }
         const url: string = window.URL.createObjectURL(result)
         const link: HTMLAnchorElement = document.createElement('a');
@@ -66,12 +60,10 @@ export default function Songs({ songs }: { songs: DownloadedSong[] }) {
             return
         }
         const song = songs[activeIndex]
-        // update status for user as paste
         if (song.songId === undefined) {
             setStatus(statuses.paste)
             return
         }
-        // simply return the song if already downloaded
         createDownloadFile(song)
     }
 
@@ -83,27 +75,18 @@ export default function Songs({ songs }: { songs: DownloadedSong[] }) {
         }
         const song = songs[activeIndex]
         setStatus(statuses.downloading)
-        const result = await downloadSongViaUrl(text, api_key)
+        const result = await downloadSongViaUrl(text)
         if (result === undefined || result.song_ids === undefined || result.song_ids.length === 0) {
             setStatus(statuses.urlDownloadError)
             return
         }
         setStatus(statuses.tagging)
         const songId = result.song_ids[0]
-        const taggingResult = await tagSong(
-            result.song_ids[0],
-            song.properties,
-            api_key
-        )
+        const taggingResult = await tagSong(result.song_ids[0], song.properties)
         if (taggingResult === undefined) {
             setStatus(statuses.taggingError)
         }
-        createDownloadFile(
-            {
-                songId: songId,
-                properties: song.properties
-            }
-        )
+        createDownloadFile({ songId, properties: song.properties })
     }
 
     function resetText(e: any) {
@@ -126,18 +109,16 @@ export default function Songs({ songs }: { songs: DownloadedSong[] }) {
                                 classAttrs="md:w-96 w-80"
                             />
                             <button onClick={resetText} type="button">
-                                <FaX className="-mx-8 text-gray-700 hover:bg-gray-500 rounded-lg"></FaX>
+                                <FaX className="-mx-8 text-gray-700 hover:bg-gray-500 rounded-lg" />
                             </button>
-                            <Button
-                                disabled={isDownloading || text === ""}
-                                text="download"
-                            >
-                            </Button>
+                            <Button disabled={isDownloading || text === ""} text="download" />
                         </form>
                         <div className="flex flex-row gap-2">
                             <p>{status}</p>
-                            {isDownloading ? (<Spinner></Spinner>) : (<div></div>)}
-                            { status === statuses.downloadFileError ? <Button text="retry" onClick={handleSongSelection} disabled={isDownloading}></Button> : <div/>}
+                            {isDownloading ? (<Spinner />) : (<div />)}
+                            {status === statuses.downloadFileError
+                                ? <Button text="retry" onClick={handleSongSelection} disabled={isDownloading} />
+                                : <div />}
                         </div>
                     </div>
                 ) : (<div />)
@@ -145,15 +126,14 @@ export default function Songs({ songs }: { songs: DownloadedSong[] }) {
             <div className="grid 2xl:grid-cols-4 xl:grid-cols-3 lg:grid-cols-2 md:gap-8 rounded-2xl justify-items-stretch py-2">
                 {
                     songs.length > 0 ? (
-                        songs.map((
-                            song: DownloadedSong, i) => <Song key={i} song={song} selected={activeIndex === i} onClick={() => setActiveIndex(i)}></Song>
+                        songs.map((song: DownloadedSong, i) =>
+                            <Song key={i} song={song} selected={activeIndex === i} onClick={() => setActiveIndex(i)} />
                         )
-                    ) :
-                        (
-                            <p>no songs found.</p>
-                        )
+                    ) : (
+                        <p>no songs found.</p>
+                    )
                 }
             </div>
         </div>
     );
-} 
+}

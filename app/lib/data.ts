@@ -17,50 +17,78 @@ enum ResponseTypes {
   bytes,
   blob,
 }
+
+async function buildFetchOptions(method: string, body?: any): Promise<RequestInit> {
+  const isServer = typeof window === 'undefined';
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+
+  if (isServer) {
+    const { cookies } = await import('next/headers');
+    const cookieStore = await cookies();
+    const cookieHeader = cookieStore.getAll().map(c => `${c.name}=${c.value}`).join('; ');
+    if (cookieHeader) headers['Cookie'] = cookieHeader;
+  }
+
+  const options: RequestInit = { method, headers };
+  if (!isServer) options.credentials = 'include';
+  if (body !== undefined) options.body = JSON.stringify(body);
+  return options;
+}
+
 export async function fetchData(args: {
   url: string;
   method: string;
   body?: any;
-  headers?: any;
   validErrors?: number[];
   responseType?: ResponseTypes;
 }): Promise<any> {
   try {
-    const responseType =
-      args.responseType === undefined ? ResponseTypes.json : args.responseType;
-    if (!args.validErrors) {
-      args.validErrors = [];
-    }
-    const response = await fetch(args.url, {
-      method: args.method,
-      headers: args.headers,
-      body: JSON.stringify(args.body),
-    });
-    if (!response.ok || args.validErrors.includes(response.status)) {
+    const responseType = args.responseType ?? ResponseTypes.json;
+    const validErrors = args.validErrors ?? [];
+    const options = await buildFetchOptions(args.method, args.body);
+    const response = await fetch(args.url, options);
+    if (!response.ok || validErrors.includes(response.status)) {
       return undefined;
     }
-    let data: any = {};
-    if (responseType === ResponseTypes.json) {
-      data = await response.json();
-    }
-    if (responseType === ResponseTypes.bytes) {
-      data = await response.bytes();
-    }
-    if (responseType === ResponseTypes.blob) {
-      data = await response.blob();
-    }
-    return data;
+    if (responseType === ResponseTypes.json) return response.json();
+    if (responseType === ResponseTypes.bytes) return response.bytes();
+    if (responseType === ResponseTypes.blob) return response.blob();
   } catch (error) {
     console.error("Fetch error:", error);
     return undefined;
   }
 }
 
-// Usage:
-interface User {
-  id: number;
-  name: string;
-  email: string;
+export interface CurrentUser {
+  username: string;
+  role: string;
+}
+
+export async function login(username: string, password: string): Promise<CurrentUser | undefined> {
+  try {
+    const response = await fetch(`${BASE_URL}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+      credentials: 'include',
+    });
+    if (!response.ok) return undefined;
+    return response.json();
+  } catch (error) {
+    console.error("Login error:", error);
+    return undefined;
+  }
+}
+
+export async function logout(): Promise<void> {
+  try {
+    await fetch(`${BASE_URL}/auth/logout`, {
+      method: 'POST',
+      credentials: 'include',
+    });
+  } catch (error) {
+    console.error("Logout error:", error);
+  }
 }
 
 export interface DownloadedSong {
@@ -97,14 +125,8 @@ interface DownloadedSongIds {
 
 export async function downloadSongViaUrl(
   url: string,
-  apiKey: string,
   embedThumbnail: boolean = false,
 ): Promise<DownloadedSongIds> {
-  const headers = {
-    "x-api-key": apiKey,
-    "Content-Type": "application/json",
-  };
-  // get song_ids for a given url
   const songs: DownloadedSongIds = await fetchData({
     url: DOWNLOAD_URL,
     method: "POST",
@@ -112,21 +134,14 @@ export async function downloadSongViaUrl(
       url: url,
       embed_thumbnail: embedThumbnail,
     },
-    headers: headers,
   });
   return songs;
 }
 
 export async function fetchPropertiesViaUrl(
   url: string,
-  apiKey: string,
 ): Promise<DownloadedSong[]> {
-  const headers = {
-    "x-api-key": apiKey,
-    "Content-Type": "application/json",
-  };
-  // get song uuid for download if it exists
-  const songs: DownloadedSongIds = await downloadSongViaUrl(url, apiKey);
+  const songs: DownloadedSongIds = await downloadSongViaUrl(url);
   if (songs === undefined) {
     return [];
   }
@@ -135,7 +150,6 @@ export async function fetchPropertiesViaUrl(
     const properties: Properties | undefined = await fetchData({
       url: `${TAGGING_URL}/${songId}`,
       method: "GET",
-      headers: headers,
       validErrors: [404],
     });
     if (properties !== undefined) {
@@ -148,15 +162,10 @@ export async function fetchPropertiesViaUrl(
   return props;
 }
 
-export async function fetchSong(id: string, apiKey: string): Promise<Blob> {
-  const headers = {
-    "x-api-key": apiKey,
-    "Content-Type": "application/json",
-  };
+export async function fetchSong(id: string): Promise<Blob> {
   const result: Blob = await fetchData({
     url: `${DOWNLOAD_URL}/${id}`,
     method: "GET",
-    headers: headers,
     responseType: ResponseTypes.blob,
   });
   return result;
@@ -164,16 +173,9 @@ export async function fetchSong(id: string, apiKey: string): Promise<Blob> {
 
 export async function fetchPropertiesFromItunes(
   query: string,
-  apiKey: string,
   lookup: boolean = false,
   limit: number = 10
 ): Promise<DownloadedSong[] | undefined> {
-
-  // todo: search redis index endpoint
-  const headers = {
-    "x-api-key": apiKey,
-    "Content-Type": "application/json",
-  };
   const params = new URLSearchParams({
     query: query,
     lookup: lookup.toString(),
@@ -182,31 +184,15 @@ export async function fetchPropertiesFromItunes(
   const result: Properties[] = await fetchData({
     url: `${ITUNES_SEARCH_URL}?${params.toString()}`,
     method: "GET",
-    headers: headers,
   });
-  if (result === undefined) {
-    return
-  }
-  const props: DownloadedSong[] = [];
-  for (let properties of result) {
-    props.push({
-      properties: properties,
-    });
-  }
-  return props;
+  if (result === undefined) return;
+  return result.map(properties => ({ properties }));
 }
 
 export async function fetchAlbumFromItunes(
   query: string,
-  apiKey: string,
   lookup: boolean = false,
 ): Promise<AlbumProps[]> {
-
-  // todo: search redis index endpoint
-  const headers = {
-    "x-api-key": apiKey,
-    "Content-Type": "application/json",
-  };
   const params = new URLSearchParams({
     query: query,
     lookup: lookup.toString(),
@@ -215,7 +201,6 @@ export async function fetchAlbumFromItunes(
   const result: AlbumProps[] = await fetchData({
     url: `${ITUNES_SEARCH_URL}?${params.toString()}`,
     method: "GET",
-    headers: headers,
   });
   return result;
 }
@@ -224,47 +209,19 @@ interface IndexedProperties {
   uuid: string;
   properties: Properties;
   file_path: string;
-}
-
-interface IndexedDocument {
-  id: string;
-  json: string;
-}
-interface IndexResponse {
-  total: string;
-  duration: number;
-  docs: IndexedDocument[];
+  url: string;
 }
 
 export async function fetchPropertiesFromIndex(
   query: string,
-  apiKey: string,
 ): Promise<DownloadedSong[] | undefined> {
-  // todo: search redis index endpoint
-  const headers = {
-    "x-api-key": apiKey,
-    "Content-Type": "application/json",
-  };
-  const params = new URLSearchParams({
-    query: query,
-  });
-  const result: IndexResponse = await fetchData({
+  const params = new URLSearchParams({ query });
+  const result: IndexedProperties[] = await fetchData({
     url: `${TAGGING_URL}?${params.toString()}`,
     method: "GET",
-    headers: headers,
   });
-  if (result === undefined) {
-    return
-  }
-  const props: DownloadedSong[] = [];
-  for (let doc of result.docs) {
-    const parsedDoc: IndexedProperties = JSON.parse(doc.json);
-    props.push({
-      songId: parsedDoc.uuid,
-      properties: parsedDoc.properties,
-    });
-  }
-  return props;
+  if (result === undefined) return;
+  return result.map(song => ({ songId: song.uuid, properties: song.properties }));
 }
 
 interface TaggingResponse {
@@ -277,20 +234,11 @@ interface TaggingBody {
 export async function tagSong(
   songId: string,
   properties: Properties,
-  apiKey: string,
 ): Promise<TaggingResponse> {
-  const headers = {
-    "x-api-key": apiKey,
-    "Content-Type": "application/json",
-  };
-  const body: TaggingBody = {
-    properties: properties,
-    song_id: songId,
-  };
+  const body: TaggingBody = { properties, song_id: songId };
   const result: TaggingResponse = await fetchData({
     url: `${TAGGING_URL}`,
     method: "PUT",
-    headers: headers,
     body: body,
   });
   return result;
