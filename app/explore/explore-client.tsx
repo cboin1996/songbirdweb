@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { ExploreData, ExploreWindow, SongWithCount, RecentlyPlayedSong, fetchLibrary } from "../lib/data"
+import { ExploreData, ExploreWindow, SongWithCount, RecentlyPlayedSong, RecentlySavedSong, fetchLibrary } from "../lib/data"
 import { routes } from "../lib/routes"
 import { usePlayer } from "../components/player"
 import Song from "../components/song"
@@ -21,7 +21,7 @@ const SORTS: { value: SortBy; label: string }[] = [
     { value: 'recently_played', label: 'recently played' },
 ]
 
-type AnyItem = SongWithCount | RecentlyPlayedSong | { uuid: string; url: string; properties: ExploreData['recently_added'][0]['properties'] }
+type AnyItem = SongWithCount | RecentlyPlayedSong | RecentlySavedSong | { uuid: string; url: string; properties: ExploreData['recently_added'][0]['properties'] }
 
 function SongGrid({ songs, libraryIds }: {
     songs: AnyItem[]
@@ -121,15 +121,26 @@ export default function ExploreClient({ data, window }: { data: ExploreData | un
                         <SongGrid songs={mainList} libraryIds={libraryIds} />
                     </div>
 
-                    {!recentSelected && (
-                        <div>
-                            <h2 className="text-sm font-medium text-gray-400 mb-4">
-                                your stats
-                                <span className="ml-1 text-gray-300 dark:text-gray-600">· {windowLabel}</span>
-                            </h2>
-                            <SongGrid songs={data.your_most_played} libraryIds={libraryIds} />
-                        </div>
-                    )}
+                    {(() => {
+                        const yourList: AnyItem[] | null =
+                            sortBy === 'plays' ? data.your_most_played :
+                            sortBy === 'downloads' ? data.your_most_downloaded :
+                            sortBy === 'saves' ? data.your_recently_saved :
+                            sortBy === 'recent' ? data.your_recently_saved :
+                            sortBy === 'recently_played' ? data.your_recently_played :
+                            null
+                        if (!yourList) return null
+                        const showWindow = !recentSelected
+                        return (
+                            <div>
+                                <h2 className="text-sm font-medium text-gray-400 mb-4">
+                                    your {sortLabel}
+                                    {showWindow && <span className="ml-1 text-gray-300 dark:text-gray-600">· {windowLabel}</span>}
+                                </h2>
+                                <SongGrid songs={yourList} libraryIds={libraryIds} />
+                            </div>
+                        )
+                    })()}
                 </div>
             )}
         </div>

@@ -144,12 +144,20 @@ export interface RecentlyPlayedSong {
   last_played_at: string
 }
 
+export interface RecentlySavedSong {
+  uuid: string
+  properties: Properties | null
+  added_at: string
+}
+
 export interface ExploreData {
   most_played: SongWithCount[]
   most_downloaded: SongWithCount[]
   most_libraryed: SongWithCount[]
   recently_added: { uuid: string; url: string; properties: Properties | null }[]
   your_most_played: SongWithCount[]
+  your_most_downloaded: SongWithCount[]
+  your_recently_saved: RecentlySavedSong[]
   your_recently_played: RecentlyPlayedSong[]
 }
 
