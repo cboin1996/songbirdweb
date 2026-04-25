@@ -97,7 +97,7 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
                                 onClick={() => {
                                     if (song.songId) {
                                         const q = downloaded.filter(s => s.songId).map(s => ({ uuid: s.songId!, properties: s.properties }))
-                                        play({ uuid: song.songId, properties: song.properties }, q)
+                                        play({ uuid: song.songId, properties: song.properties }, q, { label: 'Downloads', href: '/' })
                                     } else {
                                         setActiveIndex(globalIndex)
                                         setStatus(statuses.paste)

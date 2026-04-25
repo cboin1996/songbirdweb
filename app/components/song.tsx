@@ -1,7 +1,7 @@
 'use client'
 import { useState } from "react";
 import { addToLibrary, removeFromLibrary, downloadSongToFile, DownloadedSong } from "../lib/data";
-import { FaDownload, FaBookmark, FaRegBookmark, FaPlay, FaPause } from "react-icons/fa";
+import { FaDownload, FaBookmark, FaRegBookmark, FaPlay, FaPause, FaPlus } from "react-icons/fa";
 import Image from "next/image";
 import { usePlayer } from "./player";
 
@@ -18,7 +18,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
     const [libraryPending, setLibraryPending] = useState(false)
     const [libraryError, setLibraryError] = useState(false)
     const [downloadError, setDownloadError] = useState(false)
-    const { play, pause, resume, current, isPlaying } = usePlayer()
+    const { play, pause, resume, current, isPlaying, insertNext } = usePlayer()
     const isCurrentSong = current?.uuid === song.songId
 
     async function handleLibraryToggle(e: React.MouseEvent) {
@@ -83,6 +83,13 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                             ? <FaBookmark className="text-sky-500" />
                             : <FaRegBookmark className="text-gray-400" />
                         }
+                    </div>
+                    <div
+                        onClick={e => { e.stopPropagation(); insertNext({ uuid: song.songId!, properties: song.properties }) }}
+                        title="play next"
+                        className="hover:text-sky-500 cursor-pointer text-gray-400"
+                    >
+                        <FaPlus size={11} />
                     </div>
                 </>
             )}

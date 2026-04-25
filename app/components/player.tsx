@@ -1,10 +1,12 @@
 'use client'
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react"
 import Image from "next/image"
-import { FaPause, FaPlay, FaStepBackward, FaStepForward, FaRandom, FaRedo, FaList } from "react-icons/fa"
+import Link from "next/link"
+import { FaPause, FaPlay, FaStepBackward, FaStepForward, FaRandom, FaRedo, FaList, FaTimes } from "react-icons/fa"
 import { BASE_URL, PlayableSong, fetchLibrarySongs, fetchPlayerState, recordPlay, savePlayerState, updatePosition } from "../lib/data"
 
 export type RepeatMode = 'off' | 'one' | 'all'
+export type PlayContext = { label: string; href: string }
 
 interface PlayerContextValue {
     current: PlayableSong | null
@@ -12,13 +14,16 @@ interface PlayerContextValue {
     queue: PlayableSong[]
     shuffle: boolean
     repeat: RepeatMode
-    play: (song: PlayableSong, queue?: PlayableSong[]) => void
+    playContext: PlayContext | null
+    play: (song: PlayableSong, queue?: PlayableSong[], context?: PlayContext) => void
     pause: () => void
     resume: () => void
     skipNext: () => void
     skipPrev: () => void
     toggleShuffle: () => void
     toggleRepeat: () => void
+    insertNext: (song: PlayableSong) => void
+    removeFromQueue: (index: number) => void
 }
 
 const PlayerContext = createContext<PlayerContextValue>({
@@ -27,6 +32,7 @@ const PlayerContext = createContext<PlayerContextValue>({
     queue: [],
     shuffle: false,
     repeat: 'off',
+    playContext: null,
     play: () => {},
     pause: () => {},
     resume: () => {},
@@ -34,6 +40,8 @@ const PlayerContext = createContext<PlayerContextValue>({
     skipPrev: () => {},
     toggleShuffle: () => {},
     toggleRepeat: () => {},
+    insertNext: () => {},
+    removeFromQueue: () => {},
 })
 
 export function usePlayer() {
@@ -123,6 +131,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const [shuffle, setShuffle] = useState(false)
     const [repeat, setRepeat] = useState<RepeatMode>('off')
 
+    const [playContext, setPlayContext] = useState<PlayContext | null>(null)
     const [showQueue, setShowQueue] = useState(false)
     const pendingPosition = useRef<number>(0)
     const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -146,13 +155,32 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setIsPlaying(true)
     }
 
-    function play(song: PlayableSong, newQueue?: PlayableSong[]) {
+    function play(song: PlayableSong, newQueue?: PlayableSong[], context?: PlayContext) {
         const q = newQueue ?? [song]
         const idx = Math.max(0, q.findIndex(s => s.uuid === song.uuid))
         queueRef.current = q
         queueIndexRef.current = idx
         setQueue(q)
         loadSong(song)
+        if (context !== undefined) setPlayContext(context)
+        scheduleSave()
+    }
+
+    function insertNext(song: PlayableSong) {
+        const q = [...queueRef.current]
+        q.splice(queueIndexRef.current + 1, 0, song)
+        queueRef.current = q
+        setQueue([...q])
+        scheduleSave()
+    }
+
+    function removeFromQueue(index: number) {
+        const q = [...queueRef.current]
+        const currentIdx = queueIndexRef.current
+        q.splice(index, 1)
+        queueRef.current = q
+        if (index <= currentIdx) queueIndexRef.current = Math.max(-1, currentIdx - 1)
+        setQueue([...q])
         scheduleSave()
     }
 
@@ -262,6 +290,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             }
             audio!.play().catch(() => {})
         }
+        function onPlay() { setIsPlaying(true) }
+        function onPause() { setIsPlaying(false) }
         function onTimeUpdate() { setCurrentTime(audio!.currentTime) }
         function onDurationChange() { setDuration(audio!.duration) }
         function onEnded() {
@@ -276,11 +306,15 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             }
         }
 
+        audio.addEventListener('play', onPlay)
+        audio.addEventListener('pause', onPause)
         audio.addEventListener('canplay', onCanPlay)
         audio.addEventListener('timeupdate', onTimeUpdate)
         audio.addEventListener('durationchange', onDurationChange)
         audio.addEventListener('ended', onEnded)
         return () => {
+            audio.removeEventListener('play', onPlay)
+            audio.removeEventListener('pause', onPause)
             audio.removeEventListener('canplay', onCanPlay)
             audio.removeEventListener('timeupdate', onTimeUpdate)
             audio.removeEventListener('durationchange', onDurationChange)
@@ -301,6 +335,52 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             clearTimeout(playTimer)
         }
     }, [isPlaying, current, savePosition])
+
+    useEffect(() => {
+        if (!current?.properties || !('mediaSession' in navigator)) return
+        const p = current.properties
+        navigator.mediaSession.metadata = new MediaMetadata({
+            title: p.trackName,
+            artist: p.artistName,
+            album: p.collectionName,
+            artwork: p.artworkUrl100 ? [{ src: p.artworkUrl100, sizes: '100x100', type: 'image/jpeg' }] : [],
+        })
+        navigator.mediaSession.setActionHandler('play', () => {
+            audioRef.current?.play().catch(() => {})
+            setIsPlaying(true)
+        })
+        navigator.mediaSession.setActionHandler('pause', () => {
+            const audio = audioRef.current
+            if (!audio) return
+            audio.pause()
+            savePosition(current, audio.currentTime)
+            setIsPlaying(false)
+        })
+        navigator.mediaSession.setActionHandler('previoustrack', skipPrev)
+        navigator.mediaSession.setActionHandler('nexttrack', skipNext)
+    }, [current, skipNext, skipPrev, savePosition])
+
+    useEffect(() => {
+        function onKeyDown(e: KeyboardEvent) {
+            const tag = (e.target as HTMLElement).tagName
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement).isContentEditable) return
+            const audio = audioRef.current
+            if (!audio || !current) return
+            if (e.code === 'Space') {
+                e.preventDefault()
+                if (audio.paused) { audio.play().catch(() => {}); setIsPlaying(true) }
+                else { audio.pause(); savePosition(current, audio.currentTime); setIsPlaying(false) }
+            } else if (e.code === 'ArrowLeft') {
+                e.preventDefault()
+                skipPrev()
+            } else if (e.code === 'ArrowRight') {
+                e.preventDefault()
+                skipNext()
+            }
+        }
+        window.addEventListener('keydown', onKeyDown)
+        return () => window.removeEventListener('keydown', onKeyDown)
+    }, [current, skipPrev, skipNext, savePosition])
 
     useEffect(() => {
         Promise.all([fetchPlayerState(), fetchLibrarySongs()]).then(([state, libSongs]) => {
@@ -347,7 +427,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const idleClass = 'text-gray-400 hover:text-sky-500 transition-colors'
 
     return (
-        <PlayerContext.Provider value={{ current, isPlaying, queue, shuffle, repeat, play, pause, resume, skipNext, skipPrev, toggleShuffle, toggleRepeat }}>
+        <PlayerContext.Provider value={{ current, isPlaying, queue, shuffle, repeat, playContext, play, pause, resume, skipNext, skipPrev, toggleShuffle, toggleRepeat, insertNext, removeFromQueue }}>
             <audio ref={audioRef} />
             {children}
             {current && p && (
@@ -358,20 +438,24 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                 const isActive = song.uuid === current.uuid
                                 const sp = song.properties
                                 return (
-                                    <button
+                                    <div
                                         key={`${song.uuid}-${i}`}
-                                        onClick={() => playAt(i)}
-                                        className={`w-full flex items-center gap-3 px-4 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-900 transition-colors ${isActive ? 'bg-gray-50 dark:bg-gray-900' : ''}`}
+                                        className={`flex items-center gap-3 px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-900 transition-colors ${isActive ? 'bg-gray-50 dark:bg-gray-900' : ''}`}
                                     >
-                                        {sp?.artworkUrl100 && (
-                                            <Image src={sp.artworkUrl100} alt="" width={28} height={28} className="rounded shrink-0" />
-                                        )}
-                                        <div className="flex flex-col min-w-0 flex-1">
-                                            <span className={`text-xs font-medium truncate ${isActive ? 'text-sky-500' : ''}`}>{sp?.trackName}</span>
-                                            <span className="text-xs text-gray-400 truncate">{sp?.artistName}</span>
-                                        </div>
-                                        {isActive && <FaPlay size={8} className="text-sky-500 shrink-0" />}
-                                    </button>
+                                        <button onClick={() => playAt(i)} className="flex items-center gap-3 flex-1 text-left min-w-0">
+                                            {sp?.artworkUrl100 && (
+                                                <Image src={sp.artworkUrl100} alt="" width={28} height={28} className="rounded shrink-0" />
+                                            )}
+                                            <div className="flex flex-col min-w-0 flex-1">
+                                                <span className={`text-xs font-medium truncate ${isActive ? 'text-sky-500' : ''}`}>{sp?.trackName}</span>
+                                                <span className="text-xs text-gray-400 truncate">{sp?.artistName}</span>
+                                            </div>
+                                            {isActive && <FaPlay size={8} className="text-sky-500 shrink-0" />}
+                                        </button>
+                                        <button onClick={() => removeFromQueue(i)} className="shrink-0 text-gray-300 dark:text-gray-600 hover:text-red-400 transition-colors">
+                                            <FaTimes size={10} />
+                                        </button>
+                                    </div>
                                 )
                             })}
                         </div>
@@ -381,10 +465,18 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                             {p.artworkUrl100 && (
                                 <Image src={p.artworkUrl100} alt="" width={36} height={36} className="rounded shrink-0" />
                             )}
-                            <div className="flex flex-col min-w-0 flex-1">
-                                <span className="text-xs font-medium truncate">{p.trackName}</span>
-                                <span className="text-xs text-sky-500 truncate">{p.artistName}</span>
-                            </div>
+                            {playContext ? (
+                                <Link href={playContext.href} className="flex flex-col min-w-0 flex-1 group">
+                                    <span className="text-xs font-medium truncate group-hover:text-sky-500 transition-colors">{p.trackName}</span>
+                                    <span className="text-xs text-sky-500 truncate">{p.artistName}</span>
+                                    <span className="text-xs text-gray-400 truncate">from {playContext.label}</span>
+                                </Link>
+                            ) : (
+                                <div className="flex flex-col min-w-0 flex-1">
+                                    <span className="text-xs font-medium truncate">{p.trackName}</span>
+                                    <span className="text-xs text-sky-500 truncate">{p.artistName}</span>
+                                </div>
+                            )}
                             <div className="flex items-center gap-3 shrink-0">
                                 <button onClick={toggleShuffle} className={`shrink-0 ${shuffle ? activeClass : idleClass}`}>
                                     <FaRandom size={12} />

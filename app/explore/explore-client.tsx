@@ -39,7 +39,7 @@ function SongGrid({ songs, libraryIds }: {
                         key={s.uuid}
                         song={song}
                         selected={current?.uuid === s.uuid}
-                        onClick={() => play({ uuid: s.uuid, properties: s.properties! }, queue)}
+                        onClick={() => play({ uuid: s.uuid, properties: s.properties! }, queue, { label: 'Explore', href: '/explore' })}
                         inLibrary={libraryIds.has(s.uuid)}
                     />
                 )

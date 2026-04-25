@@ -49,7 +49,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                             onClick={() => {
                             if (!song.properties) return
                             const q = filtered.filter(s => s.properties).map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at }))
-                            play({ uuid: song.uuid, properties: song.properties, last_position: song.last_position, last_played_at: song.last_played_at }, q)
+                            play({ uuid: song.uuid, properties: song.properties, last_position: song.last_position, last_played_at: song.last_played_at }, q, { label: 'Library', href: '/library' })
                         }}
                             inLibrary={true}
                             onRemove={() => setSongs(prev => prev.filter(s => s.uuid !== song.uuid))}
