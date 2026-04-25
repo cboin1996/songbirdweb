@@ -121,19 +121,15 @@ export default function ExploreClient({ data, window }: { data: ExploreData | un
                         <SongGrid songs={mainList} libraryIds={libraryIds} />
                     </div>
 
-                    <div>
-                        <h2 className="text-sm font-medium text-gray-400 mb-4">your stats</h2>
-                        <div className="flex flex-col gap-6">
-                            <div>
-                                <p className="text-xs text-gray-400 mb-3">most played</p>
-                                <SongGrid songs={data.your_most_played} libraryIds={libraryIds} />
-                            </div>
-                            <div>
-                                <p className="text-xs text-gray-400 mb-3">recently played</p>
-                                <SongGrid songs={data.your_recently_played} libraryIds={libraryIds} />
-                            </div>
+                    {!recentSelected && (
+                        <div>
+                            <h2 className="text-sm font-medium text-gray-400 mb-4">
+                                your stats
+                                <span className="ml-1 text-gray-300 dark:text-gray-600">· {windowLabel}</span>
+                            </h2>
+                            <SongGrid songs={data.your_most_played} libraryIds={libraryIds} />
                         </div>
-                    </div>
+                    )}
                 </div>
             )}
         </div>
