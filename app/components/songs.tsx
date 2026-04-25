@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { DownloadedSong, downloadSongViaUrl, downloadSongToFile, fetchLibrary, tagSong } from "../lib/data";
 import { usePlayer } from "./player";
+import { routes } from "../lib/routes";
 import Song from "./song";
 import Input from "../components/input"
 import Button from "../components/button"
@@ -97,7 +98,7 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
                                 onClick={() => {
                                     if (song.songId) {
                                         const q = downloaded.filter(s => s.songId).map(s => ({ uuid: s.songId!, properties: s.properties }))
-                                        play({ uuid: song.songId, properties: song.properties }, q, { label: 'Downloads', href: '/' })
+                                        play({ uuid: song.songId, properties: song.properties }, q, { label: 'Downloads', href: routes.downloadSong })
                                     } else {
                                         setActiveIndex(globalIndex)
                                         setStatus(statuses.paste)

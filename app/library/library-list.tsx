@@ -4,6 +4,7 @@ import { LibrarySong } from "../lib/data";
 import Input from "../components/input";
 import Song from "../components/song";
 import { usePlayer } from "../components/player";
+import { routes } from "../lib/routes";
 
 export default function LibraryList({ initialSongs }: { initialSongs: LibrarySong[] }) {
     const [songs, setSongs] = useState(initialSongs)
@@ -49,7 +50,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                             onClick={() => {
                             if (!song.properties) return
                             const q = filtered.filter(s => s.properties).map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at }))
-                            play({ uuid: song.uuid, properties: song.properties, last_position: song.last_position, last_played_at: song.last_played_at }, q, { label: 'Library', href: '/library' })
+                            play({ uuid: song.uuid, properties: song.properties, last_position: song.last_position, last_played_at: song.last_played_at }, q, { label: 'Library', href: routes.library })
                         }}
                             inLibrary={true}
                             onRemove={() => setSongs(prev => prev.filter(s => s.uuid !== song.uuid))}

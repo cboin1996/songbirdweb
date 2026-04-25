@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { ExploreData, ExploreWindow, SongWithCount, RecentlyPlayedSong, fetchLibrary } from "../lib/data"
+import { routes } from "../lib/routes"
 import { usePlayer } from "../components/player"
 import Song from "../components/song"
 
@@ -39,7 +40,7 @@ function SongGrid({ songs, libraryIds }: {
                         key={s.uuid}
                         song={song}
                         selected={current?.uuid === s.uuid}
-                        onClick={() => play({ uuid: s.uuid, properties: s.properties! }, queue, { label: 'Explore', href: '/explore' })}
+                        onClick={() => play({ uuid: s.uuid, properties: s.properties! }, queue, { label: 'Explore', href: routes.explore })}
                         inLibrary={libraryIds.has(s.uuid)}
                     />
                 )

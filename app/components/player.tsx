@@ -434,6 +434,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 <div className="fixed bottom-0 left-0 right-0 z-50 bg-white/90 dark:bg-gray-950/90 backdrop-blur-md border-t border-gray-100 dark:border-gray-800">
                     {showQueue && queue.length > 0 && (
                         <div className="border-b border-gray-100 dark:border-gray-800 max-h-56 overflow-y-auto">
+                            {playContext && (
+                                <div className="px-4 py-1.5 border-b border-gray-100 dark:border-gray-800">
+                                    <Link href={playContext.href} className="text-xs text-gray-400 hover:text-sky-500 transition-colors">
+                                        playing from {playContext.label}
+                                    </Link>
+                                </div>
+                            )}
                             {queue.map((song, i) => {
                                 const isActive = song.uuid === current.uuid
                                 const sp = song.properties
@@ -460,6 +467,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                             })}
                         </div>
                     )}
+
                     <div className="flex flex-col">
                         <div className="flex items-center gap-3 px-4 pt-3 pb-1.5">
                             {p.artworkUrl100 && (
