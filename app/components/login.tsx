@@ -28,7 +28,7 @@ export default function Login() {
             setStatus(statuses.unauthorized)
             return
         }
-        router.push(routes.download)
+        window.location.href = routes.download
     }
 
     return (

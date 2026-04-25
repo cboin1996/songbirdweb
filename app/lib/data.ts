@@ -45,7 +45,10 @@ async function fetchData<T>(args: {
     const responseType = args.responseType ?? ResponseTypes.json;
     const options = await buildFetchOptions(args.method, args.body);
     const response = await fetch(args.url, options);
-    if (!response.ok) return undefined;
+    if (!response.ok) {
+      if (response.status !== 401) console.error(`Fetch error: ${response.status} ${args.method} ${args.url}`)
+      return undefined;
+    }
     if (responseType === ResponseTypes.json) return response.json() as T;
     if (responseType === ResponseTypes.bytes) return response.bytes() as T;
     if (responseType === ResponseTypes.blob) return response.blob() as T;
