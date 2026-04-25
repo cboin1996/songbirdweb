@@ -35,24 +35,20 @@ async function buildFetchOptions(method: string, body?: any): Promise<RequestIni
   return options;
 }
 
-export async function fetchData(args: {
+async function fetchData<T>(args: {
   url: string;
   method: string;
   body?: any;
-  validErrors?: number[];
   responseType?: ResponseTypes;
-}): Promise<any> {
+}): Promise<T | undefined> {
   try {
     const responseType = args.responseType ?? ResponseTypes.json;
-    const validErrors = args.validErrors ?? [];
     const options = await buildFetchOptions(args.method, args.body);
     const response = await fetch(args.url, options);
-    if (!response.ok || validErrors.includes(response.status)) {
-      return undefined;
-    }
-    if (responseType === ResponseTypes.json) return response.json();
-    if (responseType === ResponseTypes.bytes) return response.bytes();
-    if (responseType === ResponseTypes.blob) return response.blob();
+    if (!response.ok) return undefined;
+    if (responseType === ResponseTypes.json) return response.json() as T;
+    if (responseType === ResponseTypes.bytes) return response.bytes() as T;
+    if (responseType === ResponseTypes.blob) return response.blob() as T;
   } catch (error) {
     console.error("Fetch error:", error);
     return undefined;
@@ -62,6 +58,10 @@ export async function fetchData(args: {
 export interface CurrentUser {
   username: string;
   role: string;
+}
+
+export async function fetchCurrentUser(): Promise<CurrentUser | undefined> {
+  return fetchData<CurrentUser>({ url: `${BASE_URL}/auth/me`, method: 'GET' })
 }
 
 export async function login(username: string, password: string): Promise<CurrentUser | undefined> {
@@ -88,6 +88,32 @@ export async function logout(): Promise<void> {
     });
   } catch (error) {
     console.error("Logout error:", error);
+  }
+}
+
+export interface LibraryEntry {
+  song_id: string
+  added_at: string
+  last_position: number
+  last_played_at: string | null
+}
+
+export async function fetchLibrary(): Promise<LibraryEntry[]> {
+  return await fetchData<LibraryEntry[]>({ url: `${BASE_URL}/library`, method: 'GET' }) ?? []
+}
+
+export async function addToLibrary(songId: string): Promise<boolean> {
+  const result = await fetchData<LibraryEntry>({ url: `${BASE_URL}/library/${songId}`, method: 'POST' })
+  return result !== undefined
+}
+
+export async function removeFromLibrary(songId: string): Promise<boolean> {
+  try {
+    const options = await buildFetchOptions('DELETE')
+    const response = await fetch(`${BASE_URL}/library/${songId}`, options)
+    return response.ok
+  } catch {
+    return false
   }
 }
 
@@ -126,49 +152,20 @@ interface DownloadedSongIds {
 export async function downloadSongViaUrl(
   url: string,
   embedThumbnail: boolean = false,
-): Promise<DownloadedSongIds> {
-  const songs: DownloadedSongIds = await fetchData({
+): Promise<DownloadedSongIds | undefined> {
+  return fetchData<DownloadedSongIds>({
     url: DOWNLOAD_URL,
     method: "POST",
-    body: {
-      url: url,
-      embed_thumbnail: embedThumbnail,
-    },
+    body: { url, embed_thumbnail: embedThumbnail },
   });
-  return songs;
 }
 
-export async function fetchPropertiesViaUrl(
-  url: string,
-): Promise<DownloadedSong[]> {
-  const songs: DownloadedSongIds = await downloadSongViaUrl(url);
-  if (songs === undefined) {
-    return [];
-  }
-  const props: DownloadedSong[] = [];
-  for (let songId of songs.song_ids) {
-    const properties: Properties | undefined = await fetchData({
-      url: `${TAGGING_URL}/${songId}`,
-      method: "GET",
-      validErrors: [404],
-    });
-    if (properties !== undefined) {
-      props.push({
-        songId: songId,
-        properties: properties,
-      });
-    }
-  }
-  return props;
-}
-
-export async function fetchSong(id: string): Promise<Blob> {
-  const result: Blob = await fetchData({
+export async function fetchSong(id: string): Promise<Blob | undefined> {
+  return fetchData<Blob>({
     url: `${DOWNLOAD_URL}/${id}`,
     method: "GET",
     responseType: ResponseTypes.blob,
   });
-  return result;
 }
 
 export async function fetchPropertiesFromItunes(
@@ -176,33 +173,24 @@ export async function fetchPropertiesFromItunes(
   lookup: boolean = false,
   limit: number = 10
 ): Promise<DownloadedSong[] | undefined> {
-  const params = new URLSearchParams({
-    query: query,
-    lookup: lookup.toString(),
-    limit: limit.toString()
-  });
-  const result: Properties[] = await fetchData({
+  const params = new URLSearchParams({ query, lookup: lookup.toString(), limit: limit.toString() });
+  const result = await fetchData<Properties[]>({
     url: `${ITUNES_SEARCH_URL}?${params.toString()}`,
     method: "GET",
   });
-  if (result === undefined) return;
+  if (result === undefined) return undefined;
   return result.map(properties => ({ properties }));
 }
 
 export async function fetchAlbumFromItunes(
   query: string,
   lookup: boolean = false,
-): Promise<AlbumProps[]> {
-  const params = new URLSearchParams({
-    query: query,
-    lookup: lookup.toString(),
-    mode: "album"
-  });
-  const result: AlbumProps[] = await fetchData({
+): Promise<AlbumProps[] | undefined> {
+  const params = new URLSearchParams({ query, lookup: lookup.toString(), mode: "album" });
+  return fetchData<AlbumProps[]>({
     url: `${ITUNES_SEARCH_URL}?${params.toString()}`,
     method: "GET",
   });
-  return result;
 }
 
 interface IndexedProperties {
@@ -216,30 +204,66 @@ export async function fetchPropertiesFromIndex(
   query: string,
 ): Promise<DownloadedSong[] | undefined> {
   const params = new URLSearchParams({ query });
-  const result: IndexedProperties[] = await fetchData({
+  const result = await fetchData<IndexedProperties[]>({
     url: `${TAGGING_URL}?${params.toString()}`,
     method: "GET",
   });
-  if (result === undefined) return;
+  if (result === undefined) return undefined;
   return result.map(song => ({ songId: song.uuid, properties: song.properties }));
 }
 
 interface TaggingResponse {
   song_id: string;
 }
-interface TaggingBody {
-  properties: Properties;
-  song_id: string;
+
+export interface UserInfo {
+  id: string
+  username: string
+  email: string
+  role: string
+  is_active: boolean
+  created_at: string
 }
+
+export async function fetchUsers(): Promise<UserInfo[]> {
+  return await fetchData<UserInfo[]>({ url: `${BASE_URL}/admin/users`, method: 'GET' }) ?? []
+}
+
+export async function updateUser(id: string, body: { role?: string; is_active?: boolean }): Promise<UserInfo | undefined> {
+  return fetchData<UserInfo>({ url: `${BASE_URL}/admin/users/${id}`, method: 'PATCH', body })
+}
+
+export async function deleteUser(id: string): Promise<boolean> {
+  try {
+    const options = await buildFetchOptions('DELETE')
+    const response = await fetch(`${BASE_URL}/admin/users/${id}`, options)
+    return response.ok
+  } catch {
+    return false
+  }
+}
+
+export async function registerUser(username: string, email: string, password: string): Promise<UserInfo | undefined> {
+  return fetchData<UserInfo>({ url: `${BASE_URL}/auth/register`, method: 'POST', body: { username, email, password } })
+}
+
+export async function changePassword(currentPassword: string, newPassword: string): Promise<boolean> {
+  try {
+    const options = await buildFetchOptions('PATCH', { current_password: currentPassword, new_password: newPassword })
+    const response = await fetch(`${BASE_URL}/auth/password`, options)
+    return response.ok
+  } catch {
+    return false
+  }
+}
+
 export async function tagSong(
   songId: string,
   properties: Properties,
-): Promise<TaggingResponse> {
-  const body: TaggingBody = { properties, song_id: songId };
-  const result: TaggingResponse = await fetchData({
+): Promise<TaggingResponse | undefined> {
+  return fetchData<TaggingResponse>({
     url: `${TAGGING_URL}`,
     method: "PUT",
-    body: body,
+    body: { properties, song_id: songId },
   });
-  return result;
 }

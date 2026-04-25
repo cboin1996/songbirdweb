@@ -1,26 +1,29 @@
-'use client'
-import { FaDove } from "react-icons/fa";
-import Button from "./button";
-import { useRouter } from "next/navigation";
-import { logout } from "../lib/data";
+import Link from "next/link";
+import { FaDove, FaUser } from "react-icons/fa";
+import LogoutButton from "./logout-button";
+import { fetchCurrentUser } from "../lib/data";
 
-export default function NavBar() {
-    const router = useRouter()
-
-    async function handleLogout() {
-        await logout()
-        router.push('/')
-    }
+export default async function NavBar() {
+    const user = await fetchCurrentUser()
 
     return (
-        <nav className="flex flex-row justify-between">
-            <div className="flex flex-row gap-2">
-                <p>songbird.</p>
-                <FaDove size="20" className="hover:text-sky-600" />
+        <nav className="flex flex-row justify-between items-center">
+            <div className="flex flex-row gap-4 items-center">
+                <Link href="/download" className="flex flex-row gap-2 items-center">
+                    <FaDove size="20" className="hover:text-sky-600" />
+                    <p>songbird.</p>
+                </Link>
+                <Link href="/download" className="hover:text-sky-600">download</Link>
+                {user?.role === 'admin' && (
+                    <Link href="/admin" className="hover:text-sky-600">admin</Link>
+                )}
             </div>
-            <div>
-                <Button text="Log out" onClick={handleLogout} />
+            <div className="flex flex-row gap-3 items-center">
+                <Link href="/settings" className="hover:text-sky-600">
+                    <FaUser size="16" />
+                </Link>
+                <LogoutButton />
             </div>
         </nav>
-    );
+    )
 }

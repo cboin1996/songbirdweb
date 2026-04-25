@@ -30,7 +30,7 @@ export default async function Page(props: {
     return (
         <main>
             {searchMatches !== undefined
-                ? <SongsSelector songs={searchMatches} />
+                ? <SongsSelector key={query} songs={searchMatches} />
                 : <p>cannot fetch songs, error occured.</p>}
         </main>
     )

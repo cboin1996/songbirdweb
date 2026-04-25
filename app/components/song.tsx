@@ -1,10 +1,35 @@
+'use client'
 import { useState } from "react";
-import { DownloadedSong, fetchSong } from "../lib/data";
-import { useRouter, useSearchParams } from "next/navigation";
-import { FaDownload } from "react-icons/fa";
+import { addToLibrary, removeFromLibrary, DownloadedSong } from "../lib/data";
+import { FaDownload, FaBookmark, FaRegBookmark } from "react-icons/fa";
 
-export default function Song({ song, selected, onClick }: { song: DownloadedSong, selected: boolean, onClick: any }) {
-    const color = song.songId !== undefined ? "text-green-700" : "text-red-700"
+export default function Song({ song, selected, onClick, inLibrary: initialInLibrary }: {
+    song: DownloadedSong,
+    selected: boolean,
+    onClick: any,
+    inLibrary: boolean,
+}) {
+    const [inLibrary, setInLibrary] = useState(initialInLibrary)
+    const [libraryPending, setLibraryPending] = useState(false)
+    const [libraryError, setLibraryError] = useState(false)
+    const downloadColor = song.songId !== undefined ? "text-green-700" : "text-red-700"
+
+    async function handleLibraryToggle(e: React.MouseEvent) {
+        e.stopPropagation()
+        if (!song.songId || libraryPending) return
+        setLibraryPending(true)
+        setLibraryError(false)
+        const ok = inLibrary
+            ? await removeFromLibrary(song.songId)
+            : await addToLibrary(song.songId)
+        if (ok) {
+            setInLibrary(prev => !prev)
+        } else {
+            setLibraryError(true)
+        }
+        setLibraryPending(false)
+    }
+
     return (
         <button onClick={onClick} disabled={selected} className="dark:disabled:bg-gray-800 dark:hover:bg-gray-900 hover:bg-gray-200 disabled:bg-gray-300 rounded-md p-2">
             <div className="flex flex-row justify-between">
@@ -20,12 +45,25 @@ export default function Song({ song, selected, onClick }: { song: DownloadedSong
                             <span>·</span>
                             <span>{song.properties.releaseDate}</span>
                         </span>
+                        {libraryError && <span className="text-red-500 text-sm">library error, try again</span>}
                     </div>
                 </div>
-                <FaDownload
-                    className={`${color} min-w-3 max-w-3`}
-                />
+                <div className="flex flex-col gap-2 items-center justify-center min-w-6">
+                    <FaDownload className={downloadColor} />
+                    {song.songId && (
+                        <button
+                            onClick={handleLibraryToggle}
+                            disabled={libraryPending}
+                            className="disabled:opacity-40 hover:text-sky-500"
+                        >
+                            {inLibrary
+                                ? <FaBookmark className="text-sky-500" />
+                                : <FaRegBookmark className="text-gray-400" />
+                            }
+                        </button>
+                    )}
+                </div>
             </div>
         </button>
-    );
+    )
 }
