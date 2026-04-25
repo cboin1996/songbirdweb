@@ -1,7 +1,7 @@
 'use client'
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react"
 import Image from "next/image"
-import { FaPause, FaPlay, FaStepBackward, FaStepForward, FaRandom, FaRedo } from "react-icons/fa"
+import { FaPause, FaPlay, FaStepBackward, FaStepForward, FaRandom, FaRedo, FaList } from "react-icons/fa"
 import { BASE_URL, PlayableSong, fetchLibrarySongs, recordPlay, updatePosition } from "../lib/data"
 
 export type RepeatMode = 'off' | 'one' | 'all'
@@ -55,29 +55,38 @@ function ProgressBar({ current, duration, onSeek }: {
     const barRef = useRef<HTMLDivElement>(null)
     const dragging = useRef(false)
 
-    function posFromEvent(e: MouseEvent | React.MouseEvent) {
+    function posFromX(clientX: number) {
         const rect = barRef.current!.getBoundingClientRect()
-        return Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)) * (duration || 0)
+        return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)) * (duration || 0)
     }
 
     function onMouseDown(e: React.MouseEvent) {
         dragging.current = true
-        onSeek(posFromEvent(e))
+        onSeek(posFromX(e.clientX))
         window.addEventListener('mousemove', onMouseMove)
         window.addEventListener('mouseup', onMouseUp)
     }
 
     function onMouseMove(e: MouseEvent) {
-        if (dragging.current) onSeek(posFromEvent(e))
+        if (dragging.current) onSeek(posFromX(e.clientX))
     }
 
     function onMouseUp(e: MouseEvent) {
         if (dragging.current) {
-            onSeek(posFromEvent(e))
+            onSeek(posFromX(e.clientX))
             dragging.current = false
         }
         window.removeEventListener('mousemove', onMouseMove)
         window.removeEventListener('mouseup', onMouseUp)
+    }
+
+    function onTouchStart(e: React.TouchEvent) {
+        onSeek(posFromX(e.touches[0].clientX))
+    }
+
+    function onTouchMove(e: React.TouchEvent) {
+        e.preventDefault()
+        onSeek(posFromX(e.touches[0].clientX))
     }
 
     const pct = duration ? (current / duration) * 100 : 0
@@ -88,6 +97,8 @@ function ProgressBar({ current, duration, onSeek }: {
             <div
                 ref={barRef}
                 onMouseDown={onMouseDown}
+                onTouchStart={onTouchStart}
+                onTouchMove={onTouchMove}
                 className="flex-1 h-0.5 bg-gray-200 dark:bg-gray-700 rounded-full cursor-pointer group relative"
             >
                 <div
@@ -112,6 +123,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const [shuffle, setShuffle] = useState(false)
     const [repeat, setRepeat] = useState<RepeatMode>('off')
 
+    const [showQueue, setShowQueue] = useState(false)
     const pendingPosition = useRef<number>(0)
     // refs mirror state so stable callbacks always see latest values
     const queueRef = useRef<PlayableSong[]>([])
@@ -201,6 +213,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setShuffle(prev => { shuffleRef.current = !prev; return !prev })
     }
 
+    function playAt(index: number) {
+        const q = queueRef.current
+        if (index < 0 || index >= q.length) return
+        queueIndexRef.current = index
+        loadSong(q[index])
+    }
+
     function toggleRepeat() {
         setRepeat(prev => {
             const next: RepeatMode = prev === 'off' ? 'all' : prev === 'all' ? 'one' : 'off'
@@ -286,36 +305,66 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             {children}
             {current && p && (
                 <div className="fixed bottom-0 left-0 right-0 z-50 bg-white/90 dark:bg-gray-950/90 backdrop-blur-md border-t border-gray-100 dark:border-gray-800">
-                    <div className="flex items-center gap-3 px-4 py-3">
-                        {p.artworkUrl100 && (
-                            <Image src={p.artworkUrl100} alt="" width={36} height={36} className="rounded shrink-0" />
-                        )}
-                        <div className="flex flex-col min-w-0 w-28 shrink-0">
-                            <span className="text-xs font-medium truncate">{p.trackName}</span>
-                            <span className="text-xs text-sky-500 truncate">{p.artistName}</span>
+                    {showQueue && queue.length > 0 && (
+                        <div className="border-b border-gray-100 dark:border-gray-800 max-h-56 overflow-y-auto">
+                            {queue.map((song, i) => {
+                                const isActive = song.uuid === current.uuid
+                                const sp = song.properties
+                                return (
+                                    <button
+                                        key={`${song.uuid}-${i}`}
+                                        onClick={() => playAt(i)}
+                                        className={`w-full flex items-center gap-3 px-4 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-900 transition-colors ${isActive ? 'bg-gray-50 dark:bg-gray-900' : ''}`}
+                                    >
+                                        {sp?.artworkUrl100 && (
+                                            <Image src={sp.artworkUrl100} alt="" width={28} height={28} className="rounded shrink-0" />
+                                        )}
+                                        <div className="flex flex-col min-w-0 flex-1">
+                                            <span className={`text-xs font-medium truncate ${isActive ? 'text-sky-500' : ''}`}>{sp?.trackName}</span>
+                                            <span className="text-xs text-gray-400 truncate">{sp?.artistName}</span>
+                                        </div>
+                                        {isActive && <FaPlay size={8} className="text-sky-500 shrink-0" />}
+                                    </button>
+                                )
+                            })}
                         </div>
-                        <button onClick={skipPrev} disabled={!hasQueue} className={`shrink-0 hidden sm:block disabled:opacity-30 ${idleClass}`}>
-                            <FaStepBackward size={12} />
-                        </button>
-                        <ProgressBar current={currentTime} duration={duration} onSeek={handleSeek} />
-                        <button onClick={skipNext} disabled={!hasQueue} className={`shrink-0 hidden sm:block disabled:opacity-30 ${idleClass}`}>
-                            <FaStepForward size={12} />
-                        </button>
-                        <button onClick={isPlaying ? pause : resume} className={`shrink-0 ${idleClass}`}>
-                            {isPlaying ? <FaPause size={14} /> : <FaPlay size={14} />}
-                        </button>
-                        <button onClick={toggleShuffle} className={`shrink-0 hidden sm:block ${shuffle ? activeClass : idleClass}`}>
-                            <FaRandom size={12} />
-                        </button>
-                        <button
-                            onClick={toggleRepeat}
-                            className={`shrink-0 hidden sm:block relative ${repeat !== 'off' ? activeClass : idleClass}`}
-                        >
-                            <FaRedo size={12} />
-                            {repeat === 'one' && (
-                                <span className="absolute -top-1.5 -right-1.5 text-[8px] font-bold leading-none">1</span>
+                    )}
+                    <div className="flex flex-col">
+                        <div className="flex items-center gap-3 px-4 pt-3 pb-1.5">
+                            {p.artworkUrl100 && (
+                                <Image src={p.artworkUrl100} alt="" width={36} height={36} className="rounded shrink-0" />
                             )}
-                        </button>
+                            <div className="flex flex-col min-w-0 flex-1">
+                                <span className="text-xs font-medium truncate">{p.trackName}</span>
+                                <span className="text-xs text-sky-500 truncate">{p.artistName}</span>
+                            </div>
+                            <div className="flex items-center gap-3 shrink-0">
+                                <button onClick={toggleShuffle} className={`shrink-0 ${shuffle ? activeClass : idleClass}`}>
+                                    <FaRandom size={12} />
+                                </button>
+                                <button onClick={skipPrev} disabled={!hasQueue} className={`shrink-0 disabled:opacity-30 ${idleClass}`}>
+                                    <FaStepBackward size={12} />
+                                </button>
+                                <button onClick={isPlaying ? pause : resume} className={`shrink-0 ${idleClass}`}>
+                                    {isPlaying ? <FaPause size={14} /> : <FaPlay size={14} />}
+                                </button>
+                                <button onClick={skipNext} disabled={!hasQueue} className={`shrink-0 disabled:opacity-30 ${idleClass}`}>
+                                    <FaStepForward size={12} />
+                                </button>
+                                <button onClick={toggleRepeat} className={`shrink-0 relative ${repeat !== 'off' ? activeClass : idleClass}`}>
+                                    <FaRedo size={12} />
+                                    {repeat === 'one' && (
+                                        <span className="absolute -top-1.5 -right-1.5 text-[8px] font-bold leading-none">1</span>
+                                    )}
+                                </button>
+                                <button onClick={() => setShowQueue(v => !v)} className={`shrink-0 ${showQueue ? activeClass : idleClass}`}>
+                                    <FaList size={12} />
+                                </button>
+                            </div>
+                        </div>
+                        <div className="flex px-4 pb-3">
+                            <ProgressBar current={currentTime} duration={duration} onSeek={handleSeek} />
+                        </div>
                     </div>
                 </div>
             )}
