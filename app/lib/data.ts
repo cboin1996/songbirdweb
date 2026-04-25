@@ -316,6 +316,24 @@ export async function deleteUser(id: string): Promise<boolean> {
   }
 }
 
+export interface PlayerState {
+  shuffle: boolean
+  repeat: 'off' | 'one' | 'all'
+  queue: string[]
+  queue_index: number
+}
+
+export async function fetchPlayerState(): Promise<PlayerState | undefined> {
+  return fetchData<PlayerState>({ url: `${BASE_URL}/player/state`, method: 'GET' })
+}
+
+export async function savePlayerState(state: PlayerState): Promise<void> {
+  try {
+    const options = await buildFetchOptions('PUT', state)
+    await fetch(`${BASE_URL}/player/state`, options)
+  } catch {}
+}
+
 export async function updatePosition(songId: string, position: number): Promise<boolean> {
   try {
     const options = await buildFetchOptions('PATCH', { position })

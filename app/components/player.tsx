@@ -2,7 +2,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react"
 import Image from "next/image"
 import { FaPause, FaPlay, FaStepBackward, FaStepForward, FaRandom, FaRedo, FaList } from "react-icons/fa"
-import { BASE_URL, PlayableSong, fetchLibrarySongs, recordPlay, updatePosition } from "../lib/data"
+import { BASE_URL, PlayableSong, fetchLibrarySongs, fetchPlayerState, recordPlay, savePlayerState, updatePosition } from "../lib/data"
 
 export type RepeatMode = 'off' | 'one' | 'all'
 
@@ -125,6 +125,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     const [showQueue, setShowQueue] = useState(false)
     const pendingPosition = useRef<number>(0)
+    const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     // refs mirror state so stable callbacks always see latest values
     const queueRef = useRef<PlayableSong[]>([])
     const queueIndexRef = useRef(-1)
@@ -152,6 +153,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         queueIndexRef.current = idx
         setQueue(q)
         loadSong(song)
+        scheduleSave()
     }
 
     function pause() {
@@ -192,6 +194,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         }
         queueIndexRef.current = nextIdx
         loadSong(q[nextIdx], true)
+        scheduleSave()
     }, [])
 
     const skipPrev = useCallback(() => {
@@ -207,20 +210,26 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         const prevIdx = idx - 1
         queueIndexRef.current = prevIdx
         loadSong(queueRef.current[prevIdx], true)
+        scheduleSave()
     }, [])
 
-    useEffect(() => {
-        const s = localStorage.getItem('player-shuffle')
-        const r = localStorage.getItem('player-repeat') as RepeatMode | null
-        if (s === 'true') { setShuffle(true); shuffleRef.current = true }
-        if (r && ['off', 'one', 'all'].includes(r)) { setRepeat(r); repeatRef.current = r }
-    }, [])
+    function scheduleSave() {
+        if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+        saveTimerRef.current = setTimeout(() => {
+            savePlayerState({
+                shuffle: shuffleRef.current,
+                repeat: repeatRef.current,
+                queue: queueRef.current.map(s => s.uuid),
+                queue_index: queueIndexRef.current,
+            })
+        }, 2000)
+    }
 
     function toggleShuffle() {
         setShuffle(prev => {
             const next = !prev
             shuffleRef.current = next
-            localStorage.setItem('player-shuffle', String(next))
+            scheduleSave()
             return next
         })
     }
@@ -230,13 +239,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         if (index < 0 || index >= q.length) return
         queueIndexRef.current = index
         loadSong(q[index])
+        scheduleSave()
     }
 
     function toggleRepeat() {
         setRepeat(prev => {
             const next: RepeatMode = prev === 'off' ? 'all' : prev === 'all' ? 'one' : 'off'
             repeatRef.current = next
-            localStorage.setItem('player-repeat', next)
+            scheduleSave()
             return next
         })
     }
@@ -293,16 +303,40 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     }, [isPlaying, current, savePosition])
 
     useEffect(() => {
-        fetchLibrarySongs().then(songs => {
-            const last = songs
-                .filter(s => s.last_played_at && s.properties)
-                .sort((a, b) => new Date(b.last_played_at!).getTime() - new Date(a.last_played_at!).getTime())[0]
-            if (last?.properties) {
-                const song = { uuid: last.uuid, properties: last.properties, last_position: last.last_position, last_played_at: last.last_played_at }
-                setCurrent(song)
-                queueRef.current = [song]
-                queueIndexRef.current = 0
-                setQueue([song])
+        Promise.all([fetchPlayerState(), fetchLibrarySongs()]).then(([state, libSongs]) => {
+            const libMap = new Map(libSongs.map(s => [s.uuid, s]))
+
+            if (state) {
+                setShuffle(state.shuffle)
+                shuffleRef.current = state.shuffle
+                setRepeat(state.repeat)
+                repeatRef.current = state.repeat
+            }
+
+            const queueUuids = state?.queue ?? []
+            const restoredQueue: PlayableSong[] = queueUuids
+                .map(id => libMap.get(id))
+                .filter((s): s is NonNullable<typeof s> => !!s?.properties)
+                .map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at }))
+
+            if (restoredQueue.length > 0) {
+                const safeIndex = Math.max(0, Math.min(state!.queue_index, restoredQueue.length - 1))
+                queueRef.current = restoredQueue
+                queueIndexRef.current = safeIndex
+                setQueue(restoredQueue)
+                setCurrent(restoredQueue[safeIndex])
+            } else {
+                // fallback: restore last played song
+                const last = libSongs
+                    .filter(s => s.last_played_at && s.properties)
+                    .sort((a, b) => new Date(b.last_played_at!).getTime() - new Date(a.last_played_at!).getTime())[0]
+                if (last?.properties) {
+                    const song = { uuid: last.uuid, properties: last.properties, last_position: last.last_position, last_played_at: last.last_played_at }
+                    setCurrent(song)
+                    queueRef.current = [song]
+                    queueIndexRef.current = 0
+                    setQueue([song])
+                }
             }
         })
     }, [])
