@@ -27,6 +27,7 @@ function SongGrid({ songs, libraryIds }: {
 }) {
     const { play, current } = usePlayer()
     if (songs.length === 0) return <p className="text-gray-400 text-sm py-4">no data yet</p>
+    const queue = songs.filter(s => s.properties).map(s => ({ uuid: s.uuid, properties: s.properties! }))
     return (
         <div className="grid 2xl:grid-cols-4 xl:grid-cols-3 lg:grid-cols-2 md:gap-8 rounded-2xl justify-items-stretch">
             {songs.map(s => {
@@ -37,7 +38,7 @@ function SongGrid({ songs, libraryIds }: {
                         key={s.uuid}
                         song={song}
                         selected={current?.uuid === s.uuid}
-                        onClick={() => play({ uuid: s.uuid, properties: s.properties! })}
+                        onClick={() => play({ uuid: s.uuid, properties: s.properties! }, queue)}
                         inLibrary={libraryIds.has(s.uuid)}
                     />
                 )

@@ -52,7 +52,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
         if (!song.songId) return
         if (isCurrentSong && isPlaying) pause()
         else if (isCurrentSong) resume()
-        else play({ uuid: song.songId, properties: song.properties })
+        else onClick()
     }
 
     async function handleDownload(e: React.MouseEvent) {

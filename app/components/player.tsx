@@ -1,23 +1,39 @@
 'use client'
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react"
 import Image from "next/image"
-import { FaPause, FaPlay } from "react-icons/fa"
+import { FaPause, FaPlay, FaStepBackward, FaStepForward, FaRandom, FaRedo } from "react-icons/fa"
 import { BASE_URL, PlayableSong, fetchLibrarySongs, recordPlay, updatePosition } from "../lib/data"
+
+export type RepeatMode = 'off' | 'one' | 'all'
 
 interface PlayerContextValue {
     current: PlayableSong | null
     isPlaying: boolean
-    play: (song: PlayableSong) => void
+    queue: PlayableSong[]
+    shuffle: boolean
+    repeat: RepeatMode
+    play: (song: PlayableSong, queue?: PlayableSong[]) => void
     pause: () => void
     resume: () => void
+    skipNext: () => void
+    skipPrev: () => void
+    toggleShuffle: () => void
+    toggleRepeat: () => void
 }
 
 const PlayerContext = createContext<PlayerContextValue>({
     current: null,
     isPlaying: false,
+    queue: [],
+    shuffle: false,
+    repeat: 'off',
     play: () => {},
     pause: () => {},
     resume: () => {},
+    skipNext: () => {},
+    skipPrev: () => {},
+    toggleShuffle: () => {},
+    toggleRepeat: () => {},
 })
 
 export function usePlayer() {
@@ -92,13 +108,22 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const [isPlaying, setIsPlaying] = useState(false)
     const [currentTime, setCurrentTime] = useState(0)
     const [duration, setDuration] = useState(0)
+    const [queue, setQueue] = useState<PlayableSong[]>([])
+    const [shuffle, setShuffle] = useState(false)
+    const [repeat, setRepeat] = useState<RepeatMode>('off')
+
     const pendingPosition = useRef<number>(0)
+    // refs mirror state so stable callbacks always see latest values
+    const queueRef = useRef<PlayableSong[]>([])
+    const queueIndexRef = useRef(-1)
+    const shuffleRef = useRef(false)
+    const repeatRef = useRef<RepeatMode>('off')
 
     const savePosition = useCallback((song: PlayableSong, time: number) => {
         updatePosition(song.uuid, time)
     }, [])
 
-    function play(song: PlayableSong) {
+    function loadSong(song: PlayableSong) {
         const audio = audioRef.current
         if (!audio) return
         pendingPosition.current = song.last_position ?? 0
@@ -106,6 +131,15 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         audio.load()
         setCurrent(song)
         setIsPlaying(true)
+    }
+
+    function play(song: PlayableSong, newQueue?: PlayableSong[]) {
+        const q = newQueue ?? [song]
+        const idx = Math.max(0, q.findIndex(s => s.uuid === song.uuid))
+        queueRef.current = q
+        queueIndexRef.current = idx
+        setQueue(q)
+        loadSong(song)
     }
 
     function pause() {
@@ -128,6 +162,53 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setCurrentTime(t)
     }
 
+    const skipNext = useCallback(() => {
+        const q = queueRef.current
+        const idx = queueIndexRef.current
+        if (q.length === 0) return
+        let nextIdx: number
+        if (shuffleRef.current) {
+            const others = q.map((_, i) => i).filter(i => i !== idx)
+            if (others.length === 0) return
+            nextIdx = others[Math.floor(Math.random() * others.length)]
+        } else {
+            nextIdx = idx + 1
+            if (nextIdx >= q.length) {
+                if (repeatRef.current === 'all') nextIdx = 0
+                else return
+            }
+        }
+        queueIndexRef.current = nextIdx
+        loadSong(q[nextIdx])
+    }, [])
+
+    const skipPrev = useCallback(() => {
+        const audio = audioRef.current
+        if (!audio) return
+        if (audio.currentTime > 3) {
+            audio.currentTime = 0
+            setCurrentTime(0)
+            return
+        }
+        const idx = queueIndexRef.current
+        if (idx <= 0) return
+        const prevIdx = idx - 1
+        queueIndexRef.current = prevIdx
+        loadSong(queueRef.current[prevIdx])
+    }, [])
+
+    function toggleShuffle() {
+        setShuffle(prev => { shuffleRef.current = !prev; return !prev })
+    }
+
+    function toggleRepeat() {
+        setRepeat(prev => {
+            const next: RepeatMode = prev === 'off' ? 'all' : prev === 'all' ? 'one' : 'off'
+            repeatRef.current = next
+            return next
+        })
+    }
+
     useEffect(() => {
         const audio = audioRef.current
         if (!audio) return
@@ -144,6 +225,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         function onEnded() {
             setIsPlaying(false)
             if (current) savePosition(current, 0)
+            if (repeatRef.current === 'one') {
+                audio!.currentTime = 0
+                audio!.play().catch(() => {})
+                setIsPlaying(true)
+            } else {
+                skipNext()
+            }
         }
 
         audio.addEventListener('canplay', onCanPlay)
@@ -156,7 +244,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             audio.removeEventListener('durationchange', onDurationChange)
             audio.removeEventListener('ended', onEnded)
         }
-    }, [current, savePosition])
+    }, [current, savePosition, skipNext])
 
     useEffect(() => {
         if (!isPlaying || !current) return
@@ -177,32 +265,56 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             const last = songs
                 .filter(s => s.last_played_at && s.properties)
                 .sort((a, b) => new Date(b.last_played_at!).getTime() - new Date(a.last_played_at!).getTime())[0]
-            if (last?.properties) setCurrent({ uuid: last.uuid, properties: last.properties, last_position: last.last_position, last_played_at: last.last_played_at })
+            if (last?.properties) {
+                const song = { uuid: last.uuid, properties: last.properties, last_position: last.last_position, last_played_at: last.last_played_at }
+                setCurrent(song)
+                queueRef.current = [song]
+                queueIndexRef.current = 0
+                setQueue([song])
+            }
         })
     }, [])
 
     const p = current?.properties
+    const hasQueue = queue.length > 1
+    const activeClass = 'text-sky-500'
+    const idleClass = 'text-gray-400 hover:text-sky-500 transition-colors'
 
     return (
-        <PlayerContext.Provider value={{ current, isPlaying, play, pause, resume }}>
+        <PlayerContext.Provider value={{ current, isPlaying, queue, shuffle, repeat, play, pause, resume, skipNext, skipPrev, toggleShuffle, toggleRepeat }}>
             <audio ref={audioRef} />
             {children}
             {current && p && (
                 <div className="fixed bottom-0 left-0 right-0 z-50 bg-white/90 dark:bg-gray-950/90 backdrop-blur-md border-t border-gray-100 dark:border-gray-800">
-                    <div className="flex items-center gap-4 px-4 py-3">
+                    <div className="flex items-center gap-3 px-4 py-3">
                         {p.artworkUrl100 && (
                             <Image src={p.artworkUrl100} alt="" width={36} height={36} className="rounded shrink-0" />
                         )}
-                        <div className="flex flex-col min-w-0 w-32 shrink-0">
+                        <div className="flex flex-col min-w-0 w-28 shrink-0">
                             <span className="text-xs font-medium truncate">{p.trackName}</span>
                             <span className="text-xs text-sky-500 truncate">{p.artistName}</span>
                         </div>
+                        <button onClick={skipPrev} disabled={!hasQueue} className={`shrink-0 hidden sm:block disabled:opacity-30 ${idleClass}`}>
+                            <FaStepBackward size={12} />
+                        </button>
                         <ProgressBar current={currentTime} duration={duration} onSeek={handleSeek} />
-                        <button
-                            onClick={isPlaying ? pause : resume}
-                            className="shrink-0 hover:text-sky-500 transition-colors"
-                        >
+                        <button onClick={skipNext} disabled={!hasQueue} className={`shrink-0 hidden sm:block disabled:opacity-30 ${idleClass}`}>
+                            <FaStepForward size={12} />
+                        </button>
+                        <button onClick={isPlaying ? pause : resume} className={`shrink-0 ${idleClass}`}>
                             {isPlaying ? <FaPause size={14} /> : <FaPlay size={14} />}
+                        </button>
+                        <button onClick={toggleShuffle} className={`shrink-0 hidden sm:block ${shuffle ? activeClass : idleClass}`}>
+                            <FaRandom size={12} />
+                        </button>
+                        <button
+                            onClick={toggleRepeat}
+                            className={`shrink-0 hidden sm:block relative ${repeat !== 'off' ? activeClass : idleClass}`}
+                        >
+                            <FaRedo size={12} />
+                            {repeat === 'one' && (
+                                <span className="absolute -top-1.5 -right-1.5 text-[8px] font-bold leading-none">1</span>
+                            )}
                         </button>
                     </div>
                 </div>

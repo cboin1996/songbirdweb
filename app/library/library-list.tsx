@@ -8,7 +8,7 @@ import { usePlayer } from "../components/player";
 export default function LibraryList({ initialSongs }: { initialSongs: LibrarySong[] }) {
     const [songs, setSongs] = useState(initialSongs)
     const [query, setQuery] = useState('')
-    const { play, current } = usePlayer()
+    const { play, pause, resume, current, isPlaying } = usePlayer()
 
     const filtered = useMemo(() => {
         const q = query.toLowerCase()
@@ -46,7 +46,11 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                             key={song.uuid}
                             song={{ songId: song.uuid, properties: song.properties }}
                             selected={current?.uuid === song.uuid}
-                            onClick={() => song.properties && play({ uuid: song.uuid, properties: song.properties, last_position: song.last_position, last_played_at: song.last_played_at })}
+                            onClick={() => {
+                            if (!song.properties) return
+                            const q = filtered.filter(s => s.properties).map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at }))
+                            play({ uuid: song.uuid, properties: song.properties, last_position: song.last_position, last_played_at: song.last_played_at }, q)
+                        }}
                             inLibrary={true}
                             onRemove={() => setSongs(prev => prev.filter(s => s.uuid !== song.uuid))}
                         />
