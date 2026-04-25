@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState } from "react";
-import { DownloadedSong, downloadSongViaUrl, fetchLibrary, fetchSong, tagSong } from "../lib/data";
+import { DownloadedSong, downloadSongViaUrl, downloadSongToFile, fetchLibrary, tagSong } from "../lib/data";
+import { usePlayer } from "./player";
 import Song from "./song";
 import Input from "../components/input"
 import Button from "../components/button"
@@ -24,15 +25,11 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
     const [activeIndex, setActiveIndex] = useState(noActiveIndex)
     const [status, setStatus] = useState("")
     const [text, setText] = useState('')
+    const { play, current } = usePlayer()
 
     useEffect(() => {
         fetchLibrary().then(entries => setLibraryIds(new Set(entries.map(e => e.song_id))))
     }, [])
-
-    useEffect(() => {
-        if (activeIndex === noActiveIndex) return
-        handleSongSelection()
-    }, [activeIndex])
 
     const downloaded = songs.filter(s => s.songId !== undefined)
     const fromItunes = songs.filter(s => s.songId === undefined)
@@ -40,35 +37,18 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
     const displayDownloadInput = activeSong !== undefined
     const isDownloading = status === statuses.downloading || status === statuses.tagging
 
-    async function createDownloadFile(song: DownloadedSong) {
-        if (song.songId === undefined) {
-            setStatus(statuses.downloadFileError)
-            return
-        }
-        const blob = await fetchSong(song.songId)
-        if (blob === undefined) {
-            setStatus(statuses.downloadFileError)
-            return
-        }
-        const url = window.URL.createObjectURL(blob)
-        const link = document.createElement('a')
-        link.href = url
-        link.download = `${song.properties.trackName} - ${song.properties.artistName}.mp3`
-        document.body.appendChild(link)
-        link.click()
-        document.body.removeChild(link)
-        window.URL.revokeObjectURL(url)
+    async function triggerFileDownload(song: DownloadedSong) {
+        if (!song.songId) { setStatus(statuses.downloadFileError); return }
+        const ok = await downloadSongToFile(song.songId, song.properties.trackName, song.properties.artistName)
+        if (!ok) { setStatus(statuses.downloadFileError); return }
         setText("")
         setActiveIndex(noActiveIndex)
     }
 
     async function handleSongSelection() {
         const song = songs[activeIndex]
-        if (song.songId === undefined) {
-            setStatus(statuses.paste)
-            return
-        }
-        createDownloadFile(song)
+        if (!song.songId) { setStatus(statuses.paste); return }
+        triggerFileDownload(song)
     }
 
     async function handleSongDownload(e: React.ChangeEvent<HTMLFormElement>) {
@@ -93,7 +73,7 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
         }
         const downloaded = { ...song, songId }
         setSongs(prev => prev.map((s, i) => i === activeIndex ? downloaded : s))
-        createDownloadFile(downloaded)
+        triggerFileDownload(downloaded)
     }
 
     function resetText(e: React.MouseEvent) {
@@ -113,8 +93,15 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
                             <Song
                                 key={globalIndex}
                                 song={song}
-                                selected={activeIndex === globalIndex}
-                                onClick={() => setActiveIndex(globalIndex)}
+                                selected={song.songId ? current?.uuid === song.songId : activeIndex === globalIndex}
+                                onClick={() => {
+                                    if (song.songId) {
+                                        play({ uuid: song.songId, properties: song.properties })
+                                    } else {
+                                        setActiveIndex(globalIndex)
+                                        setStatus(statuses.paste)
+                                    }
+                                }}
                                 inLibrary={song.songId ? libraryIds.has(song.songId) : false}
                             />
                         )

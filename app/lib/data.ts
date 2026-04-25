@@ -102,6 +102,65 @@ export async function fetchLibrary(): Promise<LibraryEntry[]> {
   return await fetchData<LibraryEntry[]>({ url: `${BASE_URL}/library`, method: 'GET' }) ?? []
 }
 
+export interface PlayableSong {
+  uuid: string
+  properties: Properties
+  last_position?: number
+  last_played_at?: string | null
+}
+
+export interface LibrarySong {
+  uuid: string
+  url: string
+  properties: Properties | null
+  added_at: string
+  last_position: number
+  last_played_at: string | null
+}
+
+
+export async function fetchLibrarySongs(): Promise<LibrarySong[]> {
+  return await fetchData<LibrarySong[]>({ url: `${BASE_URL}/songs/library`, method: 'GET' }) ?? []
+}
+
+export async function fetchAllSongs(): Promise<LibrarySong[]> {
+  return await fetchData<LibrarySong[]>({ url: `${BASE_URL}/songs`, method: 'GET' }) ?? []
+}
+
+export type ExploreWindow = 'day' | 'week' | 'all'
+
+export interface SongWithCount {
+  uuid: string
+  properties: Properties | null
+  count: number
+}
+
+export interface RecentlyPlayedSong {
+  uuid: string
+  properties: Properties | null
+  last_played_at: string
+}
+
+export interface ExploreData {
+  most_played: SongWithCount[]
+  most_downloaded: SongWithCount[]
+  most_libraryed: SongWithCount[]
+  recently_added: { uuid: string; url: string; properties: Properties | null }[]
+  your_most_played: SongWithCount[]
+  your_recently_played: RecentlyPlayedSong[]
+}
+
+export async function fetchExplore(window: ExploreWindow = 'week'): Promise<ExploreData | undefined> {
+  return fetchData<ExploreData>({ url: `${BASE_URL}/songs/explore?window=${window}`, method: 'GET' })
+}
+
+export async function recordPlay(songId: string): Promise<void> {
+  try {
+    const options = await buildFetchOptions('POST')
+    await fetch(`${BASE_URL}/songs/${songId}/play`, options)
+  } catch {}
+}
+
 export async function addToLibrary(songId: string): Promise<boolean> {
   const result = await fetchData<LibraryEntry>({ url: `${BASE_URL}/library/${songId}`, method: 'POST' })
   return result !== undefined
@@ -166,6 +225,20 @@ export async function fetchSong(id: string): Promise<Blob | undefined> {
     method: "GET",
     responseType: ResponseTypes.blob,
   });
+}
+
+export async function downloadSongToFile(songId: string, trackName: string, artistName: string): Promise<boolean> {
+  const blob = await fetchSong(songId)
+  if (!blob) return false
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `${trackName} - ${artistName}.mp3`
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  window.URL.revokeObjectURL(url)
+  return true
 }
 
 export async function fetchPropertiesFromItunes(
@@ -237,6 +310,16 @@ export async function deleteUser(id: string): Promise<boolean> {
   try {
     const options = await buildFetchOptions('DELETE')
     const response = await fetch(`${BASE_URL}/admin/users/${id}`, options)
+    return response.ok
+  } catch {
+    return false
+  }
+}
+
+export async function updatePosition(songId: string, position: number): Promise<boolean> {
+  try {
+    const options = await buildFetchOptions('PATCH', { position })
+    const response = await fetch(`${BASE_URL}/library/${songId}/position`, options)
     return response.ok
   } catch {
     return false

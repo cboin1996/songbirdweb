@@ -1,14 +1,14 @@
 import { forwardRef, HTMLInputTypeAttribute } from "react";
 
 const Input = forwardRef<HTMLInputElement, {
-    placeholder: string,
-    disabled?: any,
-    onChange?: any,
-    classAttrs?: string,
-    value?: any,
-    type?: HTMLInputTypeAttribute,
-    defaultValue?: any,
-    required?: boolean,
+    placeholder: string
+    disabled?: boolean
+    onChange?: React.ChangeEventHandler<HTMLInputElement>
+    classAttrs?: string
+    value?: string
+    type?: HTMLInputTypeAttribute
+    defaultValue?: string
+    required?: boolean
 }>(function Input({ placeholder, disabled, onChange, classAttrs, value, type, defaultValue, required }, ref) {
     return (
         <input

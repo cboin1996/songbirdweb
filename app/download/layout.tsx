@@ -1,36 +1,19 @@
-import { Geist, Geist_Mono } from "next/font/google";
-import "../globals.css";
-
-import "../globals.css";
 import NavBar from "../components/navbar";
 import { Suspense } from "react";
 import Search from "../components/search";
 
-const geistSans = Geist({
-    variable: "--font-geist-sans",
-    subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-    variable: "--font-geist-mono",
-    subsets: ["latin"],
-});
-
-
-export default function Layout({
-    children,
-}: Readonly<{
-    children: React.ReactNode;
-}>) {
+export default function Layout({ children }: { children: React.ReactNode }) {
     return (
-        <section
-            className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-        >
-            <NavBar></NavBar>
+        <>
+            <NavBar />
+            <div className="sticky top-11 z-40 bg-white/90 dark:bg-gray-950/90 backdrop-blur-md border-b border-gray-100 dark:border-gray-800 px-2">
+                <Suspense>
+                    <Search />
+                </Suspense>
+            </div>
             <Suspense>
-            <Search></Search>
                 {children}
             </Suspense>
-        </section>
-    );
+        </>
+    )
 }

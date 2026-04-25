@@ -4,6 +4,7 @@ import React, { useState } from 'react'
 import { useRouter } from "next/navigation";
 import Input from "./input";
 import { login } from "../lib/data";
+import { routes } from "../lib/routes";
 
 export default function Login() {
     const router = useRouter()
@@ -27,7 +28,7 @@ export default function Login() {
             setStatus(statuses.unauthorized)
             return
         }
-        router.push('/download')
+        router.push(routes.download)
     }
 
     return (
