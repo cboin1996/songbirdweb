@@ -40,7 +40,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
             </div>
             {filtered.length === 0
                 ? <p className="text-gray-400 text-sm">no matches</p>
-                : <div className="grid 2xl:grid-cols-4 xl:grid-cols-3 lg:grid-cols-2 md:gap-8 rounded-2xl justify-items-stretch">
+                : <div className="grid 2xl:grid-cols-4 xl:grid-cols-3 lg:grid-cols-2 gap-2 md:gap-8 rounded-2xl justify-items-stretch">
                     {filtered.map(song => song.properties && (
                         <Song
                             key={song.uuid}

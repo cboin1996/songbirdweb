@@ -33,7 +33,7 @@ export default function Albums({ albums }: { albums: AlbumProps[] }) {
 
     return (
         <div>
-           <div className="grid 2xl:grid-cols-4 xl:grid-cols-3 lg:grid-cols-2 md:gap-8 rounded-2xl justify-items-stretch py-2">
+           <div className="grid 2xl:grid-cols-4 xl:grid-cols-3 lg:grid-cols-2 gap-2 md:gap-8 rounded-2xl justify-items-stretch py-2">
                 {
                     albums.length > 0 ? (
                     albums.map((

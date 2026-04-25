@@ -119,10 +119,10 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
             <div className="flex flex-row justify-between">
                 <div className="flew-row flex rounded-lg">
                     <div>
-                        <Image className="rounded-md object-contain" alt="" src={song.properties.artworkUrl100} width={96} height={96} />
+                        <Image className="rounded-md object-contain w-16 h-16 md:w-24 md:h-24" alt="" src={song.properties.artworkUrl100} width={96} height={96} />
                     </div>
                     <div className="flex flex-col px-3">
-                        <span className="text-2xl font-medium text-left">{song.properties.trackName}</span>
+                        <span className="text-lg md:text-2xl font-medium text-left">{song.properties.trackName}</span>
                         <span className="font-medium text-sky-500 text-left">{`${song.properties.artistName} · ${song.properties.collectionName}`}</span>
                         <span className="flex gap-2 font-medium text-gray-500">
                             <span>{`${song.properties.trackNumber} of ${song.properties.trackCount}`}</span>

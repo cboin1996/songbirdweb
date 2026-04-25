@@ -11,12 +11,13 @@ const WINDOWS: { value: ExploreWindow; label: string }[] = [
     { value: 'all', label: 'all time' },
 ]
 
-type SortBy = 'plays' | 'downloads' | 'saves' | 'recent'
+type SortBy = 'plays' | 'downloads' | 'saves' | 'recent' | 'recently_played'
 const SORTS: { value: SortBy; label: string }[] = [
     { value: 'plays', label: 'most played' },
     { value: 'downloads', label: 'most downloaded' },
     { value: 'saves', label: 'most saved' },
     { value: 'recent', label: 'recently added' },
+    { value: 'recently_played', label: 'recently played' },
 ]
 
 type AnyItem = SongWithCount | RecentlyPlayedSong | { uuid: string; url: string; properties: ExploreData['recently_added'][0]['properties'] }
@@ -29,7 +30,7 @@ function SongGrid({ songs, libraryIds }: {
     if (songs.length === 0) return <p className="text-gray-400 text-sm py-4">no data yet</p>
     const queue = songs.filter(s => s.properties).map(s => ({ uuid: s.uuid, properties: s.properties! }))
     return (
-        <div className="grid 2xl:grid-cols-4 xl:grid-cols-3 lg:grid-cols-2 md:gap-8 rounded-2xl justify-items-stretch">
+        <div className="grid 2xl:grid-cols-4 xl:grid-cols-3 lg:grid-cols-2 gap-2 md:gap-8 rounded-2xl justify-items-stretch">
             {songs.map(s => {
                 if (!s.properties) return null
                 const song = { songId: s.uuid, properties: s.properties }
@@ -60,12 +61,13 @@ export default function ExploreClient({ data, window }: { data: ExploreData | un
         router.push(`/explore?window=${w}`)
     }
 
-    const recentSelected = sortBy === 'recent'
+    const recentSelected = sortBy === 'recent' || sortBy === 'recently_played'
 
     const mainList: AnyItem[] = data
         ? sortBy === 'plays' ? data.most_played
         : sortBy === 'downloads' ? data.most_downloaded
         : sortBy === 'saves' ? data.most_libraryed
+        : sortBy === 'recently_played' ? data.your_recently_played
         : data.recently_added
         : []
 

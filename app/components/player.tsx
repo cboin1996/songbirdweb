@@ -135,10 +135,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         updatePosition(song.uuid, time)
     }, [])
 
-    function loadSong(song: PlayableSong) {
+    function loadSong(song: PlayableSong, fromStart = false) {
         const audio = audioRef.current
         if (!audio) return
-        pendingPosition.current = song.last_position ?? 0
+        pendingPosition.current = fromStart ? 0 : (song.last_position ?? 0)
         audio.src = `${BASE_URL}/download/${song.uuid}`
         audio.load()
         setCurrent(song)
@@ -191,7 +191,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             }
         }
         queueIndexRef.current = nextIdx
-        loadSong(q[nextIdx])
+        loadSong(q[nextIdx], true)
     }, [])
 
     const skipPrev = useCallback(() => {
@@ -206,11 +206,23 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         if (idx <= 0) return
         const prevIdx = idx - 1
         queueIndexRef.current = prevIdx
-        loadSong(queueRef.current[prevIdx])
+        loadSong(queueRef.current[prevIdx], true)
+    }, [])
+
+    useEffect(() => {
+        const s = localStorage.getItem('player-shuffle')
+        const r = localStorage.getItem('player-repeat') as RepeatMode | null
+        if (s === 'true') { setShuffle(true); shuffleRef.current = true }
+        if (r && ['off', 'one', 'all'].includes(r)) { setRepeat(r); repeatRef.current = r }
     }, [])
 
     function toggleShuffle() {
-        setShuffle(prev => { shuffleRef.current = !prev; return !prev })
+        setShuffle(prev => {
+            const next = !prev
+            shuffleRef.current = next
+            localStorage.setItem('player-shuffle', String(next))
+            return next
+        })
     }
 
     function playAt(index: number) {
@@ -224,6 +236,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setRepeat(prev => {
             const next: RepeatMode = prev === 'off' ? 'all' : prev === 'all' ? 'one' : 'off'
             repeatRef.current = next
+            localStorage.setItem('player-repeat', next)
             return next
         })
     }

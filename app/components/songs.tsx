@@ -86,7 +86,7 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
         return (
             <div className="py-2">
                 <p className="text-gray-400 text-sm pb-2">{label}</p>
-                <div className="grid 2xl:grid-cols-4 xl:grid-cols-3 lg:grid-cols-2 md:gap-8 rounded-2xl justify-items-stretch">
+                <div className="grid 2xl:grid-cols-4 xl:grid-cols-3 lg:grid-cols-2 gap-2 md:gap-8 rounded-2xl justify-items-stretch">
                     {sectionSongs.map((song, i) => {
                         const globalIndex = songs.indexOf(song)
                         return (
