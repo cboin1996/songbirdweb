@@ -1,5 +1,6 @@
 'use client'
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { createPortal } from "react-dom";
 import { addToLibrary, removeFromLibrary, downloadSongToFile, createShareToken, DownloadedSong, songArtworkUrl } from "../lib/data";
 import { cacheSong, uncacheSong } from "../lib/offline";
@@ -9,7 +10,7 @@ import { usePlayer } from "./player";
 import EditorModal from "./editor-modal";
 import { useUser } from "../lib/user-context";
 
-export default function Song({ song, selected, onClick, inLibrary: initialInLibrary, cachedOffline: initialCachedOffline, onRemove, onCacheChange, compact, rank }: {
+export default function Song({ song, selected, onClick, inLibrary: initialInLibrary, cachedOffline: initialCachedOffline, onRemove, onCacheChange, compact, rank, editContext, onEditComplete }: {
     song: DownloadedSong,
     selected: boolean,
     onClick: () => void,
@@ -19,8 +20,13 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
     onCacheChange?: (songId: string, cached: boolean) => void,
     compact?: boolean,
     rank?: number,
+    editContext?: { label: string; href: string },
+    onEditComplete?: () => void,
 }) {
     const { isAdmin } = useUser()
+    const router = useRouter()
+    const pathname = usePathname()
+    const searchParams = useSearchParams()
     const [inLibrary, setInLibrary] = useState(initialInLibrary)
     const [libraryPending, setLibraryPending] = useState(false)
     const [libraryError, setLibraryError] = useState(false)
@@ -29,7 +35,12 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
     const [offlineCached, setOfflineCached] = useState(initialCachedOffline ?? false)
     const [offlinePending, setOfflinePending] = useState(false)
     const [offlineProgress, setOfflineProgress] = useState(0)
-    const [editorOpen, setEditorOpen] = useState(false)
+    const [editorOpen, setEditorOpen] = useState(() => searchParams.get('edit') === song.songId)
+
+    useEffect(() => {
+        if (searchParams.get('edit') === song.songId && !editorOpen) setEditorOpen(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
     const [kebabOpen, setKebabOpen] = useState(false)
     const [kebabPos, setKebabPos] = useState({ top: 0, right: 0 })
     const kebabRef = useRef<HTMLButtonElement>(null)
@@ -106,6 +117,21 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
         if (!ok) setDownloadError(true)
     }
 
+    function openEditor() {
+        setEditorOpen(true)
+        const p = new URLSearchParams(searchParams.toString())
+        p.set('edit', song.songId!)
+        router.replace(`${pathname}?${p.toString()}`, { scroll: false })
+    }
+
+    function closeEditor() {
+        setEditorOpen(false)
+        const p = new URLSearchParams(searchParams.toString())
+        p.delete('edit')
+        const qs = p.toString()
+        router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
+    }
+
     function openKebab(e: React.MouseEvent) {
         e.stopPropagation()
         const rect = kebabRef.current?.getBoundingClientRect()
@@ -141,7 +167,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                         : offlineCached ? 'Remove offline copy' : 'Save offline'}
                 </button>
                 <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
-                <button onClick={() => { setKebabOpen(false); setEditorOpen(true) }}
+                <button onClick={() => { setKebabOpen(false); openEditor() }}
                     className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700">
                     Edit
                 </button>
@@ -190,8 +216,12 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
             songId={song.songId}
             properties={song.properties}
             artworkCached={song.artworkCached}
+            parentSongId={song.parentSongId}
+            rootSongId={song.rootSongId}
             isAdmin={isAdmin ?? false}
-            onClose={() => setEditorOpen(false)}
+            editContext={editContext}
+            onClose={closeEditor}
+            onEditComplete={onEditComplete}
         />
     ) : null
 

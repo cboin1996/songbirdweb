@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { FaDove, FaUser } from "react-icons/fa";
+import { FaDove, FaInfoCircle, FaUser } from "react-icons/fa";
 import LogoutButton from "./logout-button";
 import NavLinks from "./nav-links";
 import { fetchCurrentUser } from "../lib/data";
@@ -18,6 +18,9 @@ export default async function NavBar() {
                 <NavLinks isAdmin={user?.role === 'admin'} />
             </div>
             <div className="flex flex-row gap-3 items-center">
+                <Link href={routes.info} className="hover:text-sky-600">
+                    <FaInfoCircle size="16" />
+                </Link>
                 <Link href={routes.settings} className="hover:text-sky-600">
                     <FaUser size="16" />
                 </Link>

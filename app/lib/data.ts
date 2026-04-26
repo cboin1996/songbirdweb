@@ -514,6 +514,26 @@ export async function fetchShareInfo(token: string): Promise<ShareInfo | undefin
   }
 }
 
+export interface ImportResult {
+  song_id: string
+  properties: Properties | null
+}
+
+export async function importSong(file: File): Promise<ImportResult | undefined> {
+  try {
+    const formData = new FormData()
+    formData.append('file', file)
+    const isServer = typeof window === 'undefined'
+    const options: RequestInit = { method: 'POST', body: formData }
+    if (!isServer) options.credentials = 'include'
+    const response = await fetch(`${API_V1}/import`, options)
+    if (!response.ok) return undefined
+    return response.json()
+  } catch {
+    return undefined
+  }
+}
+
 export async function changePassword(currentPassword: string, newPassword: string): Promise<boolean> {
   try {
     const options = await buildFetchOptions('PATCH', { current_password: currentPassword, new_password: newPassword })

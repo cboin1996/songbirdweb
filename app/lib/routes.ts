@@ -8,4 +8,5 @@ export const routes = {
     explore: '/explore',
     admin: '/admin',
     settings: '/settings',
+    info: '/info',
 } as const

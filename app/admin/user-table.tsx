@@ -3,9 +3,11 @@ import { useState } from "react";
 import { UserInfo, updateUser, deleteUser, registerUser } from "../lib/data";
 import Button from "../components/button";
 import Input from "../components/input";
+import { useScrollRestoration } from "../lib/use-scroll-restoration";
 
 export default function UserTable({ initialUsers }: { initialUsers: UserInfo[] }) {
     const [users, setUsers] = useState<UserInfo[]>(initialUsers)
+    useScrollRestoration()
     const [username, setUsername] = useState('')
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')

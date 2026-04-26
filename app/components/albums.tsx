@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { AlbumProps, DownloadedSong, downloadSongViaUrl, fetchSong, tagSong } from "../lib/data";
 import Album from "./album";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useScrollRestoration } from "../lib/use-scroll-restoration";
 
 export default function Albums({ albums }: { albums: AlbumProps[] }) {
     const searchParams = useSearchParams()
@@ -10,6 +11,7 @@ export default function Albums({ albums }: { albums: AlbumProps[] }) {
     const noActiveIndex = -1
     const [activeIndex, setActiveIndex] = useState(noActiveIndex);
     const router = useRouter()
+    useScrollRestoration()
 
     // trigger handleSongSelection() on index selection change
     async function goToSongs() {

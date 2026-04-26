@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import Image from "next/image"
 import { useRouter, useSearchParams } from "next/navigation"
-import { LibrarySong, artworkUrl } from "../lib/data"
+import { LibrarySong, artworkUrl, fetchLibrarySongs } from "../lib/data"
 import { cacheSong, getCachedSongIds } from "../lib/offline"
 import Song from "../components/song"
 import { usePlayer } from "../components/player"
@@ -101,7 +101,12 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
 
     function changeViewMode(v: ViewMode) {
         setViewMode(v)
-        router.replace(`${routes.library}?view=${v}`)
+        router.replace(`${routes.library}?view=${v}`, { scroll: false })
+    }
+
+    async function refreshSongs() {
+        const fresh = await fetchLibrarySongs()
+        setSongs(fresh)
     }
 
     async function saveAllOffline() {
@@ -201,6 +206,9 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     }, [viewMode, songGrouped, genreGrouped])
 
     function scrollTo(letter: string) {
+        const params = new URLSearchParams(searchParams.toString())
+        params.set('letter', letter)
+        router.replace(`?${params.toString()}`, { scroll: false })
         if (viewMode === 'genres') {
             const genre = [...genreGrouped.keys()].find(g => letterKey(g) === letter)
             if (genre) sectionRefs.current[genre]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -208,6 +216,15 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         }
         sectionRefs.current[letter]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     }
+
+    // restore letter position on mount
+    useEffect(() => {
+        const letter = searchParams.get('letter')
+        if (!letter) return
+        const id = setTimeout(() => scrollTo(letter), 150)
+        return () => clearTimeout(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
 
     function playAll() {
         if (viewMode === 'albums') {
@@ -303,7 +320,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                             {group.map(song => song.properties && (
                                 <Song
                                     key={song.uuid}
-                                    song={{ songId: song.uuid, properties: song.properties }}
+                                    song={{ songId: song.uuid, properties: song.properties, artworkCached: song.artwork_cached, parentSongId: song.parent_song_id, rootSongId: song.root_song_id }}
                                     selected={current?.uuid === song.uuid}
                                     onClick={() => {
                                         if (!song.properties) return
@@ -325,6 +342,8 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                         return next
                                     })}
                                     compact={!isDesktop}
+                                    editContext={{ label: 'Library', href: routes.library }}
+                                    onEditComplete={refreshSongs}
                                 />
                             ))}
                         </div>
@@ -342,7 +361,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                             {group.map(song => song.properties && (
                                 <Song
                                     key={song.uuid}
-                                    song={{ songId: song.uuid, properties: song.properties }}
+                                    song={{ songId: song.uuid, properties: song.properties, artworkCached: song.artwork_cached, parentSongId: song.parent_song_id, rootSongId: song.root_song_id }}
                                     selected={current?.uuid === song.uuid}
                                     onClick={() => {
                                         if (!song.properties) return
@@ -364,6 +383,8 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                         return next
                                     })}
                                     compact={!isDesktop}
+                                    editContext={{ label: 'Library', href: routes.library }}
+                                    onEditComplete={refreshSongs}
                                 />
                             ))}
                         </div>

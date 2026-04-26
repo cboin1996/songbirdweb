@@ -101,6 +101,10 @@ export default function EditorModal({
   const previewSrcRef = useRef<AudioBufferSourceNode | null>(null)
   const previewCtxRef = useRef<AudioContext | null>(null)
   const [previewing, setPreviewing] = useState(false)
+  const previewRafRef = useRef<number | null>(null)
+  const previewCtxStartTimeRef = useRef<number>(0)
+  const previewTrimDurRef = useRef<number>(0)
+  const previewTrimStartRef = useRef<number>(0)
   const programmaticRegionRef = useRef(false)
 
   const { pause: pausePlayer, isPlaying: playerIsPlaying } = usePlayer()
@@ -361,6 +365,7 @@ export default function EditorModal({
 
   function stopPreview() {
     const wasWebAudio = previewSrcRef.current !== null
+    if (previewRafRef.current) { cancelAnimationFrame(previewRafRef.current); previewRafRef.current = null }
     previewSrcRef.current?.stop()
     previewCtxRef.current?.close()
     previewSrcRef.current = null
@@ -440,8 +445,24 @@ export default function EditorModal({
     source.start()
     previewSrcRef.current = source
     previewCtxRef.current = ctx
+    previewCtxStartTimeRef.current = ctx.currentTime
+    previewTrimDurRef.current = trimDur
+    previewTrimStartRef.current = params.trim_start
     setPreviewing(true)
-    source.onended = () => { previewSrcRef.current = null; previewCtxRef.current = null; setPreviewing(false) }
+    function tickCursor() {
+      if (!previewCtxRef.current || !previewSrcRef.current) return
+      const elapsed = previewCtxRef.current.currentTime - previewCtxStartTimeRef.current
+      const t = previewTrimStartRef.current + Math.min(elapsed, previewTrimDurRef.current)
+      wsRef.current?.setTime(t)
+      previewRafRef.current = requestAnimationFrame(tickCursor)
+    }
+    previewRafRef.current = requestAnimationFrame(tickCursor)
+    source.onended = () => {
+      if (previewRafRef.current) { cancelAnimationFrame(previewRafRef.current); previewRafRef.current = null }
+      previewSrcRef.current = null
+      previewCtxRef.current = null
+      setPreviewing(false)
+    }
   }
 
   function toggleWaveform() {
@@ -729,6 +750,22 @@ export default function EditorModal({
             <div className="flex items-center gap-3">
               <span className="text-sm text-gray-400 shrink-0">zoom</span>
               <Slider value={zoom} min={0} max={400} step={10} onChange={setZoom} disabled={!wsReady} label="zoom" />
+              <button
+                onClick={() => {
+                  if (!wsRef.current || !waveRef.current) return
+                  const trimEnd = paramsRef.current.trim_end ?? duration
+                  const span = trimEnd - paramsRef.current.trim_start
+                  if (span <= 0) return
+                  const pxPerSec = waveRef.current.clientWidth / span
+                  wsRef.current.zoom(pxPerSec)
+                  wsRef.current.setTime(paramsRef.current.trim_start)
+                }}
+                disabled={!wsReady}
+                title="fit trim region"
+                className={`${btnGhost} shrink-0 text-xs`}
+              >
+                fit trim
+              </button>
             </div>
 
             {/* sliders */}

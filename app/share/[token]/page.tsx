@@ -1,9 +1,10 @@
 import Image from "next/image"
-import { BASE_URL, fetchShareInfo, artworkUrl } from "../../lib/data"
+import { BASE_URL, fetchShareInfo, fetchCurrentUser, artworkUrl } from "../../lib/data"
+import ShareActions from "./share-actions"
 
 export default async function SharePage({ params }: { params: Promise<{ token: string }> }) {
     const { token } = await params
-    const info = await fetchShareInfo(token)
+    const [info, user] = await Promise.all([fetchShareInfo(token), fetchCurrentUser()])
 
     if (!info) {
         return (
@@ -38,12 +39,18 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
                         <p className="text-gray-400 text-sm mt-0.5">{p.collectionName}</p>
                     )}
                 </div>
-                <a
-                    href={downloadUrl}
-                    className="flex items-center gap-2 px-6 py-3 bg-sky-500 hover:bg-sky-400 text-white rounded-full font-medium transition-colors text-sm"
-                >
-                    Download
-                </a>
+
+                {user && p ? (
+                    <ShareActions songId={info.song_id} properties={p} downloadUrl={downloadUrl} />
+                ) : (
+                    <a
+                        href={downloadUrl}
+                        className="flex items-center gap-2 px-6 py-3 bg-sky-500 hover:bg-sky-400 text-white rounded-full font-medium transition-colors text-sm"
+                    >
+                        Download
+                    </a>
+                )}
+
                 <p className="text-xs text-gray-300 dark:text-gray-600">
                     shared via songbird · expires {new Date(info.expires_at).toLocaleDateString()}
                 </p>
