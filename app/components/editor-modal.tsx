@@ -344,8 +344,9 @@ export default function EditorModal({
   function addCut() {
     if (!wsReady || !duration) return
     const center = wsRef.current?.getCurrentTime() ?? duration / 2
-    const start = Math.max(0, Math.min(duration - 2, center - 1))
-    const end = Math.min(duration, start + 2)
+    const span = Math.min(10, duration * 0.15)  // 10s or 15% of song, whichever is smaller
+    const start = Math.max(0, Math.min(duration - span, center - span / 2))
+    const end = Math.min(duration, start + span)
     const id = crypto.randomUUID()
     pushHistory(paramsRef.current)
     regionsRef.current?.addRegion({ id, start, end, color: 'rgba(239,68,68,0.15)', drag: true, resize: true })
@@ -362,6 +363,33 @@ export default function EditorModal({
     setParams(prev => {
       const next = { ...prev, cuts: prev.cuts.map(c => c.id === id ? { ...c, [key]: value } : c) }
       scheduleSave(next)
+      return next
+    })
+  }
+
+  function updateCutTime(id: string, key: 'start' | 'end', raw: string) {
+    const parsed = parseFloat(raw)
+    if (isNaN(parsed) || parsed < 0) return
+    pushHistory(paramsRef.current)
+    setParams(prev => {
+      const next = { ...prev, cuts: prev.cuts.map(c => {
+        if (c.id !== id) return c
+        const updated = { ...c, [key]: Math.min(parsed, duration) }
+        if (updated.start >= updated.end) {
+          if (key === 'start') updated.end = Math.min(duration, updated.start + 1)
+          else updated.start = Math.max(0, updated.end - 1)
+        }
+        return updated
+      })}
+      scheduleSave(next)
+      // sync region position
+      const region = regionsRef.current?.getRegions().find(r => r.id === id)
+      const cut = next.cuts.find(c => c.id === id)
+      if (region && cut) {
+        programmaticRegionRef.current = true
+        region.setOptions({ start: cut.start, end: cut.end })
+        programmaticRegionRef.current = false
+      }
       return next
     })
   }
@@ -909,17 +937,41 @@ export default function EditorModal({
               {params.cuts.length > 0 && (
                 <div className="flex flex-col gap-2">
                   {params.cuts.map(cut => (
-                    <div key={cut.id} className="flex flex-col gap-1.5 bg-red-50 dark:bg-red-950/30 rounded px-2 py-1.5">
+                    <div key={cut.id} className="flex flex-col gap-2 bg-red-50 dark:bg-red-950/30 rounded px-2 py-2">
+                      {/* header row: icon + time inputs + duration + remove */}
                       <div className="flex items-center gap-2 text-sm">
                         <FaCut size={10} className="text-red-400 shrink-0" />
-                        <span className="text-gray-500 dark:text-gray-400 tabular-nums flex-1">
-                          {fmt(cut.start)} – {fmt(cut.end)}
-                          <span className="text-gray-400 dark:text-gray-600 ml-1.5">({fmt(cut.end - cut.start)})</span>
-                        </span>
-                        <button onClick={() => removeCut(cut.id!)} title="remove cut" className="text-gray-400 hover:text-red-400 transition-colors">
+                        <div className="flex items-center gap-1 flex-1 min-w-0">
+                          <input
+                            type="number"
+                            value={cut.start.toFixed(2)}
+                            step="0.1"
+                            min="0"
+                            max={duration}
+                            onBlur={e => updateCutTime(cut.id!, 'start', e.target.value)}
+                            onChange={e => updateCutTime(cut.id!, 'start', e.target.value)}
+                            title="cut start (seconds)"
+                            className="w-16 bg-white dark:bg-gray-900 border border-red-200 dark:border-red-900 rounded px-1.5 py-0.5 text-xs tabular-nums text-gray-600 dark:text-gray-300 outline-none focus:border-red-400"
+                          />
+                          <span className="text-gray-400 text-xs">–</span>
+                          <input
+                            type="number"
+                            value={cut.end.toFixed(2)}
+                            step="0.1"
+                            min="0"
+                            max={duration}
+                            onBlur={e => updateCutTime(cut.id!, 'end', e.target.value)}
+                            onChange={e => updateCutTime(cut.id!, 'end', e.target.value)}
+                            title="cut end (seconds)"
+                            className="w-16 bg-white dark:bg-gray-900 border border-red-200 dark:border-red-900 rounded px-1.5 py-0.5 text-xs tabular-nums text-gray-600 dark:text-gray-300 outline-none focus:border-red-400"
+                          />
+                          <span className="text-gray-400 dark:text-gray-600 text-xs tabular-nums">({fmt(cut.end - cut.start)})</span>
+                        </div>
+                        <button onClick={() => removeCut(cut.id!)} title="remove cut" className="text-gray-400 hover:text-red-400 transition-colors shrink-0">
                           <FaTimes size={10} />
                         </button>
                       </div>
+                      {/* per-cut fades */}
                       <div className="grid grid-cols-2 gap-2">
                         {(['fade_out', 'fade_in'] as const).map(key => (
                           <div key={key} className="flex flex-col gap-1">
