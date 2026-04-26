@@ -192,7 +192,7 @@ export default function EditorModal({
       programmaticRegionRef.current = true
       regions.addRegion({
         id: 'trim', start: p.trim_start, end: p.trim_end ?? dur,
-        color: 'rgba(56,189,248,0.12)', drag: true, resize: true,
+        color: 'rgba(56,189,248,0.12)', drag: false, resize: true,
       })
       p.cuts.forEach(cut => {
         regions.addRegion({
@@ -308,7 +308,7 @@ export default function EditorModal({
   function applyParams(p: EditParams) {
     setParams(p)
     const region = regionsRef.current?.getRegions().find(r => r.id === 'trim')
-    if (region && duration > 0) region.setOptions({ start: p.trim_start, end: p.trim_end ?? duration })
+    if (region && duration > 0) region.setOptions({ start: p.trim_start, end: p.trim_end ?? duration, drag: false })
     wsRef.current?.setVolume(p.volume)
     syncCutRegions(p.cuts)
   }
