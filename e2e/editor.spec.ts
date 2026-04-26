@@ -434,4 +434,222 @@ test.describe('editor modal', () => {
         await modal.getByRole('button', { name: /discard/i }).click()
         await expect(modal.locator('button[title="remove cut"]')).toHaveCount(0)
     })
+
+    test('speed slider sets display to 0.50×', async ({ page }) => {
+        const errors: string[] = []
+        page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
+        page.on('pageerror', err => errors.push(err.message))
+
+        const modal = await openEditorForJolene(page)
+        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+
+        const speedSlider = modal.getByRole('slider', { name: 'speed' })
+        await expect(speedSlider).toBeVisible()
+        await speedSlider.fill('0.5')
+        await speedSlider.dispatchEvent('input')
+
+        await expect(modal.getByText('0.50×')).toBeVisible()
+
+        const realErrors = errors.filter(e => !/AbortError/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e))
+        expect(realErrors, `Errors: ${realErrors.join('\n')}`).toHaveLength(0)
+    })
+
+    test('normalize checkbox toggles on', async ({ page }) => {
+        const errors: string[] = []
+        page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
+        page.on('pageerror', err => errors.push(err.message))
+
+        const modal = await openEditorForJolene(page)
+        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+
+        const normalizeCheckbox = modal.locator('input[type="checkbox"]').filter({ hasNot: modal.locator('[name]') }).first()
+        // find the normalize label
+        const normalizeLabel = modal.locator('label').filter({ hasText: /normalize/i })
+        const checkbox = normalizeLabel.locator('input[type="checkbox"]')
+        await expect(checkbox).not.toBeChecked()
+        await checkbox.check()
+        await expect(checkbox).toBeChecked()
+
+        const realErrors = errors.filter(e => !/AbortError/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e))
+        expect(realErrors, `Errors: ${realErrors.join('\n')}`).toHaveLength(0)
+    })
+
+    test('per-cut fade sliders appear after adding a cut', async ({ page }) => {
+        const modal = await openEditorForJolene(page)
+        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+
+        await modal.getByRole('button', { name: '+ add cut' }).click()
+        await expect(modal.locator('button[title="remove cut"]').first()).toBeVisible({ timeout: 5000 })
+
+        // fade before and fade after sliders should appear
+        await expect(modal.getByRole('slider', { name: 'fade before cut' })).toBeVisible()
+        await expect(modal.getByRole('slider', { name: 'fade after cut' })).toBeVisible()
+
+        // labels show 0.0s initially
+        await expect(modal.locator('text=fade before').first()).toBeVisible()
+        await expect(modal.locator('text=fade after').first()).toBeVisible()
+
+        // set fade before to 1.0s
+        const fadeBeforeSlider = modal.getByRole('slider', { name: 'fade before cut' })
+        await fadeBeforeSlider.fill('1')
+        await fadeBeforeSlider.dispatchEvent('input')
+
+        // display should update to 1.0s
+        await expect(modal.locator('.tabular-nums').filter({ hasText: '1.0s' }).first()).toBeVisible()
+    })
+
+    test('preview badge changes to "preview" (orange) when preview starts', async ({ page }) => {
+        const modal = await openEditorForJolene(page)
+        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+
+        const badge = modal.getByTestId('version-badge')
+        await expect(badge).toHaveText('original')
+
+        await modal.getByRole('button', { name: 'Preview' }).click()
+        await expect(badge).toHaveText('preview', { timeout: 3000 })
+
+        await modal.getByRole('button', { name: 'Stop preview' }).click()
+        // badge reverts to original
+        await expect(badge).toHaveText('original', { timeout: 3000 })
+    })
+
+    test('preview scrubbing — click waveform during no-cut preview causes no errors', async ({ page }) => {
+        const errors: string[] = []
+        page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
+        page.on('pageerror', err => errors.push(err.message))
+
+        const modal = await openEditorForJolene(page)
+        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+        errors.length = 0
+
+        // start preview (no cuts — uses WaveSurfer native path)
+        await modal.getByRole('button', { name: 'Preview' }).click()
+        await expect(modal.getByTestId('version-badge')).toHaveText('preview', { timeout: 3000 })
+
+        // click waveform at a different position
+        const waveform = modal.getByTestId('waveform')
+        const box = await waveform.boundingBox()
+        if (box) {
+            await page.mouse.click(box.x + box.width * 0.7, box.y + box.height / 2)
+        }
+        await page.waitForTimeout(300)
+
+        await modal.getByRole('button', { name: 'Stop preview' }).click()
+
+        const realErrors = errors.filter(e => !/AbortError/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e))
+        expect(realErrors, `Errors: ${realErrors.join('\n')}`).toHaveLength(0)
+    })
+
+    test('fit trim button is visible and clickable when waveform ready', async ({ page }) => {
+        const errors: string[] = []
+        page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
+        page.on('pageerror', err => errors.push(err.message))
+
+        const modal = await openEditorForJolene(page)
+        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+
+        const fitTrimBtn = modal.locator('button[title="fit trim region"]')
+        await expect(fitTrimBtn).toBeVisible()
+        await expect(fitTrimBtn).not.toBeDisabled()
+        await fitTrimBtn.click()
+        await page.waitForTimeout(200)
+
+        const realErrors = errors.filter(e => !/AbortError/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e))
+        expect(realErrors, `Errors: ${realErrors.join('\n')}`).toHaveLength(0)
+    })
+
+    test('close guard: amber banner appears on unsaved change, cancel keeps modal open', async ({ page }) => {
+        const modal = await openEditorForJolene(page)
+        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+
+        // make a change so paramsChanged returns true
+        const volumeSlider = modal.getByRole('slider', { name: 'Volume' })
+        await volumeSlider.fill('1.3')
+        await volumeSlider.click()
+
+        // click X
+        await modal.getByTestId('editor-close').click()
+
+        // amber warning banner should appear
+        const banner = page.locator('.bg-amber-50, .bg-amber-950\\/40').first()
+        await expect(banner).toBeVisible({ timeout: 3000 })
+        await expect(page.getByText(/close without saving/i)).toBeVisible()
+
+        // click cancel — modal stays open
+        await page.getByRole('button', { name: 'cancel' }).click()
+        await expect(modal).toBeVisible()
+    })
+
+    test('close guard: "close anyway" dismisses modal', async ({ page }) => {
+        const modal = await openEditorForJolene(page)
+        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+
+        const volumeSlider = modal.getByRole('slider', { name: 'Volume' })
+        await volumeSlider.fill('1.3')
+        await volumeSlider.click()
+
+        await modal.getByTestId('editor-close').click()
+        await expect(page.getByText(/close without saving/i)).toBeVisible({ timeout: 3000 })
+
+        await page.getByRole('button', { name: 'close anyway' }).click()
+        await expect(modal).not.toBeVisible()
+    })
+
+    test('Ctrl+Z keyboard shortcut triggers undo', async ({ page }) => {
+        const modal = await openEditorForJolene(page)
+        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+
+        const undoBtn = modal.locator('button[title="undo (Ctrl+Z)"]')
+        await expect(undoBtn).toBeDisabled()
+
+        // make a change
+        const volumeSlider = modal.getByRole('slider', { name: 'Volume' })
+        await volumeSlider.fill('1.5')
+        await volumeSlider.click()
+        await expect(undoBtn).not.toBeDisabled()
+
+        // press Ctrl+Z on the modal element (focused by default)
+        await modal.press('Control+z')
+
+        // after undo, undo button should be disabled again (only one change was made)
+        await expect(undoBtn).toBeDisabled({ timeout: 3000 })
+    })
+
+    test('h/l keyboard seeking causes no errors', async ({ page }) => {
+        const errors: string[] = []
+        page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
+        page.on('pageerror', err => errors.push(err.message))
+
+        const modal = await openEditorForJolene(page)
+        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+        errors.length = 0
+
+        // press l (seek forward 5s)
+        await modal.press('l')
+        await page.waitForTimeout(100)
+        // press h (seek backward 5s)
+        await modal.press('h')
+        await page.waitForTimeout(100)
+
+        const realErrors = errors.filter(e => !/AbortError/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e))
+        expect(realErrors, `Errors: ${realErrors.join('\n')}`).toHaveLength(0)
+    })
+
+    test('loop button activates and deactivates', async ({ page }) => {
+        const modal = await openEditorForJolene(page)
+        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+
+        const loopBtn = modal.locator('button[title="loop trim region"]')
+
+        // initially not active (no sky-500 color on the button itself)
+        await expect(loopBtn).not.toHaveClass(/text-sky-500/)
+
+        // click to activate
+        await loopBtn.click()
+        await expect(loopBtn).toHaveClass(/text-sky-500/)
+
+        // click to deactivate
+        await loopBtn.click()
+        await expect(loopBtn).not.toHaveClass(/text-sky-500/)
+    })
 })

@@ -12,38 +12,82 @@ async function login(page: Page) {
     await expect(page).toHaveURL(/\/download/)
 }
 
-test.beforeEach(async ({ page }) => {
-    await page.context().clearCookies()
-})
+test.describe('info page', () => {
+    test.describe.configure({ mode: 'serial' })
 
-test('info page loads with version cards', async ({ page }) => {
-    await login(page)
-    await page.goto('/info')
-    await expect(page.getByText(/v\d+\.\d+/)).toBeVisible({ timeout: 10000 })
-})
+    test.beforeEach(async ({ page }) => {
+        await login(page)
+    })
 
-test('three component version cards are present', async ({ page }) => {
-    await login(page)
-    await page.goto('/info')
-    await expect(page.getByText(/songbirdweb/i)).toBeVisible({ timeout: 10000 })
-    await expect(page.getByText(/songbirdapi/i)).toBeVisible()
-    await expect(page.getByText(/songbirdcore/i)).toBeVisible()
-})
+    test('info page accessible via navbar link', async ({ page }) => {
+        await page.goto('/download')
+        const infoLink = page.locator('a[href="/info"]')
+        await expect(infoLink).toBeVisible({ timeout: 5000 })
+        await infoLink.click()
+        await expect(page).toHaveURL(/\/info/)
+    })
 
-test('bug report links point to github', async ({ page }) => {
-    await login(page)
-    await page.goto('/info')
-    const links = page.locator('a[href*="github.com/cboin1996"]')
-    await expect(links.first()).toBeVisible({ timeout: 10000 })
-    const count = await links.count()
-    expect(count).toBeGreaterThanOrEqual(3)
-})
+    test('page loads with "about" heading', async ({ page }) => {
+        await page.goto('/info')
+        await expect(page.getByText('about')).toBeVisible({ timeout: 10000 })
+    })
 
-test('navbar info icon navigates to /info', async ({ page }) => {
-    await login(page)
-    await page.goto('/download')
-    const infoLink = page.locator('a[href="/info"]')
-    await expect(infoLink).toBeVisible({ timeout: 5000 })
-    await infoLink.click()
-    await expect(page).toHaveURL(/\/info/)
+    test('three version cards visible: songbirdweb, songbirdapi, songbirdcore', async ({ page }) => {
+        await page.goto('/info')
+        await expect(page.getByText(/songbirdweb/i)).toBeVisible({ timeout: 10000 })
+        await expect(page.getByText(/songbirdapi/i)).toBeVisible()
+        await expect(page.getByText(/songbirdcore/i)).toBeVisible()
+    })
+
+    test('each card shows a version string', async ({ page }) => {
+        await page.goto('/info')
+        // version strings match "vX.Y.Z" or "unknown"
+        const versionText = page.locator('text=/v\\d+\\.\\d+|unknown/')
+        await expect(versionText.first()).toBeVisible({ timeout: 10000 })
+    })
+
+    test('each card has a GitHub bug report link', async ({ page }) => {
+        await page.goto('/info')
+        const githubLinks = page.locator('a[href*="github.com/cboin1996"]')
+        await expect(githubLinks.first()).toBeVisible({ timeout: 10000 })
+        const count = await githubLinks.count()
+        // three cards, each with a "file a bug report" link
+        expect(count).toBeGreaterThanOrEqual(3)
+    })
+
+    test('bug report links open to github.com issues', async ({ page }) => {
+        await page.goto('/info')
+        const firstLink = page.locator('a[href*="github.com/cboin1996"]').first()
+        await expect(firstLink).toBeVisible({ timeout: 5000 })
+        const href = await firstLink.getAttribute('href')
+        expect(href).toContain('github.com')
+    })
+
+    test('all three repo links present', async ({ page }) => {
+        await page.goto('/info')
+        await expect(page.locator('a[href*="songbirdweb"]')).toBeVisible({ timeout: 5000 })
+        await expect(page.locator('a[href*="songbirdapi"]')).toBeVisible()
+        await expect(page.locator('a[href*="songbirdcore"]')).toBeVisible()
+    })
+
+    test('version cards have border styling (rendered)', async ({ page }) => {
+        await page.goto('/info')
+        // cards are divs with rounded-lg border classes
+        const cards = page.locator('.rounded-lg.border')
+        await expect(cards.first()).toBeVisible({ timeout: 5000 })
+        const count = await cards.count()
+        expect(count).toBeGreaterThanOrEqual(3)
+    })
+
+    test('no console errors on info page load', async ({ page }) => {
+        const errors: string[] = []
+        page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
+        page.on('pageerror', err => errors.push(err.message))
+
+        await page.goto('/info')
+        await page.waitForTimeout(1000)
+
+        const realErrors = errors.filter(e => !/AbortError/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e))
+        expect(realErrors, `Console errors: ${realErrors.join('\n')}`).toHaveLength(0)
+    })
 })
