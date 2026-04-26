@@ -116,6 +116,7 @@ export interface LibrarySong {
   uuid: string
   url: string
   properties: Properties | null
+  artwork_cached: boolean
   added_at: string
   last_position: number
   last_played_at: string | null
@@ -190,10 +191,19 @@ export async function removeFromLibrary(songId: string): Promise<boolean> {
 export interface DownloadedSong {
   songId?: string;
   properties: Properties;
+  artworkCached?: boolean;
 }
 
 export function artworkUrl(url: string, size: number): string {
   return url.replace(/\d+x\d+bb/, `${size}x${size}bb`)
+}
+
+export function songArtworkUrl(songId: string | undefined, artworkCached: boolean | undefined, artworkUrl100: string | undefined, size: number): string | null {
+  if (songId && artworkCached) {
+    const sizeParam = size <= 300 ? 'thumb' : 'full'
+    return `${BASE_URL}/songs/${songId}/artwork?size=${sizeParam}`
+  }
+  return artworkUrl100 ? artworkUrl(artworkUrl100, size) : null
 }
 
 export interface Properties {
@@ -408,4 +418,35 @@ export async function tagSong(
     method: "PUT",
     body: { properties, song_id: songId },
   });
+}
+
+export interface EditParams {
+  trim_start: number
+  trim_end: number | null
+  volume: number
+  fade_in: number
+  fade_out: number
+}
+
+export interface EditJobResponse {
+  job_id: string
+  status: 'pending' | 'processing' | 'done' | 'failed'
+  result_song_id: string | null
+  error: string | null
+}
+
+export async function createEditJob(
+  songId: string,
+  params: EditParams,
+  overwrite = false,
+): Promise<EditJobResponse | undefined> {
+  return fetchData<EditJobResponse>({
+    url: `${BASE_URL}/edit/songs/${songId}`,
+    method: 'POST',
+    body: { params, overwrite },
+  })
+}
+
+export async function pollEditJob(jobId: string): Promise<EditJobResponse | undefined> {
+  return fetchData<EditJobResponse>({ url: `${BASE_URL}/edit/jobs/${jobId}`, method: 'GET' })
 }

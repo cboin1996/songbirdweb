@@ -1,12 +1,13 @@
 'use client'
 import { useState } from "react";
-import { addToLibrary, removeFromLibrary, downloadSongToFile, createShareToken, DownloadedSong, artworkUrl } from "../lib/data";
+import { addToLibrary, removeFromLibrary, downloadSongToFile, createShareToken, DownloadedSong, songArtworkUrl } from "../lib/data";
 import { cacheSong, uncacheSong } from "../lib/offline";
-import { FaDownload, FaBookmark, FaRegBookmark, FaPlay, FaPause, FaPlus, FaLink, FaCloudDownloadAlt, FaCheckCircle } from "react-icons/fa";
+import { FaDownload, FaBookmark, FaRegBookmark, FaPlay, FaPause, FaPlus, FaLink, FaCloudDownloadAlt, FaCheckCircle, FaEllipsisV } from "react-icons/fa";
 import Image from "next/image";
 import { usePlayer } from "./player";
+import EditorModal from "./editor-modal";
 
-export default function Song({ song, selected, onClick, inLibrary: initialInLibrary, cachedOffline: initialCachedOffline, onRemove, onCacheChange, compact, rank }: {
+export default function Song({ song, selected, onClick, inLibrary: initialInLibrary, cachedOffline: initialCachedOffline, onRemove, onCacheChange, compact, rank, isAdmin }: {
     song: DownloadedSong,
     selected: boolean,
     onClick: () => void,
@@ -16,6 +17,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
     onCacheChange?: (songId: string, cached: boolean) => void,
     compact?: boolean,
     rank?: number,
+    isAdmin?: boolean,
 }) {
     const [inLibrary, setInLibrary] = useState(initialInLibrary)
     const [libraryPending, setLibraryPending] = useState(false)
@@ -25,6 +27,8 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
     const [offlineCached, setOfflineCached] = useState(initialCachedOffline ?? false)
     const [offlinePending, setOfflinePending] = useState(false)
     const [offlineProgress, setOfflineProgress] = useState(0)
+    const [editorOpen, setEditorOpen] = useState(false)
+    const [kebabOpen, setKebabOpen] = useState(false)
     const { play, pause, resume, current, isPlaying, insertNext } = usePlayer()
     const isCurrentSong = current?.uuid === song.songId
 
@@ -148,59 +152,97 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                             </span>
                         )}
                     </div>
+                    <div className="relative">
+                        <div
+                            onClick={e => { e.stopPropagation(); setKebabOpen(o => !o) }}
+                            title="more"
+                            className="cursor-pointer text-gray-400 hover:text-sky-500"
+                        >
+                            <FaEllipsisV size={11} />
+                        </div>
+                        {kebabOpen && (
+                            <div
+                                className="absolute right-0 top-5 z-20 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg py-1 min-w-[110px]"
+                                onClick={e => e.stopPropagation()}
+                            >
+                                <button
+                                    onClick={() => { setKebabOpen(false); setEditorOpen(true) }}
+                                    className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-100 dark:hover:bg-gray-700"
+                                >
+                                    Edit
+                                </button>
+                            </div>
+                        )}
+                    </div>
                 </>
             )}
         </>
     )
 
+    const modal = editorOpen && song.songId ? (
+        <EditorModal
+            songId={song.songId}
+            properties={song.properties}
+            artworkCached={song.artworkCached}
+            isAdmin={isAdmin ?? false}
+            onClose={() => setEditorOpen(false)}
+        />
+    ) : null
+
     if (compact) {
         return (
-            <button
-                onClick={handleCardClick}
-                className={`flex items-center gap-3 w-full text-left rounded-md p-2 transition-colors hover:bg-gray-100 dark:hover:bg-gray-900 ${selected ? 'bg-gray-100 dark:bg-gray-800' : ''}`}
-            >
-                {rank !== undefined && (
-                    <span className="text-gray-400 tabular-nums w-5 text-right shrink-0 text-sm">{rank}</span>
-                )}
-                {song.properties.artworkUrl100 && (
-                    <Image src={artworkUrl(song.properties.artworkUrl100, 200)} alt="" width={36} height={36} className="rounded shrink-0" />
-                )}
-                <div className="flex flex-col min-w-0 flex-1">
-                    <span className={`text-sm font-medium truncate ${isCurrentSong ? 'text-sky-500' : ''}`}>
-                        {song.properties.trackName}
-                    </span>
-                    <span className="text-xs text-sky-500 truncate">{song.properties.artistName} · {song.properties.collectionName}</span>
-                </div>
-                <div className="flex gap-3 items-center shrink-0">
-                    {actions}
-                </div>
-            </button>
+            <>
+                {modal}
+                <button
+                    onClick={handleCardClick}
+                    className={`flex items-center gap-3 w-full text-left rounded-md p-2 transition-colors hover:bg-gray-100 dark:hover:bg-gray-900 ${selected ? 'bg-gray-100 dark:bg-gray-800' : ''}`}
+                >
+                    {rank !== undefined && (
+                        <span className="text-gray-400 tabular-nums w-5 text-right shrink-0 text-sm">{rank}</span>
+                    )}
+                    {song.properties.artworkUrl100 && (
+                        <Image src={songArtworkUrl(song.songId, song.artworkCached, song.properties.artworkUrl100, 200) ?? ''} alt="" width={36} height={36} className="rounded shrink-0" />
+                    )}
+                    <div className="flex flex-col min-w-0 flex-1">
+                        <span className={`text-sm font-medium truncate ${isCurrentSong ? 'text-sky-500' : ''}`}>
+                            {song.properties.trackName}
+                        </span>
+                        <span className="text-xs text-sky-500 truncate">{song.properties.artistName} · {song.properties.collectionName}</span>
+                    </div>
+                    <div className="flex gap-3 items-center shrink-0">
+                        {actions}
+                    </div>
+                </button>
+            </>
         )
     }
 
     return (
-        <button onClick={handleCardClick} className={`dark:hover:bg-gray-900 hover:bg-gray-200 rounded-md p-2 ${selected ? 'bg-gray-300 dark:bg-gray-800' : ''}`}>
-            <div className="flex flex-row justify-between">
-                <div className="flew-row flex rounded-lg">
-                    <div>
-                        <Image className="rounded-md object-contain w-16 h-16 md:w-24 md:h-24" alt="" src={artworkUrl(song.properties.artworkUrl100, 400)} width={96} height={96} />
+        <>
+            {modal}
+            <button onClick={handleCardClick} className={`dark:hover:bg-gray-900 hover:bg-gray-200 rounded-md p-2 ${selected ? 'bg-gray-300 dark:bg-gray-800' : ''}`}>
+                <div className="flex flex-row justify-between">
+                    <div className="flew-row flex rounded-lg">
+                        <div>
+                            <Image className="rounded-md object-contain w-16 h-16 md:w-24 md:h-24" alt="" src={songArtworkUrl(song.songId, song.artworkCached, song.properties.artworkUrl100, 400) ?? ''} width={96} height={96} />
+                        </div>
+                        <div className="flex flex-col px-3">
+                            <span className="text-lg md:text-2xl font-medium text-left">{song.properties.trackName}</span>
+                            <span className="font-medium text-sky-500 text-left">{`${song.properties.artistName} · ${song.properties.collectionName}`}</span>
+                            <span className="flex gap-2 font-medium text-gray-500">
+                                <span>{`${song.properties.trackNumber} of ${song.properties.trackCount}`}</span>
+                                <span>·</span>
+                                <span>{song.properties.releaseDate}</span>
+                            </span>
+                            {libraryError && <span className="text-red-500 text-sm">library error, try again</span>}
+                            {downloadError && <span className="text-red-500 text-sm">download failed, try again</span>}
+                        </div>
                     </div>
-                    <div className="flex flex-col px-3">
-                        <span className="text-lg md:text-2xl font-medium text-left">{song.properties.trackName}</span>
-                        <span className="font-medium text-sky-500 text-left">{`${song.properties.artistName} · ${song.properties.collectionName}`}</span>
-                        <span className="flex gap-2 font-medium text-gray-500">
-                            <span>{`${song.properties.trackNumber} of ${song.properties.trackCount}`}</span>
-                            <span>·</span>
-                            <span>{song.properties.releaseDate}</span>
-                        </span>
-                        {libraryError && <span className="text-red-500 text-sm">library error, try again</span>}
-                        {downloadError && <span className="text-red-500 text-sm">download failed, try again</span>}
+                    <div className="flex flex-col gap-2 items-center justify-center min-w-6">
+                        {actions}
                     </div>
                 </div>
-                <div className="flex flex-col gap-2 items-center justify-center min-w-6">
-                    {actions}
-                </div>
-            </div>
-        </button>
+            </button>
+        </>
     )
 }
