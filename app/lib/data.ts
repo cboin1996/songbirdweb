@@ -450,3 +450,18 @@ export async function createEditJob(
 export async function pollEditJob(jobId: string): Promise<EditJobResponse | undefined> {
   return fetchData<EditJobResponse>({ url: `${BASE_URL}/edit/jobs/${jobId}`, method: 'GET' })
 }
+
+export async function fetchEditDraft(songId: string): Promise<EditParams | undefined> {
+  return fetchData<EditParams>({ url: `${BASE_URL}/edit/songs/${songId}/draft`, method: 'GET' })
+}
+
+export async function saveEditDraft(songId: string, params: EditParams): Promise<void> {
+  await fetchData({ url: `${BASE_URL}/edit/songs/${songId}/draft`, method: 'PUT', body: params })
+}
+
+export async function deleteEditDraft(songId: string): Promise<void> {
+  try {
+    const options = await buildFetchOptions('DELETE')
+    await fetch(`${BASE_URL}/edit/songs/${songId}/draft`, options)
+  } catch {}
+}
