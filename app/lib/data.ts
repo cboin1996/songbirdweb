@@ -18,6 +18,23 @@ enum ResponseTypes {
   blob,
 }
 
+const SKIP_REFRESH_URLS = ['/auth/login', '/auth/refresh', '/auth/me']
+
+let refreshPromise: Promise<boolean> | null = null
+
+function redirectToLogin() {
+  window.location.href = '/login?next=' + encodeURIComponent(window.location.pathname + window.location.search)
+}
+
+async function tryRefresh(): Promise<boolean> {
+  if (refreshPromise) return refreshPromise
+  refreshPromise = fetch(`${BASE_URL}/auth/refresh`, { method: 'POST', credentials: 'include' })
+    .then(r => r.ok)
+    .catch(() => false)
+    .finally(() => { refreshPromise = null })
+  return refreshPromise
+}
+
 async function buildFetchOptions(method: string, body?: any): Promise<RequestInit> {
   const isServer = typeof window === 'undefined';
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -40,13 +57,30 @@ async function fetchData<T>(args: {
   method: string;
   body?: any;
   responseType?: ResponseTypes;
+  silentStatuses?: number[];
 }): Promise<T | undefined> {
   try {
     const responseType = args.responseType ?? ResponseTypes.json;
     const options = await buildFetchOptions(args.method, args.body);
     const response = await fetch(args.url, options);
     if (!response.ok) {
-      if (response.status !== 401) console.error(`Fetch error: ${response.status} ${args.method} ${args.url}`)
+      const silent = args.silentStatuses ?? []
+      if (response.status === 401 && typeof window !== 'undefined' && !SKIP_REFRESH_URLS.some(u => args.url.includes(u))) {
+        const refreshed = await tryRefresh()
+        if (refreshed) {
+          const retryOptions = await buildFetchOptions(args.method, args.body)
+          const retryResponse = await fetch(args.url, retryOptions)
+          if (retryResponse.ok) {
+            if (responseType === ResponseTypes.json) return retryResponse.json() as T;
+            if (responseType === ResponseTypes.bytes) return retryResponse.bytes() as T;
+            if (responseType === ResponseTypes.blob) return retryResponse.blob() as T;
+          }
+        }
+        redirectToLogin()
+        return undefined;
+      }
+      if (response.status !== 401 && !silent.includes(response.status))
+        console.error(`Fetch error: ${response.status} ${args.method} ${args.url}`)
       return undefined;
     }
     if (responseType === ResponseTypes.json) return response.json() as T;
@@ -117,6 +151,8 @@ export interface LibrarySong {
   url: string
   properties: Properties | null
   artwork_cached: boolean
+  parent_song_id: string | null
+  root_song_id: string | null
   added_at: string
   last_position: number
   last_played_at: string | null
@@ -192,6 +228,8 @@ export interface DownloadedSong {
   songId?: string;
   properties: Properties;
   artworkCached?: boolean;
+  parentSongId?: string | null;
+  rootSongId?: string | null;
 }
 
 export function artworkUrl(url: string, size: number): string {
@@ -341,6 +379,28 @@ export async function deleteUser(id: string): Promise<boolean> {
   }
 }
 
+export interface EditJobSummary {
+  job_id: string
+  source_song_id: string
+  user_id: string
+  status: string
+  result_song_id: string | null
+  error: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface AdminStats {
+  song_count: number
+  user_count: number
+  disk_bytes: number
+  recent_jobs: EditJobSummary[]
+}
+
+export async function fetchAdminStats(): Promise<AdminStats | undefined> {
+  return fetchData<AdminStats>({ url: `${BASE_URL}/admin/stats`, method: 'GET' })
+}
+
 export interface PlayerState {
   shuffle: boolean
   repeat: 'off' | 'one' | 'all'
@@ -420,12 +480,19 @@ export async function tagSong(
   });
 }
 
+export interface Cut {
+  id?: string  // client-side only, stripped before API calls
+  start: number
+  end: number
+}
+
 export interface EditParams {
   trim_start: number
   trim_end: number | null
   volume: number
   fade_in: number
   fade_out: number
+  cuts: Cut[]
 }
 
 export interface EditJobResponse {
@@ -452,11 +519,14 @@ export async function pollEditJob(jobId: string): Promise<EditJobResponse | unde
 }
 
 export async function fetchEditDraft(songId: string): Promise<EditParams | undefined> {
-  return fetchData<EditParams>({ url: `${BASE_URL}/edit/songs/${songId}/draft`, method: 'GET' })
+  return fetchData<EditParams>({ url: `${BASE_URL}/edit/songs/${songId}/draft`, method: 'GET', silentStatuses: [404] })
 }
 
 export async function saveEditDraft(songId: string, params: EditParams): Promise<void> {
-  await fetchData({ url: `${BASE_URL}/edit/songs/${songId}/draft`, method: 'PUT', body: params })
+  try {
+    const options = await buildFetchOptions('PUT', params)
+    await fetch(`${BASE_URL}/edit/songs/${songId}/draft`, options)
+  } catch {}
 }
 
 export async function deleteEditDraft(songId: string): Promise<void> {

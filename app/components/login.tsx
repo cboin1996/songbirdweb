@@ -2,12 +2,15 @@
 import { FaDove } from "react-icons/fa";
 import React, { useState } from 'react'
 import { useRouter } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import Input from "./input";
 import { login } from "../lib/data";
 import { routes } from "../lib/routes";
 
 export default function Login() {
     const router = useRouter()
+    const searchParams = useSearchParams()
+    const next = searchParams.get('next')
     const statuses = {
         idle: "",
         sending: "signing in…",
@@ -28,7 +31,7 @@ export default function Login() {
             setStatus(statuses.unauthorized)
             return
         }
-        window.location.href = routes.download
+        window.location.href = next ?? routes.download
     }
 
     return (
