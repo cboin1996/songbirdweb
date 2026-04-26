@@ -13,6 +13,28 @@ import { usePlayer } from './player'
 
 type Tab = 'audio' | 'properties'
 
+// Map a buffer-offset (seconds from buffer start) back to original audio time using kept segments
+function _bufTimeToOrig(elapsed: number, segs: [number, number][]): number {
+  let rem = elapsed
+  for (const [s, e] of segs) {
+    const d = e - s
+    if (rem <= d) return s + rem
+    rem -= d
+  }
+  return segs.length > 0 ? segs[segs.length - 1][1] : elapsed
+}
+
+// Map an original audio time to its offset in the spliced buffer (snaps into-cut times to segment start)
+function _origToBufOffset(origTime: number, segs: [number, number][]): number {
+  let off = 0
+  for (const [s, e] of segs) {
+    if (origTime <= s) return off
+    if (origTime <= e) return off + (origTime - s)
+    off += e - s
+  }
+  return off
+}
+
 function Slider({ value, min, max, step, onChange, onStart, onCommit, disabled, label }: {
   value: number; min: number; max: number; step: number
   onChange: (v: number) => void; onStart?: () => void; onCommit?: () => void; disabled?: boolean; label?: string
@@ -105,6 +127,8 @@ export default function EditorModal({
   const previewCtxStartTimeRef = useRef<number>(0)
   const previewTrimDurRef = useRef<number>(0)
   const previewTrimStartRef = useRef<number>(0)
+  const previewBufferRef = useRef<AudioBuffer | null>(null)
+  const previewSegmentsRef = useRef<[number, number][]>([])
   const programmaticRegionRef = useRef(false)
 
   const { pause: pausePlayer, isPlaying: playerIsPlaying } = usePlayer()
@@ -366,10 +390,12 @@ export default function EditorModal({
   function stopPreview() {
     const wasWebAudio = previewSrcRef.current !== null
     if (previewRafRef.current) { cancelAnimationFrame(previewRafRef.current); previewRafRef.current = null }
-    previewSrcRef.current?.stop()
+    try { previewSrcRef.current?.stop() } catch {}
     previewCtxRef.current?.close()
     previewSrcRef.current = null
     previewCtxRef.current = null
+    previewBufferRef.current = null
+    previewSegmentsRef.current = []
     if (!wasWebAudio && wsPreviewRef.current) wsRef.current?.pause()
     wsPreviewRef.current = false
     setPreviewing(false)
@@ -427,6 +453,10 @@ export default function EditorModal({
       offset += len
     }
 
+    const segsSec: [number, number][] = segments.map(([s, e]) => [s / sr, e / sr])
+    previewBufferRef.current = trimmed
+    previewSegmentsRef.current = segsSec
+
     const source = ctx.createBufferSource()
     source.buffer = trimmed
     const gain = ctx.createGain()
@@ -452,7 +482,7 @@ export default function EditorModal({
     function tickCursor() {
       if (!previewCtxRef.current || !previewSrcRef.current) return
       const elapsed = previewCtxRef.current.currentTime - previewCtxStartTimeRef.current
-      const t = previewTrimStartRef.current + Math.min(elapsed, previewTrimDurRef.current)
+      const t = _bufTimeToOrig(Math.min(elapsed, previewTrimDurRef.current), previewSegmentsRef.current)
       wsRef.current?.setTime(t)
       previewRafRef.current = requestAnimationFrame(tickCursor)
     }
@@ -461,6 +491,48 @@ export default function EditorModal({
       if (previewRafRef.current) { cancelAnimationFrame(previewRafRef.current); previewRafRef.current = null }
       previewSrcRef.current = null
       previewCtxRef.current = null
+      previewBufferRef.current = null
+      previewSegmentsRef.current = []
+      setPreviewing(false)
+    }
+  }
+
+  function seekWebAudioPreview(originalTime: number) {
+    const ctx = previewCtxRef.current
+    const buffer = previewBufferRef.current
+    const segs = previewSegmentsRef.current
+    if (!ctx || !buffer || segs.length === 0) return
+    const bufOff = _origToBufOffset(originalTime, segs)
+    const remaining = buffer.duration - bufOff
+    if (remaining <= 0) return
+    if (previewRafRef.current) { cancelAnimationFrame(previewRafRef.current); previewRafRef.current = null }
+    try { previewSrcRef.current?.stop() } catch {}
+    previewSrcRef.current = null
+    const gain = ctx.createGain()
+    gain.gain.setValueAtTime(paramsRef.current.volume, ctx.currentTime)
+    const source = ctx.createBufferSource()
+    source.buffer = buffer
+    source.connect(gain)
+    gain.connect(ctx.destination)
+    source.start(0, bufOff)
+    previewSrcRef.current = source
+    previewCtxStartTimeRef.current = ctx.currentTime
+    previewTrimDurRef.current = remaining
+    wsRef.current?.setTime(originalTime)
+    const seekBufOff = bufOff
+    function tickSeekCursor() {
+      if (!previewCtxRef.current || !previewSrcRef.current) return
+      const elapsed = previewCtxRef.current.currentTime - previewCtxStartTimeRef.current
+      const t = _bufTimeToOrig(seekBufOff + Math.min(elapsed, remaining), previewSegmentsRef.current)
+      wsRef.current?.setTime(t)
+      previewRafRef.current = requestAnimationFrame(tickSeekCursor)
+    }
+    previewRafRef.current = requestAnimationFrame(tickSeekCursor)
+    source.onended = () => {
+      if (previewRafRef.current) { cancelAnimationFrame(previewRafRef.current); previewRafRef.current = null }
+      previewSrcRef.current = null
+      previewBufferRef.current = null
+      previewSegmentsRef.current = []
       setPreviewing(false)
     }
   }
@@ -569,6 +641,11 @@ export default function EditorModal({
     if (!wsReady || !duration || !waveRef.current) return
     const rect = waveRef.current.getBoundingClientRect()
     const progress = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+    const clickedTime = progress * duration
+    if (previewCtxRef.current) {
+      seekWebAudioPreview(clickedTime)
+      return
+    }
     wsRef.current?.seekTo(progress)
   }
 
@@ -687,8 +764,8 @@ export default function EditorModal({
             {/* waveform with fade overlays */}
             <div className="relative">
               <div ref={waveRef} data-testid="waveform" onClick={handleWaveformClick} className="w-full rounded-lg overflow-hidden bg-white dark:bg-gray-950 min-h-[112px] cursor-crosshair" />
-              <span data-testid="version-badge" className={`absolute top-1 right-1 text-[10px] px-1.5 py-0.5 rounded pointer-events-none select-none font-medium ${rootSongId ? 'bg-amber-500/20 text-amber-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
-                {rootSongId ? 'edited' : 'original'}
+              <span data-testid="version-badge" className={`absolute top-1 right-1 text-[10px] px-1.5 py-0.5 rounded pointer-events-none select-none font-medium ${previewing ? 'bg-orange-500/20 text-orange-400' : rootSongId ? 'bg-amber-500/20 text-amber-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
+                {previewing ? 'preview' : rootSongId ? 'edited' : 'original'}
               </span>
               {!wsReady && (
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
