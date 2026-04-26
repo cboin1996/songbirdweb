@@ -1,8 +1,9 @@
 export const API_HOST = process.env.NEXT_PUBLIC_API_HOST;
 export const BASE_URL = `http://${API_HOST}:8000`;
-export const DOWNLOAD_URL = `${BASE_URL}/download`;
-export const TAGGING_URL = `${BASE_URL}/properties`;
-export const ITUNES_SEARCH_URL = `${BASE_URL}/properties/itunes`;
+export const API_V1 = `${BASE_URL}/v1`;
+export const DOWNLOAD_URL = `${API_V1}/download`;
+export const TAGGING_URL = `${API_V1}/properties`;
+export const ITUNES_SEARCH_URL = `${API_V1}/properties/itunes`;
 
 export function isValidUrl(url: string) {
   try {
@@ -28,7 +29,7 @@ function redirectToLogin() {
 
 async function tryRefresh(): Promise<boolean> {
   if (refreshPromise) return refreshPromise
-  refreshPromise = fetch(`${BASE_URL}/auth/refresh`, { method: 'POST', credentials: 'include' })
+  refreshPromise = fetch(`${API_V1}/auth/refresh`, { method: 'POST', credentials: 'include' })
     .then(r => r.ok)
     .catch(() => false)
     .finally(() => { refreshPromise = null })
@@ -98,12 +99,12 @@ export interface CurrentUser {
 }
 
 export async function fetchCurrentUser(): Promise<CurrentUser | undefined> {
-  return fetchData<CurrentUser>({ url: `${BASE_URL}/auth/me`, method: 'GET' })
+  return fetchData<CurrentUser>({ url: `${API_V1}/auth/me`, method: 'GET' })
 }
 
 export async function login(username: string, password: string): Promise<CurrentUser | undefined> {
   try {
-    const response = await fetch(`${BASE_URL}/auth/login`, {
+    const response = await fetch(`${API_V1}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
@@ -119,7 +120,7 @@ export async function login(username: string, password: string): Promise<Current
 
 export async function logout(): Promise<void> {
   try {
-    await fetch(`${BASE_URL}/auth/logout`, {
+    await fetch(`${API_V1}/auth/logout`, {
       method: 'POST',
       credentials: 'include',
     });
@@ -136,7 +137,7 @@ export interface LibraryEntry {
 }
 
 export async function fetchLibrary(): Promise<LibraryEntry[]> {
-  return await fetchData<LibraryEntry[]>({ url: `${BASE_URL}/library`, method: 'GET' }) ?? []
+  return await fetchData<LibraryEntry[]>({ url: `${API_V1}/library`, method: 'GET' }) ?? []
 }
 
 export interface PlayableSong {
@@ -160,11 +161,11 @@ export interface LibrarySong {
 
 
 export async function fetchLibrarySongs(): Promise<LibrarySong[]> {
-  return await fetchData<LibrarySong[]>({ url: `${BASE_URL}/songs/library`, method: 'GET' }) ?? []
+  return await fetchData<LibrarySong[]>({ url: `${API_V1}/songs/library`, method: 'GET' }) ?? []
 }
 
 export async function fetchAllSongs(): Promise<LibrarySong[]> {
-  return await fetchData<LibrarySong[]>({ url: `${BASE_URL}/songs`, method: 'GET' }) ?? []
+  return await fetchData<LibrarySong[]>({ url: `${API_V1}/songs`, method: 'GET' }) ?? []
 }
 
 export type ExploreWindow = 'day' | 'week' | 'all'
@@ -199,25 +200,25 @@ export interface ExploreData {
 }
 
 export async function fetchExplore(window: ExploreWindow = 'week'): Promise<ExploreData | undefined> {
-  return fetchData<ExploreData>({ url: `${BASE_URL}/songs/explore?window=${window}`, method: 'GET' })
+  return fetchData<ExploreData>({ url: `${API_V1}/songs/explore?window=${window}`, method: 'GET' })
 }
 
 export async function recordPlay(songId: string): Promise<void> {
   try {
     const options = await buildFetchOptions('POST')
-    await fetch(`${BASE_URL}/songs/${songId}/play`, options)
+    await fetch(`${API_V1}/songs/${songId}/play`, options)
   } catch {}
 }
 
 export async function addToLibrary(songId: string): Promise<boolean> {
-  const result = await fetchData<LibraryEntry>({ url: `${BASE_URL}/library/${songId}`, method: 'POST' })
+  const result = await fetchData<LibraryEntry>({ url: `${API_V1}/library/${songId}`, method: 'POST' })
   return result !== undefined
 }
 
 export async function removeFromLibrary(songId: string): Promise<boolean> {
   try {
     const options = await buildFetchOptions('DELETE')
-    const response = await fetch(`${BASE_URL}/library/${songId}`, options)
+    const response = await fetch(`${API_V1}/library/${songId}`, options)
     return response.ok
   } catch {
     return false
@@ -239,7 +240,7 @@ export function artworkUrl(url: string, size: number): string {
 export function songArtworkUrl(songId: string | undefined, artworkCached: boolean | undefined, artworkUrl100: string | undefined, size: number): string | null {
   if (songId && artworkCached) {
     const sizeParam = size <= 300 ? 'thumb' : 'full'
-    return `${BASE_URL}/songs/${songId}/artwork?size=${sizeParam}`
+    return `${API_V1}/songs/${songId}/artwork?size=${sizeParam}`
   }
   return artworkUrl100 ? artworkUrl(artworkUrl100, size) : null
 }
@@ -362,17 +363,17 @@ export interface UserInfo {
 }
 
 export async function fetchUsers(): Promise<UserInfo[]> {
-  return await fetchData<UserInfo[]>({ url: `${BASE_URL}/admin/users`, method: 'GET' }) ?? []
+  return await fetchData<UserInfo[]>({ url: `${API_V1}/admin/users`, method: 'GET' }) ?? []
 }
 
 export async function updateUser(id: string, body: { role?: string; is_active?: boolean }): Promise<UserInfo | undefined> {
-  return fetchData<UserInfo>({ url: `${BASE_URL}/admin/users/${id}`, method: 'PATCH', body })
+  return fetchData<UserInfo>({ url: `${API_V1}/admin/users/${id}`, method: 'PATCH', body })
 }
 
 export async function deleteUser(id: string): Promise<boolean> {
   try {
     const options = await buildFetchOptions('DELETE')
-    const response = await fetch(`${BASE_URL}/admin/users/${id}`, options)
+    const response = await fetch(`${API_V1}/admin/users/${id}`, options)
     return response.ok
   } catch {
     return false
@@ -390,15 +391,60 @@ export interface EditJobSummary {
   updated_at: string
 }
 
+export interface DayActivity {
+  date: string
+  plays: number
+  downloads: number
+}
+
+export interface TopSong {
+  song_id: string
+  title: string | null
+  artist: string | null
+  count: number
+}
+
+export interface PerUser {
+  user_id: string
+  username: string
+  song_count: number
+  play_count: number
+  download_count: number
+  last_active: string | null
+}
+
 export interface AdminStats {
   song_count: number
   user_count: number
   disk_bytes: number
+  disk_total: number
+  disk_free: number
+  failed_job_count: number
+  active_share_tokens: number
   recent_jobs: EditJobSummary[]
+  plays_by_day: DayActivity[]
+  top_songs: TopSong[]
+  per_user: PerUser[]
 }
 
 export async function fetchAdminStats(): Promise<AdminStats | undefined> {
-  return fetchData<AdminStats>({ url: `${BASE_URL}/admin/stats`, method: 'GET' })
+  return fetchData<AdminStats>({ url: `${API_V1}/admin/stats`, method: 'GET' })
+}
+
+export interface ErrorLogEntry {
+  id: string
+  timestamp: string
+  level: string
+  path: string | null
+  method: string | null
+  status_code: number | null
+  message: string
+  detail: string | null
+  user_id: string | null
+}
+
+export async function fetchAdminErrors(): Promise<ErrorLogEntry[]> {
+  return await fetchData<ErrorLogEntry[]>({ url: `${API_V1}/admin/errors`, method: 'GET' }) ?? []
 }
 
 export interface PlayerState {
@@ -409,20 +455,20 @@ export interface PlayerState {
 }
 
 export async function fetchPlayerState(): Promise<PlayerState | undefined> {
-  return fetchData<PlayerState>({ url: `${BASE_URL}/player/state`, method: 'GET' })
+  return fetchData<PlayerState>({ url: `${API_V1}/player/state`, method: 'GET' })
 }
 
 export async function savePlayerState(state: PlayerState): Promise<void> {
   try {
     const options = await buildFetchOptions('PUT', state)
-    await fetch(`${BASE_URL}/player/state`, options)
+    await fetch(`${API_V1}/player/state`, options)
   } catch {}
 }
 
 export async function updatePosition(songId: string, position: number): Promise<boolean> {
   try {
     const options = await buildFetchOptions('PATCH', { position })
-    const response = await fetch(`${BASE_URL}/library/${songId}/position`, options)
+    const response = await fetch(`${API_V1}/library/${songId}/position`, options)
     return response.ok
   } catch {
     return false
@@ -430,7 +476,16 @@ export async function updatePosition(songId: string, position: number): Promise<
 }
 
 export async function registerUser(username: string, email: string, password: string): Promise<UserInfo | undefined> {
-  return fetchData<UserInfo>({ url: `${BASE_URL}/auth/register`, method: 'POST', body: { username, email, password } })
+  return fetchData<UserInfo>({ url: `${API_V1}/auth/register`, method: 'POST', body: { username, email, password } })
+}
+
+export interface VersionInfo {
+  api_version: string
+  core_version: string
+}
+
+export async function fetchVersion(): Promise<VersionInfo | undefined> {
+  return fetchData<VersionInfo>({ url: `${API_V1}/version`, method: 'GET' })
 }
 
 export interface ShareToken {
@@ -446,12 +501,12 @@ export interface ShareInfo {
 }
 
 export async function createShareToken(songId: string): Promise<ShareToken | undefined> {
-  return fetchData<ShareToken>({ url: `${BASE_URL}/share/songs/${songId}`, method: 'POST' })
+  return fetchData<ShareToken>({ url: `${API_V1}/share/songs/${songId}`, method: 'POST' })
 }
 
 export async function fetchShareInfo(token: string): Promise<ShareInfo | undefined> {
   try {
-    const res = await fetch(`${BASE_URL}/share/${token}/info`)
+    const res = await fetch(`${API_V1}/share/${token}/info`)
     if (!res.ok) return undefined
     return res.json()
   } catch {
@@ -462,7 +517,7 @@ export async function fetchShareInfo(token: string): Promise<ShareInfo | undefin
 export async function changePassword(currentPassword: string, newPassword: string): Promise<boolean> {
   try {
     const options = await buildFetchOptions('PATCH', { current_password: currentPassword, new_password: newPassword })
-    const response = await fetch(`${BASE_URL}/auth/password`, options)
+    const response = await fetch(`${API_V1}/auth/password`, options)
     return response.ok
   } catch {
     return false
@@ -484,6 +539,8 @@ export interface Cut {
   id?: string  // client-side only, stripped before API calls
   start: number
   end: number
+  fade_in: number
+  fade_out: number
 }
 
 export interface EditParams {
@@ -492,6 +549,8 @@ export interface EditParams {
   volume: number
   fade_in: number
   fade_out: number
+  speed: number
+  normalize: boolean
   cuts: Cut[]
 }
 
@@ -508,30 +567,30 @@ export async function createEditJob(
   overwrite = false,
 ): Promise<EditJobResponse | undefined> {
   return fetchData<EditJobResponse>({
-    url: `${BASE_URL}/edit/songs/${songId}`,
+    url: `${API_V1}/edit/songs/${songId}`,
     method: 'POST',
     body: { params, overwrite },
   })
 }
 
 export async function pollEditJob(jobId: string): Promise<EditJobResponse | undefined> {
-  return fetchData<EditJobResponse>({ url: `${BASE_URL}/edit/jobs/${jobId}`, method: 'GET' })
+  return fetchData<EditJobResponse>({ url: `${API_V1}/edit/jobs/${jobId}`, method: 'GET' })
 }
 
 export async function fetchEditDraft(songId: string): Promise<EditParams | undefined> {
-  return fetchData<EditParams>({ url: `${BASE_URL}/edit/songs/${songId}/draft`, method: 'GET', silentStatuses: [404] })
+  return fetchData<EditParams>({ url: `${API_V1}/edit/songs/${songId}/draft`, method: 'GET', silentStatuses: [404] })
 }
 
 export async function saveEditDraft(songId: string, params: EditParams): Promise<void> {
   try {
     const options = await buildFetchOptions('PUT', params)
-    await fetch(`${BASE_URL}/edit/songs/${songId}/draft`, options)
+    await fetch(`${API_V1}/edit/songs/${songId}/draft`, options)
   } catch {}
 }
 
 export async function deleteEditDraft(songId: string): Promise<void> {
   try {
     const options = await buildFetchOptions('DELETE')
-    await fetch(`${BASE_URL}/edit/songs/${songId}/draft`, options)
+    await fetch(`${API_V1}/edit/songs/${songId}/draft`, options)
   } catch {}
 }
