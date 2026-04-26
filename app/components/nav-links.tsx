@@ -11,6 +11,7 @@ export default function NavLinks({ isAdmin }: { isAdmin: boolean }) {
 
     const links = [
         { href: routes.download, label: 'download' },
+        { href: routes.import, label: 'import' },
         { href: routes.library, label: 'library' },
         { href: routes.explore, label: 'explore' },
         ...(isAdmin ? [{ href: routes.admin, label: 'admin' }] : []),

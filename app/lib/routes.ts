@@ -6,6 +6,7 @@ export const routes = {
     downloadUrl: '/download/url',
     library: '/library',
     explore: '/explore',
+    import: '/import',
     admin: '/admin',
     settings: '/settings',
     info: '/info',
