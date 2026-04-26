@@ -434,29 +434,34 @@ export default function EditorModal({
     wsRef.current?.pause()
     pausePlayer()
 
-    const hasCuts = params.cuts.length > 0
+    const p = paramsRef.current
+    const cursorTime = wsRef.current?.getCurrentTime() ?? p.trim_start
+    const trimEnd = p.trim_end ?? duration
+    // start from cursor if it falls inside the trim window, otherwise start from trim_start
+    const startOrig = (cursorTime >= p.trim_start && cursorTime < trimEnd) ? cursorTime : p.trim_start
 
-    if (!hasCuts) {
-      // Native WaveSurfer playback — identical quality to pressing play
-      wsRef.current?.setVolume(params.volume)
-      wsRef.current?.play(params.trim_start, params.trim_end ?? undefined)
+    const hasCuts = p.cuts.length > 0
+    const needsWebAudio = hasCuts || p.speed !== 1.0 || p.fade_in > 0 || p.fade_out > 0
+
+    if (!needsWebAudio) {
+      wsRef.current?.setVolume(p.volume)
+      wsRef.current?.play(startOrig, p.trim_end ?? undefined)
       wsPreviewRef.current = true
       setPreviewing(true)
       return
     }
 
-    // Web Audio: splice out cut segments
     const raw = wsRef.current?.getDecodedData()
     if (!raw) return
     const ctx = new AudioContext({ sampleRate: raw.sampleRate })
     if (ctx.state === 'suspended') await ctx.resume()
 
     const sr = raw.sampleRate
-    const startFrame = Math.floor(params.trim_start * sr)
-    const endFrame = params.trim_end !== null ? Math.floor(params.trim_end * sr) : raw.length
+    const startFrame = Math.floor(p.trim_start * sr)
+    const endFrame = p.trim_end !== null ? Math.floor(p.trim_end * sr) : raw.length
 
-    const cutsInRange = [...params.cuts]
-      .filter(c => c.end > params.trim_start && c.start < (params.trim_end ?? duration))
+    const cutsInRange = [...p.cuts]
+      .filter(c => c.end > p.trim_start && c.start < trimEnd)
       .sort((a, b) => a.start - b.start)
     const segments: [number, number][] = []
     let pos = startFrame
@@ -485,32 +490,43 @@ export default function EditorModal({
     previewBufferRef.current = trimmed
     previewSegmentsRef.current = segsSec
 
+    // Compute buffer offset for startOrig so we begin from cursor position
+    const startBufOff = _origToBufOffset(startOrig, segsSec)
+    const remainingBufDur = trimmed.duration - startBufOff
+
     const source = ctx.createBufferSource()
     source.buffer = trimmed
+    source.playbackRate.value = p.speed
+
     const gain = ctx.createGain()
     const now = ctx.currentTime
-    const trimDur = totalFrames / sr
+    // real-time duration accounts for speed: buffer plays faster/slower
+    const realDur = remainingBufDur / p.speed
 
-    gain.gain.setValueAtTime(params.fade_in > 0 ? 0 : params.volume, now)
-    if (params.fade_in > 0) gain.gain.linearRampToValueAtTime(params.volume, now + params.fade_in)
-    if (params.fade_out > 0) {
-      gain.gain.setValueAtTime(params.volume, now + Math.max(0, trimDur - params.fade_out))
-      gain.gain.linearRampToValueAtTime(0, now + trimDur)
+    gain.gain.setValueAtTime(p.fade_in > 0 ? 0 : p.volume, now)
+    if (p.fade_in > 0) gain.gain.linearRampToValueAtTime(p.volume, now + Math.min(p.fade_in, realDur))
+    if (p.fade_out > 0) {
+      const outStart = Math.max(now, now + realDur - p.fade_out)
+      gain.gain.setValueAtTime(p.volume, outStart)
+      gain.gain.linearRampToValueAtTime(0, now + realDur)
     }
 
     source.connect(gain)
     gain.connect(ctx.destination)
-    source.start()
+    source.start(0, startBufOff)
     previewSrcRef.current = source
     previewCtxRef.current = ctx
     previewCtxStartTimeRef.current = ctx.currentTime
-    previewTrimDurRef.current = trimDur
-    previewTrimStartRef.current = params.trim_start
+    // trimDur is in buffer-seconds; rAF uses buffer elapsed = real elapsed * speed
+    previewTrimDurRef.current = remainingBufDur
+    previewTrimStartRef.current = startOrig
     setPreviewing(true)
+    wsRef.current?.setTime(startOrig)
     function tickCursor() {
       if (!previewCtxRef.current || !previewSrcRef.current) return
-      const elapsed = previewCtxRef.current.currentTime - previewCtxStartTimeRef.current
-      const t = _bufTimeToOrig(Math.min(elapsed, previewTrimDurRef.current), previewSegmentsRef.current)
+      const realElapsed = previewCtxRef.current.currentTime - previewCtxStartTimeRef.current
+      const bufElapsed = realElapsed * paramsRef.current.speed
+      const t = _bufTimeToOrig(startBufOff + Math.min(bufElapsed, previewTrimDurRef.current), previewSegmentsRef.current)
       wsRef.current?.setTime(t)
       previewRafRef.current = requestAnimationFrame(tickCursor)
     }
@@ -536,10 +552,12 @@ export default function EditorModal({
     if (previewRafRef.current) { cancelAnimationFrame(previewRafRef.current); previewRafRef.current = null }
     try { previewSrcRef.current?.stop() } catch {}
     previewSrcRef.current = null
+    const p = paramsRef.current
     const gain = ctx.createGain()
-    gain.gain.setValueAtTime(paramsRef.current.volume, ctx.currentTime)
+    gain.gain.setValueAtTime(p.volume, ctx.currentTime)
     const source = ctx.createBufferSource()
     source.buffer = buffer
+    source.playbackRate.value = p.speed
     source.connect(gain)
     gain.connect(ctx.destination)
     source.start(0, bufOff)
@@ -550,8 +568,9 @@ export default function EditorModal({
     const seekBufOff = bufOff
     function tickSeekCursor() {
       if (!previewCtxRef.current || !previewSrcRef.current) return
-      const elapsed = previewCtxRef.current.currentTime - previewCtxStartTimeRef.current
-      const t = _bufTimeToOrig(seekBufOff + Math.min(elapsed, remaining), previewSegmentsRef.current)
+      const realElapsed = previewCtxRef.current.currentTime - previewCtxStartTimeRef.current
+      const bufElapsed = realElapsed * paramsRef.current.speed
+      const t = _bufTimeToOrig(seekBufOff + Math.min(bufElapsed, remaining), previewSegmentsRef.current)
       wsRef.current?.setTime(t)
       previewRafRef.current = requestAnimationFrame(tickSeekCursor)
     }
