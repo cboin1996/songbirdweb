@@ -112,6 +112,7 @@ export default function EditorModal({
     ws.on('pause', () => setWfPlaying(false))
     ws.on('finish', () => setWfPlaying(false))
     ws.on('error', (err: Error) => { if (err?.name !== 'AbortError') console.error('WaveSurfer:', err) })
+    wsRef.current = ws
     regions.on('region-updated', r => {
       if (r.id !== 'trim') return
       setParams(prev => {
@@ -120,7 +121,15 @@ export default function EditorModal({
         return next
       })
     })
-    return () => { ws.destroy() }
+    return () => {
+      // destroy() aborts the in-flight fetch; suppress that AbortError so it doesn't
+      // surface in the Next.js dev overlay (harmless, only fires in StrictMode remounts)
+      const suppress = (e: PromiseRejectionEvent) => {
+        if (e.reason?.name === 'AbortError') e.preventDefault()
+      }
+      window.addEventListener('unhandledrejection', suppress, { once: true })
+      ws.destroy()
+    }
   }, [songId, scheduleSave])
 
   // sync volume to WaveSurfer when it changes
