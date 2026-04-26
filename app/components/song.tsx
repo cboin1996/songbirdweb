@@ -199,9 +199,12 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
         return (
             <>
                 {modal}
-                <button
+                <div
                     onClick={handleCardClick}
-                    className={`flex items-center gap-3 w-full text-left rounded-md p-2 transition-colors hover:bg-gray-100 dark:hover:bg-gray-900 ${selected ? 'bg-gray-100 dark:bg-gray-800' : ''}`}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && handleCardClick()}
+                    className={`flex items-center gap-3 w-full text-left rounded-md p-2 transition-colors cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-900 ${selected ? 'bg-gray-100 dark:bg-gray-800' : ''}`}
                 >
                     {rank !== undefined && (
                         <span className="text-gray-400 tabular-nums w-5 text-right shrink-0 text-sm">{rank}</span>
@@ -218,7 +221,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                     <div onClick={e => e.stopPropagation()}>
                         {actions}
                     </div>
-                </button>
+                </div>
             </>
         )
     }
@@ -226,7 +229,13 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
     return (
         <>
             {modal}
-            <button onClick={handleCardClick} className={`dark:hover:bg-gray-900 hover:bg-gray-200 rounded-md p-2 w-full ${selected ? 'bg-gray-300 dark:bg-gray-800' : ''}`}>
+            <div
+                onClick={handleCardClick}
+                role="button"
+                tabIndex={0}
+                onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && handleCardClick()}
+                className={`dark:hover:bg-gray-900 hover:bg-gray-200 rounded-md p-2 w-full cursor-pointer ${selected ? 'bg-gray-300 dark:bg-gray-800' : ''}`}
+            >
                 <div className="flex flex-row justify-between">
                     <div className="flex flex-row rounded-lg min-w-0">
                         <div className="shrink-0">
@@ -248,7 +257,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                         {actions}
                     </div>
                 </div>
-            </button>
+            </div>
         </>
     )
 }
