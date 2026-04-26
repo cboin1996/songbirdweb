@@ -4,6 +4,7 @@ import Image from "next/image"
 import Link from "next/link"
 import { FaPause, FaPlay, FaStepBackward, FaStepForward, FaRandom, FaRedo, FaList, FaTimes } from "react-icons/fa"
 import { BASE_URL, PlayableSong, artworkUrl, fetchLibrarySongs, fetchPlayerState, recordPlay, savePlayerState, updatePosition } from "../lib/data"
+import { getSongFile } from "../lib/offline"
 
 export type RepeatMode = 'off' | 'one' | 'all'
 export type PlayContext = { label: string; href: string }
@@ -135,6 +136,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const [showQueue, setShowQueue] = useState(false)
     const pendingPosition = useRef<number>(0)
     const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const blobUrlRef = useRef<string | null>(null)
     // refs mirror state so stable callbacks always see latest values
     const queueRef = useRef<PlayableSong[]>([])
     const queueIndexRef = useRef(-1)
@@ -145,11 +147,22 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         updatePosition(song.uuid, time)
     }, [])
 
-    function loadSong(song: PlayableSong, fromStart = false) {
+    async function loadSong(song: PlayableSong, fromStart = false) {
         const audio = audioRef.current
         if (!audio) return
         pendingPosition.current = fromStart ? 0 : (song.last_position ?? 0)
-        audio.src = `${BASE_URL}/download/${song.uuid}`
+        // revoke previous blob URL to free memory
+        if (blobUrlRef.current) {
+            URL.revokeObjectURL(blobUrlRef.current)
+            blobUrlRef.current = null
+        }
+        const cachedFile = await getSongFile(song.uuid)
+        if (cachedFile) {
+            blobUrlRef.current = URL.createObjectURL(cachedFile)
+            audio.src = blobUrlRef.current
+        } else {
+            audio.src = `${BASE_URL}/download/${song.uuid}`
+        }
         audio.load()
         setCurrent(song)
         setIsPlaying(true)
@@ -383,7 +396,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     }, [current, skipPrev, skipNext, savePosition])
 
     useEffect(() => {
-        Promise.all([fetchPlayerState(), fetchLibrarySongs()]).then(([state, libSongs]) => {
+        Promise.all([fetchPlayerState(), fetchLibrarySongs()]).then(async ([state, libSongs]) => {
             const libMap = new Map(libSongs.map(s => [s.uuid, s]))
 
             if (state) {
@@ -401,14 +414,21 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
             if (restoredQueue.length > 0) {
                 const safeIndex = Math.max(0, Math.min(state!.queue_index, restoredQueue.length - 1))
+                const song = restoredQueue[safeIndex]
                 queueRef.current = restoredQueue
                 queueIndexRef.current = safeIndex
                 setQueue(restoredQueue)
-                setCurrent(restoredQueue[safeIndex])
+                setCurrent(song)
                 const audio = audioRef.current
                 if (audio) {
-                    pendingPosition.current = restoredQueue[safeIndex].last_position ?? 0
-                    audio.src = `${BASE_URL}/download/${restoredQueue[safeIndex].uuid}`
+                    pendingPosition.current = song.last_position ?? 0
+                    const cached = await getSongFile(song.uuid)
+                    if (cached) {
+                        blobUrlRef.current = URL.createObjectURL(cached)
+                        audio.src = blobUrlRef.current
+                    } else {
+                        audio.src = `${BASE_URL}/download/${song.uuid}`
+                    }
                 }
             } else {
                 // fallback: restore last played song
@@ -424,7 +444,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                     const audio = audioRef.current
                     if (audio) {
                         pendingPosition.current = last.last_position ?? 0
-                        audio.src = `${BASE_URL}/download/${last.uuid}`
+                        const cached = await getSongFile(last.uuid)
+                        if (cached) {
+                            blobUrlRef.current = URL.createObjectURL(cached)
+                            audio.src = blobUrlRef.current
+                        } else {
+                            audio.src = `${BASE_URL}/download/${last.uuid}`
+                        }
                     }
                 }
             }

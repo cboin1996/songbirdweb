@@ -33,12 +33,13 @@ export async function middleware(request: NextRequest) {
   const refreshToken = request.cookies.get('refresh_token')
   const isLoginPage = request.nextUrl.pathname === routes.home
   const isSharePage = request.nextUrl.pathname.startsWith('/share/')
+  const isOfflinePage = request.nextUrl.pathname === '/offline'
 
   const validToken = accessToken && !isExpired(accessToken.value)
 
   if (validToken && isLoginPage) return NextResponse.redirect(new URL(routes.download, request.url))
   if (validToken) return NextResponse.next()
-  if (isLoginPage || isSharePage) return NextResponse.next()
+  if (isLoginPage || isSharePage || isOfflinePage) return NextResponse.next()
 
   if (refreshToken) {
     const newToken = await refreshAccessToken(refreshToken.value)
@@ -59,5 +60,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|sw.js|manifest.json|icon-.*\\.png).*)'],
 }

@@ -3,10 +3,11 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import Image from "next/image"
 import { useRouter, useSearchParams } from "next/navigation"
 import { LibrarySong, artworkUrl } from "../lib/data"
+import { cacheSong, getCachedSongIds } from "../lib/offline"
 import Song from "../components/song"
 import { usePlayer } from "../components/player"
 import { routes } from "../lib/routes"
-import { FaPlay } from "react-icons/fa"
+import { FaPlay, FaCloudDownloadAlt } from "react-icons/fa"
 
 type ViewMode = 'songs' | 'artists' | 'albums' | 'genres'
 
@@ -90,10 +91,32 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     const { play, current } = usePlayer()
     const sectionRefs = useRef<Record<string, HTMLElement | null>>({})
     const isDesktop = useIsDesktop()
+    const [cachedIds, setCachedIds] = useState<Set<string>>(new Set())
+    const [savingAll, setSavingAll] = useState(false)
+    const [saveAllProgress, setSaveAllProgress] = useState({ done: 0, total: 0 })
+
+    useEffect(() => {
+        getCachedSongIds().then(setCachedIds)
+    }, [])
 
     function changeViewMode(v: ViewMode) {
         setViewMode(v)
         router.replace(`${routes.library}?view=${v}`)
+    }
+
+    async function saveAllOffline() {
+        const uncached = songs.filter(s => s.properties && !cachedIds.has(s.uuid))
+        if (!uncached.length) return
+        setSavingAll(true)
+        setSaveAllProgress({ done: 0, total: uncached.length })
+        for (const song of uncached) {
+            try {
+                await cacheSong(song.uuid)
+                setCachedIds(prev => new Set([...prev, song.uuid]))
+            } catch {}
+            setSaveAllProgress(p => ({ ...p, done: p.done + 1 }))
+        }
+        setSavingAll(false)
     }
 
     // songs + artists: grouped by first letter
@@ -223,6 +246,14 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                     <FaPlay size={9} />
                     play all
                 </button>
+                <button
+                    onClick={saveAllOffline}
+                    disabled={savingAll}
+                    className="flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors disabled:opacity-50 text-gray-400 hover:text-sky-500 border border-gray-200 dark:border-gray-800 hover:border-sky-500 transition-colors"
+                >
+                    <FaCloudDownloadAlt size={12} />
+                    {savingAll ? `${saveAllProgress.done}/${saveAllProgress.total}` : 'save all offline'}
+                </button>
                 <div className="flex gap-1">
                     {(['songs', 'artists', 'albums', 'genres'] as ViewMode[]).map(v => (
                         <button
@@ -287,6 +318,12 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                     }}
                                     inLibrary={true}
                                     onRemove={() => setSongs(prev => prev.filter(s => s.uuid !== song.uuid))}
+                                    cachedOffline={cachedIds.has(song.uuid)}
+                                    onCacheChange={(id, cached) => setCachedIds(prev => {
+                                        const next = new Set(prev)
+                                        cached ? next.add(id) : next.delete(id)
+                                        return next
+                                    })}
                                     compact={!isDesktop}
                                 />
                             ))}
@@ -320,6 +357,12 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                     }}
                                     inLibrary={true}
                                     onRemove={() => setSongs(prev => prev.filter(s => s.uuid !== song.uuid))}
+                                    cachedOffline={cachedIds.has(song.uuid)}
+                                    onCacheChange={(id, cached) => setCachedIds(prev => {
+                                        const next = new Set(prev)
+                                        cached ? next.add(id) : next.delete(id)
+                                        return next
+                                    })}
                                     compact={!isDesktop}
                                 />
                             ))}

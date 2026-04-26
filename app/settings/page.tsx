@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useRef, useState } from "react";
 import { changePassword } from "../lib/data";
+import { clearOfflineCache, getCachedSongIds, getStorageEstimate, formatBytes } from "../lib/offline";
 import Button from "../components/button";
 import Input from "../components/input";
 import { FaEye, FaEyeSlash } from "react-icons/fa";
@@ -31,6 +32,57 @@ function PasswordField({ placeholder, value, onChange, inputRef }: {
             >
                 {show ? <FaEyeSlash size={14} /> : <FaEye size={14} />}
             </button>
+        </div>
+    )
+}
+
+function OfflineStorage() {
+    const [estimate, setEstimate] = useState<{ used: number; quota: number } | null>(null)
+    const [cachedCount, setCachedCount] = useState(0)
+    const [clearing, setClearing] = useState(false)
+
+    useEffect(() => {
+        Promise.all([getStorageEstimate(), getCachedSongIds()]).then(([est, ids]) => {
+            setEstimate(est)
+            setCachedCount(ids.size)
+        })
+    }, [])
+
+    async function handleClear() {
+        setClearing(true)
+        await clearOfflineCache()
+        const est = await getStorageEstimate()
+        setEstimate(est)
+        setCachedCount(0)
+        setClearing(false)
+    }
+
+    if (!estimate) return null
+
+    const pct = estimate.quota > 0 ? (estimate.used / estimate.quota) * 100 : 0
+
+    return (
+        <div>
+            <p className="text-gray-400 text-sm pb-2">offline storage</p>
+            <div className="flex flex-col gap-3 w-64">
+                <div className="flex flex-col gap-1">
+                    <div className="flex justify-between text-xs text-gray-400">
+                        <span>{formatBytes(estimate.used)} used</span>
+                        <span>{formatBytes(estimate.quota)} total</span>
+                    </div>
+                    <div className="w-full h-1.5 bg-gray-200 dark:bg-gray-800 rounded-full overflow-hidden">
+                        <div className="h-full bg-sky-500 rounded-full transition-all" style={{ width: `${Math.min(pct, 100)}%` }} />
+                    </div>
+                </div>
+                <p className="text-xs text-gray-400">{cachedCount} song{cachedCount !== 1 ? 's' : ''} cached offline</p>
+                {cachedCount > 0 && (
+                    <Button
+                        text={clearing ? 'clearing…' : 'clear offline cache'}
+                        disabled={clearing}
+                        onClick={handleClear}
+                    />
+                )}
+            </div>
         </div>
     )
 }
@@ -70,6 +122,7 @@ export default function Page() {
     return (
         <main className="p-4">
             <div className="flex flex-col gap-8 py-4">
+                <OfflineStorage />
                 <div>
                     <p className="text-gray-400 text-sm pb-2">change password</p>
                     <form onSubmit={handleSubmit} className="flex flex-col gap-2 w-64">

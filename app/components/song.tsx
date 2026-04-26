@@ -1,16 +1,19 @@
 'use client'
 import { useState } from "react";
 import { addToLibrary, removeFromLibrary, downloadSongToFile, createShareToken, DownloadedSong, artworkUrl } from "../lib/data";
-import { FaDownload, FaBookmark, FaRegBookmark, FaPlay, FaPause, FaPlus, FaLink } from "react-icons/fa";
+import { cacheSong, uncacheSong } from "../lib/offline";
+import { FaDownload, FaBookmark, FaRegBookmark, FaPlay, FaPause, FaPlus, FaLink, FaCloudDownloadAlt, FaCheckCircle } from "react-icons/fa";
 import Image from "next/image";
 import { usePlayer } from "./player";
 
-export default function Song({ song, selected, onClick, inLibrary: initialInLibrary, onRemove, compact, rank }: {
+export default function Song({ song, selected, onClick, inLibrary: initialInLibrary, cachedOffline: initialCachedOffline, onRemove, onCacheChange, compact, rank }: {
     song: DownloadedSong,
     selected: boolean,
     onClick: () => void,
     inLibrary: boolean,
+    cachedOffline?: boolean,
     onRemove?: () => void,
+    onCacheChange?: (songId: string, cached: boolean) => void,
     compact?: boolean,
     rank?: number,
 }) {
@@ -19,6 +22,9 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
     const [libraryError, setLibraryError] = useState(false)
     const [downloadError, setDownloadError] = useState(false)
     const [copied, setCopied] = useState(false)
+    const [offlineCached, setOfflineCached] = useState(initialCachedOffline ?? false)
+    const [offlinePending, setOfflinePending] = useState(false)
+    const [offlineProgress, setOfflineProgress] = useState(0)
     const { play, pause, resume, current, isPlaying, insertNext } = usePlayer()
     const isCurrentSong = current?.uuid === song.songId
 
@@ -54,6 +60,27 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
         if (isCurrentSong && isPlaying) pause()
         else if (isCurrentSong) resume()
         else onClick()
+    }
+
+    async function handleOfflineToggle(e: React.MouseEvent) {
+        e.stopPropagation()
+        if (!song.songId || offlinePending) return
+        setOfflinePending(true)
+        setOfflineProgress(0)
+        try {
+            if (offlineCached) {
+                await uncacheSong(song.songId)
+                setOfflineCached(false)
+                onCacheChange?.(song.songId, false)
+            } else {
+                await cacheSong(song.songId, (pct) => setOfflineProgress(pct))
+                setOfflineCached(true)
+                onCacheChange?.(song.songId, true)
+            }
+        } catch {
+            // silently fail — user sees no change
+        }
+        setOfflinePending(false)
     }
 
     async function handleShare(e: React.MouseEvent) {
@@ -108,6 +135,18 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                         className={`cursor-pointer transition-colors ${copied ? 'text-green-500' : 'text-gray-400 hover:text-sky-500'}`}
                     >
                         <FaLink size={11} />
+                    </div>
+                    <div
+                        onClick={handleOfflineToggle}
+                        title={offlineCached ? 'remove offline copy' : 'save offline'}
+                        className={`cursor-pointer transition-colors relative ${offlinePending ? 'opacity-50' : ''} ${offlineCached ? 'text-sky-500' : 'text-gray-400 hover:text-sky-500'}`}
+                    >
+                        {offlineCached ? <FaCheckCircle size={11} /> : <FaCloudDownloadAlt size={13} />}
+                        {offlinePending && !offlineCached && offlineProgress > 0 && (
+                            <span className="absolute -bottom-2 left-0 text-[8px] text-sky-500 leading-none">
+                                {Math.round(offlineProgress * 100)}%
+                            </span>
+                        )}
                     </div>
                 </>
             )}
