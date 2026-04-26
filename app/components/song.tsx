@@ -6,8 +6,9 @@ import { FaBookmark, FaRegBookmark, FaPlay, FaPause, FaEllipsisV } from "react-i
 import Image from "next/image";
 import { usePlayer } from "./player";
 import EditorModal from "./editor-modal";
+import { useUser } from "../lib/user-context";
 
-export default function Song({ song, selected, onClick, inLibrary: initialInLibrary, cachedOffline: initialCachedOffline, onRemove, onCacheChange, compact, rank, isAdmin }: {
+export default function Song({ song, selected, onClick, inLibrary: initialInLibrary, cachedOffline: initialCachedOffline, onRemove, onCacheChange, compact, rank }: {
     song: DownloadedSong,
     selected: boolean,
     onClick: () => void,
@@ -17,8 +18,8 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
     onCacheChange?: (songId: string, cached: boolean) => void,
     compact?: boolean,
     rank?: number,
-    isAdmin?: boolean,
 }) {
+    const { isAdmin } = useUser()
     const [inLibrary, setInLibrary] = useState(initialInLibrary)
     const [libraryPending, setLibraryPending] = useState(false)
     const [libraryError, setLibraryError] = useState(false)
