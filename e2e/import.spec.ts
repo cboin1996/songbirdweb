@@ -80,8 +80,8 @@ test.describe('import page', () => {
             const row = page.getByTestId('import-file-row').first()
             await expect(row).toBeVisible({ timeout: 3000 })
             await expect(row).toContainText('test-song.mp3')
-            // Wait for done or error (backend may reject fake mp3)
-            await expect(row.locator('[class*="text-emerald"], [class*="text-red"]')).toBeVisible({ timeout: 15000 })
+            // Wait for done or error — fake mp3 may fail processing but job still completes
+            await expect(row.locator('.text-emerald-500, .text-red-500')).toBeVisible({ timeout: 15000 })
         } finally {
             fs.unlinkSync(filePath)
         }
