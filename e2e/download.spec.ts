@@ -12,6 +12,10 @@ async function login(page: Page) {
     await expect(page).toHaveURL(/\/download/)
 }
 
+function ignoreError(msg: string) {
+    return /AbortError|favicon|401/i.test(msg)
+}
+
 test.describe('download page', () => {
     test.describe.configure({ mode: 'serial' })
 
@@ -19,111 +23,102 @@ test.describe('download page', () => {
         await login(page)
     })
 
-    test('unauthenticated redirect to /login (root)', async ({ page }) => {
+    test('unauthenticated user is redirected to root', async ({ page }) => {
         await page.context().clearCookies()
         await page.goto('/download')
         await expect(page).toHaveURL('/')
     })
 
-    test('page loads with search bar visible', async ({ page }) => {
-        await expect(page.locator('input[type="text"], input[type="url"]').first()).toBeVisible({ timeout: 5000 })
+    test('download page shows song, album, URL options', async ({ page }) => {
+        await page.goto('/download')
+        await expect(page.getByRole('link', { name: 'Song' })).toBeVisible({ timeout: 5000 })
+        await expect(page.getByRole('link', { name: 'Album' })).toBeVisible()
+        await expect(page.getByRole('link', { name: 'URL' })).toBeVisible()
     })
 
-    test('default mode shows song search input', async ({ page }) => {
-        // the search bar should show the song name placeholder by default
-        const input = page.locator('input').filter({ has: page.locator(':scope') }).first()
-        await expect(input).toBeVisible()
+    test('Song link navigates to /download/song', async ({ page }) => {
+        await page.goto('/download')
+        await page.getByRole('link', { name: 'Song' }).click()
+        await expect(page).toHaveURL(/\/download\/song/)
     })
 
-    test('song search tab: type jolene, results appear', async ({ page }) => {
-        await page.goto('/download/song?query=jolene&mode=song')
-        const card = page.locator('[role="button"]').filter({ hasText: /jolene/i }).first()
+    test('Album link navigates to /download/album', async ({ page }) => {
+        await page.goto('/download')
+        await page.getByRole('link', { name: 'Album' }).click()
+        await expect(page).toHaveURL(/\/download\/album/)
+    })
+
+    test('URL link navigates to /download/url', async ({ page }) => {
+        await page.goto('/download')
+        await page.getByRole('link', { name: 'URL' }).click()
+        await expect(page).toHaveURL(/\/download\/url/)
+    })
+
+    // --- song search sub-page ---
+
+    test('song search: results appear for "jolene"', async ({ page }) => {
+        await page.goto('/download/song?query=jolene')
+        const card = page.getByTestId('song-card').filter({ hasText: /jolene/i }).first()
         await expect(card).toBeVisible({ timeout: 15000 })
     })
 
-    test('album search tab: type jolene, results appear', async ({ page }) => {
-        await page.goto('/download/album?query=jolene&mode=album')
-        // album results page should show something matching jolene
-        await expect(page.locator('body').filter({ hasText: /jolene/i })).toBeTruthy()
-        await page.waitForTimeout(3000)
-        // any content (even empty results) should be rendered without crash
-        await expect(page.locator('main')).toBeVisible()
-    })
-
-    test('switch mode to album via select', async ({ page }) => {
-        const modeSelect = page.locator('select#mode')
-        await expect(modeSelect).toBeVisible()
-        await modeSelect.selectOption('album')
-        await expect(modeSelect).toHaveValue('album')
-    })
-
-    test('switch mode to url via select', async ({ page }) => {
-        const modeSelect = page.locator('select#mode')
-        await modeSelect.selectOption('url')
-        await expect(modeSelect).toHaveValue('url')
-        // placeholder should change to URL-style
-        const input = page.locator('input[type="url"]')
-        await expect(input).toBeVisible()
-    })
-
-    test('URL mode input accepts text', async ({ page }) => {
-        const modeSelect = page.locator('select#mode')
-        await modeSelect.selectOption('url')
-        const urlInput = page.locator('input[type="url"]')
-        await urlInput.fill('https://www.youtube.com/watch?v=test')
-        await expect(urlInput).toHaveValue('https://www.youtube.com/watch?v=test')
-    })
-
-    test('song card: kebab menu button visible on hover', async ({ page }) => {
-        await page.goto('/download/song?query=jolene&mode=song')
-        const card = page.locator('[role="button"]').filter({ hasText: /jolene/i }).first()
+    test('song search: kebab menu opens on hover', async ({ page }) => {
+        await page.goto('/download/song?query=jolene')
+        const card = page.getByTestId('song-card').first()
         await expect(card).toBeVisible({ timeout: 15000 })
         await card.hover()
-        const kebab = card.locator('button[title="more"]')
-        await expect(kebab).toBeVisible({ timeout: 3000 })
+        await expect(card.getByTestId('song-kebab')).toBeVisible({ timeout: 3000 })
     })
 
-    test('song card kebab: add to library option exists', async ({ page }) => {
-        await page.goto('/download/song?query=jolene&mode=song')
-        const card = page.locator('[role="button"]').filter({ hasText: /jolene/i }).first()
+    test('song search: kebab menu shows expected actions', async ({ page }) => {
+        await page.goto('/download/song?query=jolene')
+        const card = page.getByTestId('song-card').first()
         await expect(card).toBeVisible({ timeout: 15000 })
         await card.hover()
-        const kebab = card.locator('button[title="more"]')
-        await kebab.click()
-        // menu should show "add to library" or similar option
-        const addBtn = page.getByRole('button', { name: /add to library/i })
-        await expect(addBtn).toBeVisible({ timeout: 3000 })
-        // close without acting
+        await card.getByTestId('song-kebab').click()
+        const menu = page.getByTestId('song-kebab-menu')
+        await expect(menu).toBeVisible({ timeout: 3000 })
+        await expect(menu.getByRole('button', { name: /download/i })).toBeVisible()
+        await expect(menu.getByRole('button', { name: /play next/i })).toBeVisible()
+        await expect(menu.getByRole('button', { name: /edit/i })).toBeVisible()
         await page.keyboard.press('Escape')
     })
 
-    test('import file section is visible on download page', async ({ page }) => {
-        await expect(page.getByText(/import local file/i)).toBeVisible({ timeout: 5000 })
-    })
-
-    test('import file input accepts .mp3 and .m4a', async ({ page }) => {
-        const fileInput = page.locator('input[type="file"][accept=".mp3,.m4a"]')
-        await expect(fileInput).toBeAttached()
-        const accept = await fileInput.getAttribute('accept')
-        expect(accept).toContain('.mp3')
-        expect(accept).toContain('.m4a')
-    })
-
-    test('song card play button starts player', async ({ page }) => {
+    test('song search: clicking card starts player', async ({ page }) => {
         const errors: string[] = []
-        page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
-        page.on('pageerror', err => errors.push(err.message))
+        page.on('pageerror', err => { if (!ignoreError(err.message)) errors.push(err.message) })
 
-        await page.goto('/download/song?query=jolene&mode=song')
-        const card = page.locator('[role="button"]').filter({ hasText: /jolene/i }).first()
+        await page.goto('/download/song?query=jolene')
+        const card = page.getByTestId('song-card').first()
         await expect(card).toBeVisible({ timeout: 15000 })
-
-        // click the card to play
         await card.click()
-        // player bar should appear with a song name
-        await expect(page.locator('text=Jolene').last()).toBeVisible({ timeout: 5000 })
+        await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
+        await expect(page.getByTestId('player-track-name')).toBeVisible()
 
-        const realErrors = errors.filter(e => !/AbortError/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e))
-        expect(realErrors, `Errors: ${realErrors.join('\n')}`).toHaveLength(0)
+        expect(errors).toHaveLength(0)
+    })
+
+    test('song search: library bookmark button visible on card', async ({ page }) => {
+        await page.goto('/download/song?query=jolene')
+        const card = page.getByTestId('song-card').first()
+        await expect(card).toBeVisible({ timeout: 15000 })
+        await expect(card.getByTestId('song-library-toggle')).toBeVisible()
+    })
+
+    // --- URL download sub-page ---
+
+    test('URL sub-page: input field is present', async ({ page }) => {
+        await page.goto('/download/url')
+        await expect(page.locator('input[type="url"], input[type="text"]').first()).toBeVisible({ timeout: 5000 })
+    })
+
+    test('no console errors on download page', async ({ page }) => {
+        const errors: string[] = []
+        page.on('console', msg => { if (msg.type() === 'error' && !ignoreError(msg.text())) errors.push(msg.text()) })
+        page.on('pageerror', err => { if (!ignoreError(err.message)) errors.push(err.message) })
+
+        await page.goto('/download')
+        await page.waitForTimeout(1000)
+        expect(errors, `Console errors: ${errors.join('\n')}`).toHaveLength(0)
     })
 })

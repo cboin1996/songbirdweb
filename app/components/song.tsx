@@ -143,6 +143,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
         <>
             <div className="fixed inset-0 z-40" onClick={() => setKebabOpen(false)} />
             <div
+                data-testid="song-kebab-menu"
                 className="fixed z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl py-1 min-w-[155px]"
                 style={{ top: kebabPos.top, right: kebabPos.right }}
                 onClick={e => e.stopPropagation()}
@@ -178,7 +179,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
 
     const kebabMenu = song.songId ? (
         <div onClick={e => e.stopPropagation()}>
-            <button ref={kebabRef} onClick={openKebab} title="more" className="cursor-pointer text-gray-400 hover:text-sky-500 p-0.5">
+            <button ref={kebabRef} data-testid="song-kebab" onClick={openKebab} title="more" className="cursor-pointer text-gray-400 hover:text-sky-500 p-0.5">
                 <FaEllipsisV size={12} />
             </button>
             {kebabDropdown}
@@ -188,12 +189,13 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
     const actions = (
         <div className="flex gap-3 items-center">
             {song.songId && (
-                <button onClick={handlePlay} className="hover:text-sky-500 cursor-pointer text-gray-400">
+                <button data-testid="song-play" onClick={handlePlay} className="hover:text-sky-500 cursor-pointer text-gray-400">
                     {isCurrentSong && isPlaying ? <FaPause size={13} /> : <FaPlay size={13} />}
                 </button>
             )}
             {song.songId && (
                 <button
+                    data-testid="song-library-toggle"
                     onClick={handleLibraryToggle}
                     aria-disabled={libraryPending}
                     className="aria-disabled:opacity-40 hover:text-sky-500 cursor-pointer"
@@ -230,6 +232,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
             <>
                 {modal}
                 <div
+                    data-testid="song-card"
                     onClick={handleCardClick}
                     role="button"
                     tabIndex={0}
@@ -260,6 +263,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
         <>
             {modal}
             <div
+                data-testid="song-card"
                 onClick={handleCardClick}
                 role="button"
                 tabIndex={0}

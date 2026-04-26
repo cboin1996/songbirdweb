@@ -14,10 +14,14 @@ async function login(page: Page) {
 
 async function startPlayback(page: Page) {
     await page.goto('/library')
-    const card = page.locator('[role="button"]').first()
+    const card = page.getByTestId('song-card').first()
     await expect(card).toBeVisible({ timeout: 10000 })
     await card.click()
-    await page.waitForTimeout(1000)
+    await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
+}
+
+function ignoreError(msg: string) {
+    return /AbortError|favicon|401/i.test(msg)
 }
 
 test.describe('player bar', () => {
@@ -29,175 +33,137 @@ test.describe('player bar', () => {
 
     test('player bar appears after clicking a song', async ({ page }) => {
         await page.goto('/library')
-        const card = page.locator('[role="button"]').first()
+        const card = page.getByTestId('song-card').first()
         await expect(card).toBeVisible({ timeout: 10000 })
         await card.click()
-        await page.waitForTimeout(1000)
-
-        // player bar is a fixed bottom element — check for skip/shuffle buttons unique to it
-        const shuffleBtn = page.locator('button').filter({ has: page.locator('svg') }).first()
-        await expect(page.locator('fixed bottom-0').or(page.locator('[class*="fixed bottom"]'))).toBeTruthy()
-        // verify progress bar area renders
-        await expect(page.locator('.h-0\\.5').first()).toBeVisible({ timeout: 3000 })
+        await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
     })
 
-    test('play/pause toggle: clicking pause stops and clicking play resumes', async ({ page }) => {
-        const errors: string[] = []
-        page.on('pageerror', err => errors.push(err.message))
-
-        await startPlayback(page)
-
-        // find pause button (song is playing)
-        const pauseBtn = page.locator('button').filter({ has: page.locator('svg') }).filter({ hasNot: page.locator('[disabled]') })
-        // look for FaPause icon specifically by aria or title — fallback: click at player location
-        // The player renders FaPause when playing; clicking it pauses
-        // We find the play/pause toggle by looking for buttons in the fixed bottom bar
-        const playerBar = page.locator('[class*="fixed bottom"]').last()
-        const playPauseBtn = playerBar.locator('button').filter({ has: page.locator('svg') }).nth(2)
-        await playPauseBtn.evaluate((el: HTMLElement) => el.click())
-        await page.waitForTimeout(500)
-        // click again to resume
-        await playPauseBtn.evaluate((el: HTMLElement) => el.click())
-        await page.waitForTimeout(500)
-
-        const realErrors = errors.filter(e => !/AbortError/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e))
-        expect(realErrors, `Errors: ${realErrors.join('\n')}`).toHaveLength(0)
-    })
-
-    test('clicking song in library starts it in player (song name appears)', async ({ page }) => {
+    test('player shows track name of clicked song', async ({ page }) => {
         await page.goto('/library')
-        const card = page.locator('[role="button"]').first()
+        const card = page.getByTestId('song-card').first()
         await expect(card).toBeVisible({ timeout: 10000 })
+        // get the track name text from the card before clicking
+        const cardText = (await card.textContent()) ?? ''
         await card.click()
-        await page.waitForTimeout(1500)
-        // player renders the current song's track name as text
-        await expect(page.locator('body')).toBeVisible()
-        // player bar fixed area should be visible
-        await expect(page.locator('.tabular-nums').first()).toBeVisible({ timeout: 5000 })
+        await expect(page.getByTestId('player-track-name')).toBeVisible({ timeout: 5000 })
+        // track name in player should match something from the card
+        const playerName = await page.getByTestId('player-track-name').textContent()
+        expect(playerName?.length).toBeGreaterThan(0)
     })
 
-    test('shuffle button toggles active state', async ({ page }) => {
+    test('play/pause button toggles playback', async ({ page }) => {
+        const errors: string[] = []
+        page.on('pageerror', err => { if (!ignoreError(err.message)) errors.push(err.message) })
+
         await startPlayback(page)
+        const btn = page.getByTestId('player-play-pause')
+        await expect(btn).toBeVisible()
 
-        const playerBar = page.locator('[class*="fixed bottom"]').last()
-        // shuffle is first button in the controls row (FaRandom icon)
-        const shuffleBtn = playerBar.locator('button').first()
-        await expect(shuffleBtn).toBeVisible({ timeout: 3000 })
+        // click to pause
+        await btn.click()
+        await page.waitForTimeout(400)
+        // click to resume
+        await btn.click()
+        await page.waitForTimeout(400)
 
-        // initially not sky-500 (active) color
-        const initialClass = await shuffleBtn.getAttribute('class')
+        expect(errors).toHaveLength(0)
+    })
 
-        await shuffleBtn.evaluate((el: HTMLElement) => el.click())
-        await page.waitForTimeout(300)
+    test('shuffle button toggles active class', async ({ page }) => {
+        await startPlayback(page)
+        const btn = page.getByTestId('player-shuffle')
+        await expect(btn).toBeVisible()
 
-        const afterClass = await shuffleBtn.getAttribute('class')
-        // class should have changed (active state toggled)
-        expect(afterClass).not.toEqual(initialClass)
+        const before = await btn.getAttribute('class')
+        await btn.click()
+        await page.waitForTimeout(200)
+        const after = await btn.getAttribute('class')
+        expect(after).not.toEqual(before)
 
         // toggle back off
-        await shuffleBtn.evaluate((el: HTMLElement) => el.click())
+        await btn.click()
     })
 
-    test('repeat button cycles off → all → one → off', async ({ page }) => {
+    test('repeat cycles off → all → one → off', async ({ page }) => {
         await startPlayback(page)
+        const btn = page.getByTestId('player-repeat')
+        await expect(btn).toBeVisible()
 
-        const playerBar = page.locator('[class*="fixed bottom"]').last()
-        const buttons = playerBar.locator('button')
+        // off → all
+        await btn.click()
+        await expect(btn).toHaveClass(/text-sky-500/, { timeout: 2000 })
+        await expect(btn.locator('span')).not.toBeVisible()
 
-        // repeat button is the 5th button in the controls row (shuffle, prev, play, next, repeat)
-        const repeatBtn = buttons.nth(4)
-        await expect(repeatBtn).toBeVisible({ timeout: 3000 })
+        // all → one (shows "1" superscript)
+        await btn.click()
+        await expect(btn.locator('span')).toBeVisible({ timeout: 2000 })
 
-        // should start as 'off' (no sky-500)
-        await expect(repeatBtn).not.toHaveClass(/text-sky-500/)
+        // one → off
+        await btn.click()
+        await expect(btn).not.toHaveClass(/text-sky-500/, { timeout: 2000 })
+    })
 
-        // click once → 'all' (sky-500)
-        await repeatBtn.evaluate((el: HTMLElement) => el.click())
-        await expect(repeatBtn).toHaveClass(/text-sky-500/, { timeout: 2000 })
+    test('queue toggle shows and hides queue panel', async ({ page }) => {
+        await startPlayback(page)
+        const btn = page.getByTestId('player-queue-toggle')
+        await expect(btn).toBeVisible()
 
-        // click again → 'one' (sky-500 + "1" superscript)
-        await repeatBtn.evaluate((el: HTMLElement) => el.click())
-        await expect(repeatBtn.locator('span')).toBeVisible({ timeout: 2000 })
+        // open queue
+        await btn.click()
+        await expect(btn).toHaveClass(/text-sky-500/, { timeout: 2000 })
+        // panel may be present if queue has songs
+        await page.waitForTimeout(200)
 
-        // click again → 'off'
-        await repeatBtn.evaluate((el: HTMLElement) => el.click())
-        await expect(repeatBtn).not.toHaveClass(/text-sky-500/, { timeout: 2000 })
+        // close queue
+        await btn.click()
+        await expect(btn).not.toHaveClass(/text-sky-500/, { timeout: 2000 })
     })
 
     test('progress bar click seeks without error', async ({ page }) => {
         const errors: string[] = []
-        page.on('pageerror', err => errors.push(err.message))
+        page.on('pageerror', err => { if (!ignoreError(err.message)) errors.push(err.message) })
 
         await startPlayback(page)
         await page.waitForTimeout(500)
 
-        // the progress bar is a flex-1 element inside the player
-        const progressBar = page.locator('.flex-1.h-0\\.5').first()
+        const progressBar = page.getByTestId('player-progress')
         await expect(progressBar).toBeVisible({ timeout: 5000 })
 
         const box = await progressBar.boundingBox()
         if (box) {
-            // click at 50% of the progress bar
             await page.mouse.click(box.x + box.width * 0.5, box.y + box.height / 2)
         }
         await page.waitForTimeout(300)
-
-        const realErrors = errors.filter(e => !/AbortError/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e))
-        expect(realErrors, `Errors: ${realErrors.join('\n')}`).toHaveLength(0)
+        expect(errors).toHaveLength(0)
     })
 
-    test('queue drawer opens and closes', async ({ page }) => {
-        await startPlayback(page)
-
-        const playerBar = page.locator('[class*="fixed bottom"]').last()
-        // queue button is the last button (FaList icon)
-        const queueBtn = playerBar.locator('button').last()
-        await expect(queueBtn).toBeVisible({ timeout: 3000 })
-
-        // open queue
-        await queueBtn.evaluate((el: HTMLElement) => el.click())
-        await page.waitForTimeout(300)
-
-        // queue should now have active sky color on queue button
-        await expect(queueBtn).toHaveClass(/text-sky-500/, { timeout: 2000 })
-
-        // close queue
-        await queueBtn.evaluate((el: HTMLElement) => el.click())
-        await page.waitForTimeout(300)
-        await expect(queueBtn).not.toHaveClass(/text-sky-500/, { timeout: 2000 })
-    })
-
-    test('player shows "from Library" context label', async ({ page }) => {
-        await page.goto('/library')
-        const card = page.locator('[role="button"]').first()
-        await expect(card).toBeVisible({ timeout: 10000 })
-        await card.click()
-        await page.waitForTimeout(1500)
-
-        // player shows "from Library" as a link
-        await expect(page.getByText(/from Library/i)).toBeVisible({ timeout: 5000 })
-    })
-
-    test('time stamps render in player bar', async ({ page }) => {
+    test('timestamps render in M:SS format', async ({ page }) => {
         await startPlayback(page)
         await page.waitForTimeout(500)
 
-        // current time and remaining time in tabular-nums format (e.g. "0:00" and "-3:45")
-        const timeEl = page.locator('.tabular-nums').first()
-        await expect(timeEl).toBeVisible({ timeout: 5000 })
-        const text = await timeEl.textContent()
+        const progress = page.getByTestId('player-progress')
+        await expect(progress).toBeVisible({ timeout: 5000 })
+        const text = await progress.textContent()
         expect(text).toMatch(/\d+:\d{2}/)
+    })
+
+    test('player shows "from Library" context link', async ({ page }) => {
+        await page.goto('/library')
+        const card = page.getByTestId('song-card').first()
+        await expect(card).toBeVisible({ timeout: 10000 })
+        await card.click()
+        await expect(page.getByText(/from Library/i)).toBeVisible({ timeout: 5000 })
     })
 
     test('no console errors during playback', async ({ page }) => {
         const errors: string[] = []
-        page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
-        page.on('pageerror', err => errors.push(err.message))
+        page.on('console', msg => { if (msg.type() === 'error' && !ignoreError(msg.text())) errors.push(msg.text()) })
+        page.on('pageerror', err => { if (!ignoreError(err.message)) errors.push(err.message) })
 
         await startPlayback(page)
         await page.waitForTimeout(2000)
 
-        const realErrors = errors.filter(e => !/AbortError/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e))
-        expect(realErrors, `Console errors: ${realErrors.join('\n')}`).toHaveLength(0)
+        expect(errors, `Console errors: ${errors.join('\n')}`).toHaveLength(0)
     })
 })

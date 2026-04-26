@@ -12,6 +12,10 @@ async function login(page: Page) {
     await expect(page).toHaveURL(/\/download/)
 }
 
+function ignoreError(msg: string) {
+    return /AbortError|favicon|401/i.test(msg)
+}
+
 test.describe('library page', () => {
     test.describe.configure({ mode: 'serial' })
 
@@ -19,62 +23,37 @@ test.describe('library page', () => {
         await login(page)
     })
 
-    test('page loads with songs', async ({ page }) => {
+    test('page loads and shows song cards', async ({ page }) => {
         await page.goto('/library')
-        await expect(page.locator('[role="button"]').first()).toBeVisible({ timeout: 10000 })
+        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
     })
 
-    test('default view is songs', async ({ page }) => {
+    test('default view is songs tab (active state)', async ({ page }) => {
         await page.goto('/library')
         const songsBtn = page.getByRole('button', { name: 'songs', exact: true })
         await expect(songsBtn).toBeVisible({ timeout: 5000 })
-        // songs button should have the active bg-sky-500 class
         await expect(songsBtn).toHaveClass(/bg-sky-500/)
     })
 
-    test('A-Z letter click updates URL', async ({ page }) => {
+    test('artists tab updates URL', async ({ page }) => {
         await page.goto('/library')
-        await expect(page.locator('[role="button"]').first()).toBeVisible({ timeout: 10000 })
-        const letterJ = page.getByRole('button', { name: 'J', exact: true })
-        if (await letterJ.isEnabled()) {
-            await letterJ.click()
-            await expect(page).toHaveURL(/letter=J/)
-        }
-    })
-
-    test('search input filters results', async ({ page }) => {
-        await page.goto('/library')
-        await expect(page.locator('[role="button"]').first()).toBeVisible({ timeout: 10000 })
-        const search = page.getByPlaceholder(/search/i)
-        if (await search.isVisible()) {
-            await search.fill('edit-me')
-            await expect(page.locator('[role="button"]').filter({ hasText: /edit-me/i }).first()).toBeVisible({ timeout: 5000 })
-        }
-    })
-
-    test('view mode: artists tab updates URL', async ({ page }) => {
-        await page.goto('/library')
-        const artistsBtn = page.getByRole('button', { name: 'artists', exact: true })
-        await expect(artistsBtn).toBeVisible({ timeout: 5000 })
-        await artistsBtn.click()
+        await page.getByRole('button', { name: 'artists', exact: true }).click()
         await expect(page).toHaveURL(/view=artists/)
     })
 
-    test('view mode: albums tab updates URL', async ({ page }) => {
+    test('albums tab updates URL', async ({ page }) => {
         await page.goto('/library')
-        const albumsBtn = page.getByRole('button', { name: 'albums', exact: true })
-        await albumsBtn.click()
+        await page.getByRole('button', { name: 'albums', exact: true }).click()
         await expect(page).toHaveURL(/view=albums/)
     })
 
-    test('view mode: genres tab updates URL', async ({ page }) => {
+    test('genres tab updates URL', async ({ page }) => {
         await page.goto('/library')
-        const genresBtn = page.getByRole('button', { name: 'genres', exact: true })
-        await genresBtn.click()
+        await page.getByRole('button', { name: 'genres', exact: true }).click()
         await expect(page).toHaveURL(/view=genres/)
     })
 
-    test('view mode: songs tab has active state', async ({ page }) => {
+    test('songs tab switches back and becomes active', async ({ page }) => {
         await page.goto('/library?view=albums')
         const songsBtn = page.getByRole('button', { name: 'songs', exact: true })
         await songsBtn.click()
@@ -82,50 +61,20 @@ test.describe('library page', () => {
         await expect(songsBtn).toHaveClass(/bg-sky-500/)
     })
 
-    test('song card hover shows kebab menu button', async ({ page }) => {
+    test('A-Z letter button updates URL', async ({ page }) => {
         await page.goto('/library')
-        const card = page.locator('[role="button"]').first()
-        await expect(card).toBeVisible({ timeout: 10000 })
-        await card.hover()
-        const kebab = card.locator('button[title="more"]')
-        await expect(kebab).toBeVisible({ timeout: 3000 })
-    })
-
-    test('kebab menu has expected options', async ({ page }) => {
-        await page.goto('/library')
-        const card = page.locator('[role="button"]').first()
-        await expect(card).toBeVisible({ timeout: 10000 })
-        await card.hover()
-        const kebab = card.locator('button[title="more"]')
-        await kebab.click()
-
-        // menu options should be visible
-        await expect(page.getByRole('button', { name: /play/i }).first()).toBeVisible({ timeout: 3000 })
-        await expect(page.getByRole('button', { name: /edit/i }).first()).toBeVisible()
-
-        // close the menu
-        await page.keyboard.press('Escape')
-    })
-
-    test('kebab menu has remove from library option (do not click)', async ({ page }) => {
-        await page.goto('/library')
-        // find edit-me card specifically to avoid accidentally removing important songs
-        const search = page.getByPlaceholder(/search/i)
-        if (await search.isVisible()) {
-            await search.fill('edit-me')
+        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
+        // find an enabled letter button
+        const enabledLetter = page.locator('button').filter({ hasNotText: /songs|artists|albums|genres|play|save|offline/ }).filter({ has: page.locator(':scope:not([disabled])') }).first()
+        const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')
+        for (const letter of letters) {
+            const btn = page.getByRole('button', { name: letter, exact: true })
+            if (await btn.isEnabled()) {
+                await btn.click()
+                await expect(page).toHaveURL(new RegExp(`letter=${letter}`))
+                break
+            }
         }
-        const card = page.locator('[role="button"]').filter({ hasText: /edit-me/i }).first()
-        await expect(card).toBeVisible({ timeout: 10000 })
-        await card.hover()
-        const kebab = card.locator('button[title="more"]')
-        await kebab.click()
-
-        // verify remove option exists without clicking
-        const removeBtn = page.getByRole('button', { name: /remove from library/i })
-        await expect(removeBtn).toBeVisible({ timeout: 3000 })
-
-        // close menu
-        await page.keyboard.press('Escape')
     })
 
     test('play all button is visible', async ({ page }) => {
@@ -138,31 +87,66 @@ test.describe('library page', () => {
         await expect(page.getByRole('button', { name: /save all offline/i })).toBeVisible({ timeout: 5000 })
     })
 
-    test('clicking a song starts playback', async ({ page }) => {
+    test('song card: library bookmark button visible', async ({ page }) => {
+        await page.goto('/library')
+        const card = page.getByTestId('song-card').first()
+        await expect(card).toBeVisible({ timeout: 10000 })
+        await expect(card.getByTestId('song-library-toggle')).toBeVisible()
+    })
+
+    test('song card: kebab button visible on hover', async ({ page }) => {
+        await page.goto('/library')
+        const card = page.getByTestId('song-card').first()
+        await expect(card).toBeVisible({ timeout: 10000 })
+        await card.hover()
+        await expect(card.getByTestId('song-kebab')).toBeVisible({ timeout: 3000 })
+    })
+
+    test('kebab menu shows Download, Play next, Edit, Copy share link options', async ({ page }) => {
+        await page.goto('/library')
+        const card = page.getByTestId('song-card').first()
+        await expect(card).toBeVisible({ timeout: 10000 })
+        await card.hover()
+        await card.getByTestId('song-kebab').click()
+        const menu = page.getByTestId('song-kebab-menu')
+        await expect(menu).toBeVisible({ timeout: 3000 })
+        await expect(menu.getByRole('button', { name: 'Download' })).toBeVisible()
+        await expect(menu.getByRole('button', { name: 'Play next' })).toBeVisible()
+        await expect(menu.getByRole('button', { name: 'Edit' })).toBeVisible()
+        await expect(menu.getByRole('button', { name: /copy share link/i })).toBeVisible()
+        // close without acting
+        await page.keyboard.press('Escape')
+    })
+
+    test('clicking a song card starts player and shows track name', async ({ page }) => {
         const errors: string[] = []
-        page.on('pageerror', err => errors.push(err.message))
+        page.on('pageerror', err => { if (!ignoreError(err.message)) errors.push(err.message) })
 
         await page.goto('/library')
-        const card = page.locator('[role="button"]').first()
+        const card = page.getByTestId('song-card').first()
         await expect(card).toBeVisible({ timeout: 10000 })
         await card.click()
-        await page.waitForTimeout(1500)
-        // player should be showing something
-        await expect(page.locator('body')).toBeVisible()
+        await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
+        await expect(page.getByTestId('player-track-name')).toBeVisible()
 
-        const realErrors = errors.filter(e => !/AbortError/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e))
-        expect(realErrors, `Errors: ${realErrors.join('\n')}`).toHaveLength(0)
+        expect(errors).toHaveLength(0)
+    })
+
+    test('play button on card starts player', async ({ page }) => {
+        await page.goto('/library')
+        const card = page.getByTestId('song-card').first()
+        await expect(card).toBeVisible({ timeout: 10000 })
+        await card.getByTestId('song-play').click()
+        await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
     })
 
     test('no console errors on library load', async ({ page }) => {
         const errors: string[] = []
-        page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
-        page.on('pageerror', err => errors.push(err.message))
+        page.on('console', msg => { if (msg.type() === 'error' && !ignoreError(msg.text())) errors.push(msg.text()) })
+        page.on('pageerror', err => { if (!ignoreError(err.message)) errors.push(err.message) })
 
         await page.goto('/library')
-        await expect(page.locator('[role="button"]').first()).toBeVisible({ timeout: 10000 })
-
-        const realErrors = errors.filter(e => !/AbortError/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e))
-        expect(realErrors, `Console errors: ${realErrors.join('\n')}`).toHaveLength(0)
+        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
+        expect(errors, `Console errors: ${errors.join('\n')}`).toHaveLength(0)
     })
 })

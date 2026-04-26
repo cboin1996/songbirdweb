@@ -467,9 +467,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             <audio ref={audioRef} />
             {children}
             {current && p && (
-                <div className="fixed bottom-0 left-0 right-0 z-50 bg-white/90 dark:bg-gray-950/90 backdrop-blur-md border-t border-gray-100 dark:border-gray-800">
+                <div data-testid="player-bar" className="fixed bottom-0 left-0 right-0 z-50 bg-white/90 dark:bg-gray-950/90 backdrop-blur-md border-t border-gray-100 dark:border-gray-800">
                     {showQueue && queue.length > 0 && (
-                        <div className="border-b border-gray-100 dark:border-gray-800 max-h-56 overflow-y-auto">
+                        <div data-testid="player-queue-panel" className="border-b border-gray-100 dark:border-gray-800 max-h-56 overflow-y-auto">
                             {playContext && (
                                 <div className="px-4 py-1.5 border-b border-gray-100 dark:border-gray-800">
                                     <Link href={playContext.href} className="text-xs text-gray-400 hover:text-sky-500 transition-colors">
@@ -511,41 +511,41 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                             )}
                             {playContext ? (
                                 <Link href={playContext.href} className="flex flex-col min-w-0 flex-1 group">
-                                    <span className="text-xs font-medium truncate group-hover:text-sky-500 transition-colors">{p.trackName}</span>
+                                    <span data-testid="player-track-name" className="text-xs font-medium truncate group-hover:text-sky-500 transition-colors">{p.trackName}</span>
                                     <span className="text-xs text-sky-500 truncate">{p.artistName}</span>
                                     <span className="text-xs text-gray-400 truncate">from {playContext.label}</span>
                                 </Link>
                             ) : (
                                 <div className="flex flex-col min-w-0 flex-1">
-                                    <span className="text-xs font-medium truncate">{p.trackName}</span>
+                                    <span data-testid="player-track-name" className="text-xs font-medium truncate">{p.trackName}</span>
                                     <span className="text-xs text-sky-500 truncate">{p.artistName}</span>
                                 </div>
                             )}
                             <div className="flex items-center gap-3 shrink-0">
-                                <button onClick={toggleShuffle} className={`shrink-0 ${shuffle ? activeClass : idleClass}`}>
+                                <button data-testid="player-shuffle" onClick={toggleShuffle} className={`shrink-0 ${shuffle ? activeClass : idleClass}`}>
                                     <FaRandom size={12} />
                                 </button>
-                                <button onClick={skipPrev} disabled={!hasQueue} className={`shrink-0 disabled:opacity-30 ${idleClass}`}>
+                                <button data-testid="player-prev" onClick={skipPrev} disabled={!hasQueue} className={`shrink-0 disabled:opacity-30 ${idleClass}`}>
                                     <FaStepBackward size={12} />
                                 </button>
-                                <button onClick={isPlaying ? pause : resume} className={`shrink-0 ${idleClass}`}>
+                                <button data-testid="player-play-pause" onClick={isPlaying ? pause : resume} className={`shrink-0 ${idleClass}`}>
                                     {isPlaying ? <FaPause size={14} /> : <FaPlay size={14} />}
                                 </button>
-                                <button onClick={skipNext} disabled={!hasQueue} className={`shrink-0 disabled:opacity-30 ${idleClass}`}>
+                                <button data-testid="player-next" onClick={skipNext} disabled={!hasQueue} className={`shrink-0 disabled:opacity-30 ${idleClass}`}>
                                     <FaStepForward size={12} />
                                 </button>
-                                <button onClick={toggleRepeat} className={`shrink-0 relative ${repeat !== 'off' ? activeClass : idleClass}`}>
+                                <button data-testid="player-repeat" onClick={toggleRepeat} className={`shrink-0 relative ${repeat !== 'off' ? activeClass : idleClass}`}>
                                     <FaRedo size={12} />
                                     {repeat === 'one' && (
                                         <span className="absolute -top-1.5 -right-1.5 text-[8px] font-bold leading-none">1</span>
                                     )}
                                 </button>
-                                <button onClick={() => setShowQueue(v => !v)} className={`shrink-0 ${showQueue ? activeClass : idleClass}`}>
+                                <button data-testid="player-queue-toggle" onClick={() => setShowQueue(v => !v)} className={`shrink-0 ${showQueue ? activeClass : idleClass}`}>
                                     <FaList size={12} />
                                 </button>
                             </div>
                         </div>
-                        <div className="flex px-4 pb-3">
+                        <div data-testid="player-progress" className="flex px-4 pb-3">
                             <ProgressBar current={currentTime} duration={duration} onSeek={handleSeek} />
                         </div>
                     </div>
