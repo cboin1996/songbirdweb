@@ -1,5 +1,6 @@
 'use client'
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { addToLibrary, removeFromLibrary, downloadSongToFile, createShareToken, DownloadedSong, songArtworkUrl } from "../lib/data";
 import { cacheSong, uncacheSong } from "../lib/offline";
 import { FaBookmark, FaRegBookmark, FaPlay, FaPause, FaEllipsisV } from "react-icons/fa";
@@ -30,6 +31,8 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
     const [offlineProgress, setOfflineProgress] = useState(0)
     const [editorOpen, setEditorOpen] = useState(false)
     const [kebabOpen, setKebabOpen] = useState(false)
+    const [kebabPos, setKebabPos] = useState({ top: 0, right: 0 })
+    const kebabRef = useRef<HTMLButtonElement>(null)
     const { play, pause, resume, current, isPlaying, insertNext } = usePlayer()
     const isCurrentSong = current?.uuid === song.songId
 
@@ -103,56 +106,56 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
         if (!ok) setDownloadError(true)
     }
 
-    const kebabMenu = song.songId ? (
-        <div className="relative" onClick={e => e.stopPropagation()}>
-            <button
-                onClick={() => setKebabOpen(o => !o)}
-                title="more"
-                className="cursor-pointer text-gray-400 hover:text-sky-500 p-0.5"
+    function openKebab(e: React.MouseEvent) {
+        e.stopPropagation()
+        const rect = kebabRef.current?.getBoundingClientRect()
+        if (rect) setKebabPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right })
+        setKebabOpen(o => !o)
+    }
+
+    const kebabDropdown = kebabOpen && typeof document !== 'undefined' ? createPortal(
+        <>
+            <div className="fixed inset-0 z-40" onClick={() => setKebabOpen(false)} />
+            <div
+                className="fixed z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl py-1 min-w-[155px]"
+                style={{ top: kebabPos.top, right: kebabPos.right }}
+                onClick={e => e.stopPropagation()}
             >
+                <button onClick={() => { setKebabOpen(false); handleDownload() }}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700">
+                    Download
+                </button>
+                <button onClick={() => { setKebabOpen(false); insertNext({ uuid: song.songId!, properties: song.properties }) }}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700">
+                    Play next
+                </button>
+                <button onClick={() => { setKebabOpen(false); handleShare() }}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700">
+                    {copied ? 'Link copied!' : 'Copy share link'}
+                </button>
+                <button onClick={() => { setKebabOpen(false); handleOfflineToggle() }}
+                    disabled={offlinePending}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40">
+                    {offlinePending
+                        ? `Saving… ${offlineProgress > 0 ? Math.round(offlineProgress * 100) + '%' : ''}`
+                        : offlineCached ? 'Remove offline copy' : 'Save offline'}
+                </button>
+                <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
+                <button onClick={() => { setKebabOpen(false); setEditorOpen(true) }}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700">
+                    Edit
+                </button>
+            </div>
+        </>,
+        document.body
+    ) : null
+
+    const kebabMenu = song.songId ? (
+        <div onClick={e => e.stopPropagation()}>
+            <button ref={kebabRef} onClick={openKebab} title="more" className="cursor-pointer text-gray-400 hover:text-sky-500 p-0.5">
                 <FaEllipsisV size={12} />
             </button>
-            {kebabOpen && (
-                <>
-                    <div className="fixed inset-0 z-10" onClick={() => setKebabOpen(false)} />
-                    <div className="absolute right-0 top-6 z-20 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl py-1 min-w-[150px]">
-                        <button
-                            onClick={() => { setKebabOpen(false); handleDownload() }}
-                            className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700"
-                        >
-                            Download
-                        </button>
-                        <button
-                            onClick={() => { setKebabOpen(false); insertNext({ uuid: song.songId!, properties: song.properties }) }}
-                            className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700"
-                        >
-                            Play next
-                        </button>
-                        <button
-                            onClick={() => { setKebabOpen(false); handleShare() }}
-                            className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700"
-                        >
-                            {copied ? 'Link copied!' : 'Copy share link'}
-                        </button>
-                        <button
-                            onClick={() => { setKebabOpen(false); handleOfflineToggle() }}
-                            disabled={offlinePending}
-                            className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40"
-                        >
-                            {offlinePending
-                                ? `Saving… ${offlineProgress > 0 ? Math.round(offlineProgress * 100) + '%' : ''}`
-                                : offlineCached ? 'Remove offline copy' : 'Save offline'}
-                        </button>
-                        <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
-                        <button
-                            onClick={() => { setKebabOpen(false); setEditorOpen(true) }}
-                            className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700"
-                        >
-                            Edit
-                        </button>
-                    </div>
-                </>
-            )}
+            {kebabDropdown}
         </div>
     ) : null
 
