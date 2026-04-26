@@ -192,6 +192,10 @@ export interface DownloadedSong {
   properties: Properties;
 }
 
+export function artworkUrl(url: string, size: number): string {
+  return url.replace(/\d+x\d+bb/, `${size}x${size}bb`)
+}
+
 export interface Properties {
   trackName: string;
   artistName: string;
@@ -357,6 +361,32 @@ export async function updatePosition(songId: string, position: number): Promise<
 
 export async function registerUser(username: string, email: string, password: string): Promise<UserInfo | undefined> {
   return fetchData<UserInfo>({ url: `${BASE_URL}/auth/register`, method: 'POST', body: { username, email, password } })
+}
+
+export interface ShareToken {
+  token: string
+  expires_at: string
+}
+
+export interface ShareInfo {
+  token: string
+  expires_at: string
+  song_id: string
+  properties: Properties | null
+}
+
+export async function createShareToken(songId: string): Promise<ShareToken | undefined> {
+  return fetchData<ShareToken>({ url: `${BASE_URL}/share/songs/${songId}`, method: 'POST' })
+}
+
+export async function fetchShareInfo(token: string): Promise<ShareInfo | undefined> {
+  try {
+    const res = await fetch(`${BASE_URL}/share/${token}/info`)
+    if (!res.ok) return undefined
+    return res.json()
+  } catch {
+    return undefined
+  }
 }
 
 export async function changePassword(currentPassword: string, newPassword: string): Promise<boolean> {

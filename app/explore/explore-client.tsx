@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { ExploreData, ExploreWindow, SongWithCount, RecentlyPlayedSong, RecentlySavedSong, fetchLibrary } from "../lib/data"
 import { routes } from "../lib/routes"
 import { usePlayer } from "../components/player"
@@ -51,7 +51,9 @@ function SongGrid({ songs, libraryIds }: {
 
 export default function ExploreClient({ data, window }: { data: ExploreData | undefined; window: ExploreWindow }) {
     const router = useRouter()
-    const [sortBy, setSortBy] = useState<SortBy>('plays')
+    const searchParams = useSearchParams()
+    const initialSort = (searchParams.get('sort') as SortBy | null) ?? 'plays'
+    const [sortBy, setSortBy] = useState<SortBy>(initialSort)
     const [libraryIds, setLibraryIds] = useState<Set<string>>(new Set())
 
     useEffect(() => {
@@ -59,7 +61,14 @@ export default function ExploreClient({ data, window }: { data: ExploreData | un
     }, [])
 
     function setWindow(w: ExploreWindow) {
-        router.push(`/explore?window=${w}`)
+        router.push(`/explore?window=${w}&sort=${sortBy}`)
+    }
+
+    function changeSortBy(s: SortBy) {
+        setSortBy(s)
+        const params = new URLSearchParams(searchParams.toString())
+        params.set('sort', s)
+        router.replace(`/explore?${params.toString()}`)
     }
 
     const recentSelected = sortBy === 'recent' || sortBy === 'recently_played'
@@ -98,7 +107,7 @@ export default function ExploreClient({ data, window }: { data: ExploreData | un
                     {SORTS.map(s => (
                         <button
                             key={s.value}
-                            onClick={() => setSortBy(s.value)}
+                            onClick={() => changeSortBy(s.value)}
                             className={`px-3 py-1 rounded-full text-sm transition-colors ${
                                 sortBy === s.value ? 'bg-sky-500 text-white' : 'text-gray-400 hover:text-sky-500'
                             }`}

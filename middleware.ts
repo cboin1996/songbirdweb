@@ -32,12 +32,13 @@ export async function middleware(request: NextRequest) {
   const accessToken = request.cookies.get('access_token')
   const refreshToken = request.cookies.get('refresh_token')
   const isLoginPage = request.nextUrl.pathname === routes.home
+  const isSharePage = request.nextUrl.pathname.startsWith('/share/')
 
   const validToken = accessToken && !isExpired(accessToken.value)
 
   if (validToken && isLoginPage) return NextResponse.redirect(new URL(routes.download, request.url))
   if (validToken) return NextResponse.next()
-  if (isLoginPage) return NextResponse.next()
+  if (isLoginPage || isSharePage) return NextResponse.next()
 
   if (refreshToken) {
     const newToken = await refreshAccessToken(refreshToken.value)

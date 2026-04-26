@@ -1,7 +1,7 @@
 'use client'
 import { useState } from "react";
-import { addToLibrary, removeFromLibrary, downloadSongToFile, DownloadedSong } from "../lib/data";
-import { FaDownload, FaBookmark, FaRegBookmark, FaPlay, FaPause, FaPlus } from "react-icons/fa";
+import { addToLibrary, removeFromLibrary, downloadSongToFile, createShareToken, DownloadedSong, artworkUrl } from "../lib/data";
+import { FaDownload, FaBookmark, FaRegBookmark, FaPlay, FaPause, FaPlus, FaLink } from "react-icons/fa";
 import Image from "next/image";
 import { usePlayer } from "./player";
 
@@ -18,6 +18,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
     const [libraryPending, setLibraryPending] = useState(false)
     const [libraryError, setLibraryError] = useState(false)
     const [downloadError, setDownloadError] = useState(false)
+    const [copied, setCopied] = useState(false)
     const { play, pause, resume, current, isPlaying, insertNext } = usePlayer()
     const isCurrentSong = current?.uuid === song.songId
 
@@ -53,6 +54,16 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
         if (isCurrentSong && isPlaying) pause()
         else if (isCurrentSong) resume()
         else onClick()
+    }
+
+    async function handleShare(e: React.MouseEvent) {
+        e.stopPropagation()
+        if (!song.songId) return
+        const result = await createShareToken(song.songId)
+        if (!result) return
+        await navigator.clipboard.writeText(`${window.location.origin}/share/${result.token}`)
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
     }
 
     async function handleDownload(e: React.MouseEvent) {
@@ -91,6 +102,13 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                     >
                         <FaPlus size={11} />
                     </div>
+                    <div
+                        onClick={handleShare}
+                        title="copy download link"
+                        className={`cursor-pointer transition-colors ${copied ? 'text-green-500' : 'text-gray-400 hover:text-sky-500'}`}
+                    >
+                        <FaLink size={11} />
+                    </div>
                 </>
             )}
         </>
@@ -106,7 +124,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                     <span className="text-gray-400 tabular-nums w-5 text-right shrink-0 text-sm">{rank}</span>
                 )}
                 {song.properties.artworkUrl100 && (
-                    <Image src={song.properties.artworkUrl100} alt="" width={36} height={36} className="rounded shrink-0" />
+                    <Image src={artworkUrl(song.properties.artworkUrl100, 200)} alt="" width={36} height={36} className="rounded shrink-0" />
                 )}
                 <div className="flex flex-col min-w-0 flex-1">
                     <span className={`text-sm font-medium truncate ${isCurrentSong ? 'text-sky-500' : ''}`}>
@@ -126,7 +144,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
             <div className="flex flex-row justify-between">
                 <div className="flew-row flex rounded-lg">
                     <div>
-                        <Image className="rounded-md object-contain w-16 h-16 md:w-24 md:h-24" alt="" src={song.properties.artworkUrl100} width={96} height={96} />
+                        <Image className="rounded-md object-contain w-16 h-16 md:w-24 md:h-24" alt="" src={artworkUrl(song.properties.artworkUrl100, 400)} width={96} height={96} />
                     </div>
                     <div className="flex flex-col px-3">
                         <span className="text-lg md:text-2xl font-medium text-left">{song.properties.trackName}</span>

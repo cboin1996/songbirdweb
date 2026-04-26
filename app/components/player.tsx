@@ -3,7 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import Image from "next/image"
 import Link from "next/link"
 import { FaPause, FaPlay, FaStepBackward, FaStepForward, FaRandom, FaRedo, FaList, FaTimes } from "react-icons/fa"
-import { BASE_URL, PlayableSong, fetchLibrarySongs, fetchPlayerState, recordPlay, savePlayerState, updatePosition } from "../lib/data"
+import { BASE_URL, PlayableSong, artworkUrl, fetchLibrarySongs, fetchPlayerState, recordPlay, savePlayerState, updatePosition } from "../lib/data"
 
 export type RepeatMode = 'off' | 'one' | 'all'
 export type PlayContext = { label: string; href: string }
@@ -343,7 +343,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             title: p.trackName,
             artist: p.artistName,
             album: p.collectionName,
-            artwork: p.artworkUrl100 ? [{ src: p.artworkUrl100, sizes: '100x100', type: 'image/jpeg' }] : [],
+            artwork: p.artworkUrl100 ? [{ src: artworkUrl(p.artworkUrl100, 600), sizes: '600x600', type: 'image/jpeg' }] : [],
         })
         navigator.mediaSession.setActionHandler('play', () => {
             audioRef.current?.play().catch(() => {})
@@ -405,6 +405,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 queueIndexRef.current = safeIndex
                 setQueue(restoredQueue)
                 setCurrent(restoredQueue[safeIndex])
+                const audio = audioRef.current
+                if (audio) {
+                    pendingPosition.current = restoredQueue[safeIndex].last_position ?? 0
+                    audio.src = `${BASE_URL}/download/${restoredQueue[safeIndex].uuid}`
+                }
             } else {
                 // fallback: restore last played song
                 const last = libSongs
@@ -416,6 +421,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                     queueRef.current = [song]
                     queueIndexRef.current = 0
                     setQueue([song])
+                    const audio = audioRef.current
+                    if (audio) {
+                        pendingPosition.current = last.last_position ?? 0
+                        audio.src = `${BASE_URL}/download/${last.uuid}`
+                    }
                 }
             }
         })
@@ -451,7 +461,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                     >
                                         <button onClick={() => playAt(i)} className="flex items-center gap-3 flex-1 text-left min-w-0">
                                             {sp?.artworkUrl100 && (
-                                                <Image src={sp.artworkUrl100} alt="" width={28} height={28} className="rounded shrink-0" />
+                                                <Image src={artworkUrl(sp.artworkUrl100, 200)} alt="" width={28} height={28} className="rounded shrink-0" />
                                             )}
                                             <div className="flex flex-col min-w-0 flex-1">
                                                 <span className={`text-xs font-medium truncate ${isActive ? 'text-sky-500' : ''}`}>{sp?.trackName}</span>
@@ -471,7 +481,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                     <div className="flex flex-col">
                         <div className="flex items-center gap-3 px-4 pt-3 pb-1.5">
                             {p.artworkUrl100 && (
-                                <Image src={p.artworkUrl100} alt="" width={36} height={36} className="rounded shrink-0" />
+                                <Image src={artworkUrl(p.artworkUrl100, 200)} alt="" width={36} height={36} className="rounded shrink-0" />
                             )}
                             {playContext ? (
                                 <Link href={playContext.href} className="flex flex-col min-w-0 flex-1 group">
