@@ -111,6 +111,7 @@ export default function EditorModal({
     ws.on('play', () => setWfPlaying(true))
     ws.on('pause', () => setWfPlaying(false))
     ws.on('finish', () => setWfPlaying(false))
+    ws.on('error', (err: Error) => { if (err?.name !== 'AbortError') console.error('WaveSurfer:', err) })
     regions.on('region-updated', r => {
       if (r.id !== 'trim') return
       setParams(prev => {
