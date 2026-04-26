@@ -514,19 +514,29 @@ export async function fetchShareInfo(token: string): Promise<ShareInfo | undefin
   }
 }
 
-export interface ImportResult {
-  song_id: string
-  properties: Properties | null
+export interface ImportJobResult {
+  job_id: string
+  status: string
+  song_id?: string
+  track_name?: string
+  error?: string
 }
 
-export async function importSong(file: File): Promise<ImportResult | undefined> {
+export async function startImport(file: File): Promise<ImportJobResult | undefined> {
   try {
     const formData = new FormData()
     formData.append('file', file)
-    const isServer = typeof window === 'undefined'
-    const options: RequestInit = { method: 'POST', body: formData }
-    if (!isServer) options.credentials = 'include'
-    const response = await fetch(`${API_V1}/import`, options)
+    const response = await fetch(`${API_V1}/import`, { method: 'POST', body: formData, credentials: 'include' })
+    if (!response.ok) return undefined
+    return response.json()
+  } catch {
+    return undefined
+  }
+}
+
+export async function pollImportJob(jobId: string): Promise<ImportJobResult | undefined> {
+  try {
+    const response = await fetch(`${API_V1}/import/${jobId}`, { credentials: 'include' })
     if (!response.ok) return undefined
     return response.json()
   } catch {

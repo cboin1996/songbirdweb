@@ -1,9 +1,9 @@
 'use client'
 import { useCallback, useRef, useState } from 'react'
-import { importSong } from '../lib/data'
+import { startImport, pollImportJob } from '../lib/data'
 import { FaCheckCircle, FaTimesCircle, FaUpload } from 'react-icons/fa'
 
-type FileStatus = 'pending' | 'uploading' | 'done' | 'error'
+type FileStatus = 'pending' | 'uploading' | 'processing' | 'done' | 'error'
 
 interface FileEntry {
   id: string
@@ -12,6 +12,9 @@ interface FileEntry {
   trackName?: string
   errorMsg?: string
 }
+
+const POLL_INTERVAL_MS = 1500
+const MAX_POLLS = 60
 
 export default function ImportPage() {
   const [entries, setEntries] = useState<FileEntry[]>([])
@@ -32,16 +35,34 @@ export default function ImportPage() {
 
   const uploadEntry = useCallback(async (entry: FileEntry) => {
     setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: 'uploading' } : e))
-    const result = await importSong(entry.file)
-    if (!result) {
+    const job = await startImport(entry.file)
+    if (!job) {
       setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: 'error', errorMsg: 'upload failed' } : e))
       return
     }
-    setEntries(prev => prev.map(e => e.id === entry.id ? {
-      ...e,
-      status: 'done',
-      trackName: result.properties?.trackName ?? entry.file.name,
-    } : e))
+    setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: 'processing' } : e))
+    let polls = 0
+    const interval = setInterval(async () => {
+      polls++
+      const result = await pollImportJob(job.job_id)
+      if (!result || polls > MAX_POLLS) {
+        clearInterval(interval)
+        setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: 'error', errorMsg: 'timed out' } : e))
+        return
+      }
+      if (result.status === 'done') {
+        clearInterval(interval)
+        setEntries(prev => prev.map(e => e.id === entry.id ? {
+          ...e, status: 'done', trackName: result.track_name ?? entry.file.name,
+        } : e))
+      }
+      if (result.status === 'failed') {
+        clearInterval(interval)
+        setEntries(prev => prev.map(e => e.id === entry.id ? {
+          ...e, status: 'error', errorMsg: result.error ?? 'processing failed',
+        } : e))
+      }
+    }, POLL_INTERVAL_MS)
   }, [])
 
   function onDrop(e: React.DragEvent) {
@@ -61,7 +82,7 @@ export default function ImportPage() {
 
   const doneCount = entries.filter(e => e.status === 'done').length
   const errorCount = entries.filter(e => e.status === 'error').length
-  const activeCount = entries.filter(e => e.status === 'uploading' || e.status === 'pending').length
+  const activeCount = entries.filter(e => e.status === 'uploading' || e.status === 'processing' || e.status === 'pending').length
 
   return (
     <main className="flex flex-col items-center gap-6 p-6 max-w-2xl mx-auto">
@@ -95,7 +116,7 @@ export default function ImportPage() {
         <div className="w-full flex flex-col gap-2">
           <div className="flex items-center justify-between text-sm text-gray-400">
             <span>
-              {activeCount > 0 && <span className="text-sky-500">{activeCount} uploading</span>}
+              {activeCount > 0 && <span className="text-sky-500">{activeCount} in progress</span>}
               {activeCount > 0 && (doneCount > 0 || errorCount > 0) && <span className="mx-1">·</span>}
               {doneCount > 0 && <span className="text-emerald-500">{doneCount} done</span>}
               {doneCount > 0 && errorCount > 0 && <span className="mx-1">·</span>}
@@ -117,14 +138,15 @@ export default function ImportPage() {
               <div className="shrink-0">
                 {entry.status === 'done' && <FaCheckCircle className="text-emerald-500" size={14} />}
                 {entry.status === 'error' && <FaTimesCircle className="text-red-500" size={14} />}
-                {(entry.status === 'uploading' || entry.status === 'pending') && (
+                {(entry.status === 'uploading' || entry.status === 'processing' || entry.status === 'pending') && (
                   <div className="w-3.5 h-3.5 rounded-full border-2 border-gray-200 dark:border-gray-700 border-t-sky-500 animate-spin" />
                 )}
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm truncate">{entry.trackName ?? entry.file.name}</p>
                 {entry.status === 'uploading' && <p className="text-xs text-sky-500">uploading…</p>}
-                {entry.status === 'pending' && <p className="text-xs text-gray-400">pending…</p>}
+                {entry.status === 'processing' && <p className="text-xs text-sky-400">processing…</p>}
+                {entry.status === 'pending' && <p className="text-xs text-gray-400">queued…</p>}
                 {entry.status === 'done' && <p className="text-xs text-emerald-500">added to library</p>}
                 {entry.status === 'error' && <p className="text-xs text-red-500">{entry.errorMsg}</p>}
               </div>
