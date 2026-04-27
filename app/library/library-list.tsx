@@ -247,6 +247,21 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
+    // scroll to and highlight a specific song on mount (?song=<uuid>)
+    useEffect(() => {
+        const songId = searchParams.get('song')
+        if (!songId) return
+        const id = setTimeout(() => {
+            const el = document.querySelector<HTMLElement>(`[data-song-id="${songId}"]`)
+            if (!el) return
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+            el.style.animation = 'song-highlight 1.5s ease-out forwards'
+            el.addEventListener('animationend', () => { el.style.animation = '' }, { once: true })
+        }, 300)
+        return () => clearTimeout(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
+
     // update URL letter as user scrolls through sections
     useEffect(() => {
         if (viewMode === 'playlists') return
@@ -383,8 +398,8 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                             : "flex flex-col mb-6"
                         }>
                             {group.map(song => song.properties && (
+                                <div key={song.uuid} data-song-id={song.uuid}>
                                 <Song
-                                    key={song.uuid}
                                     song={{ songId: song.uuid, properties: song.properties, artworkCached: song.artwork_cached, parentSongId: song.parent_song_id, rootSongId: song.root_song_id }}
                                     selected={current?.uuid === song.uuid}
                                     onClick={() => {
@@ -413,6 +428,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                     playlists={playlistStubs}
                                     onPlaylistAdd={refreshPlaylists}
                                 />
+                                </div>
                             ))}
                         </div>
                     </div>
@@ -427,8 +443,8 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                             : "flex flex-col mb-4"
                         }>
                             {group.map(song => song.properties && (
+                                <div key={song.uuid} data-song-id={song.uuid}>
                                 <Song
-                                    key={song.uuid}
                                     song={{ songId: song.uuid, properties: song.properties, artworkCached: song.artwork_cached, parentSongId: song.parent_song_id, rootSongId: song.root_song_id }}
                                     selected={current?.uuid === song.uuid}
                                     onClick={() => {
@@ -457,6 +473,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                     playlists={playlistStubs}
                                     onPlaylistAdd={refreshPlaylists}
                                 />
+                                </div>
                             ))}
                         </div>
                     </div>

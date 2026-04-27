@@ -24,14 +24,10 @@ export default function SystemStats({ stats }: { stats: AdminStats | undefined }
     const [errorPage, setErrorPage] = useState(0)
     const [errorTotal, setErrorTotal] = useState(0)
     const [errors, setErrors] = useState<ErrorLogEntry[]>([])
-    const [errorDateFrom, setErrorDateFrom] = useState('')
-    const [errorDateTo, setErrorDateTo] = useState('')
     const [jobFilter, setJobFilter] = useState('')
     const [jobPage, setJobPage] = useState(0)
     const [jobTotal, setJobTotal] = useState(0)
     const [editJobs, setEditJobs] = useState<EditJobSummary[]>([])
-    const [jobDateFrom, setJobDateFrom] = useState('')
-    const [jobDateTo, setJobDateTo] = useState('')
     const [topSongsFilter, setTopSongsFilter] = useState('')
     const [topSongsPage, setTopSongsPage] = useState(0)
 
@@ -49,10 +45,9 @@ export default function SystemStats({ stats }: { stats: AdminStats | undefined }
 
     const filteredJobs = editJobs.filter(j => {
         const q = jobFilter.toLowerCase()
-        if (q && !j.status.includes(q) && !j.job_id.includes(q) && !j.user_id.includes(q) && !(j.error ?? '').toLowerCase().includes(q)) return false
-        if (jobDateFrom && j.created_at < jobDateFrom) return false
-        if (jobDateTo && j.created_at > jobDateTo + 'T23:59:59') return false
-        return true
+        if (!q) return true
+        return j.status.includes(q) || j.job_id.includes(q) || j.user_id.includes(q) ||
+            (j.error ?? '').toLowerCase().includes(q) || fmt(j.created_at).includes(q)
     })
     const jobTotalPages = Math.max(1, Math.ceil(jobTotal / JOB_PAGE_SIZE))
 
@@ -62,16 +57,14 @@ export default function SystemStats({ stats }: { stats: AdminStats | undefined }
         setJobTotal(data.total)
         setJobPage(p)
     }
-    function handleJobFilterChange(v: string) { setJobFilter(v) }
-    function handleJobDateFromChange(v: string) { setJobDateFrom(v) }
-    function handleJobDateToChange(v: string) { setJobDateTo(v) }
 
     const filteredErrors = errors.filter(e => {
         const q = errorFilter.toLowerCase()
-        if (q && !e.message.toLowerCase().includes(q) && !(e.path ?? '').toLowerCase().includes(q) && !(e.method ?? '').toLowerCase().includes(q) && !(e.level ?? '').toLowerCase().includes(q) && !String(e.status_code ?? '').includes(q) && !(e.user_id ?? '').toLowerCase().includes(q)) return false
-        if (errorDateFrom && e.timestamp < errorDateFrom) return false
-        if (errorDateTo && e.timestamp > errorDateTo + 'T23:59:59') return false
-        return true
+        if (!q) return true
+        return e.message.toLowerCase().includes(q) || (e.path ?? '').toLowerCase().includes(q) ||
+            (e.method ?? '').toLowerCase().includes(q) || (e.level ?? '').toLowerCase().includes(q) ||
+            String(e.status_code ?? '').includes(q) || (e.user_id ?? '').toLowerCase().includes(q) ||
+            fmt(e.timestamp).includes(q)
     })
     const totalPages = Math.max(1, Math.ceil(errorTotal / ERROR_PAGE_SIZE))
 
@@ -81,11 +74,6 @@ export default function SystemStats({ stats }: { stats: AdminStats | undefined }
         setErrorTotal(data.total)
         setErrorPage(p)
     }
-    function handleErrorFilterChange(v: string) {
-        setErrorFilter(v)
-    }
-    function handleErrorDateFromChange(v: string) { setErrorDateFrom(v) }
-    function handleErrorDateToChange(v: string) { setErrorDateTo(v) }
 
     const filteredTopSongs = (stats.top_songs ?? []).filter(s => {
         const q = topSongsFilter.toLowerCase()
@@ -93,8 +81,6 @@ export default function SystemStats({ stats }: { stats: AdminStats | undefined }
     })
     const topSongsTotalPages = Math.ceil(filteredTopSongs.length / TOP_SONGS_PAGE_SIZE)
     const pagedTopSongs = filteredTopSongs.slice(topSongsPage * TOP_SONGS_PAGE_SIZE, (topSongsPage + 1) * TOP_SONGS_PAGE_SIZE)
-
-    function handleTopSongsFilterChange(v: string) { setTopSongsFilter(v); setTopSongsPage(0) }
 
     return (
         <div className="flex flex-col gap-10">
@@ -182,7 +168,7 @@ export default function SystemStats({ stats }: { stats: AdminStats | undefined }
                         type="text"
                         placeholder="filter by title, artist…"
                         value={topSongsFilter}
-                        onChange={e => handleTopSongsFilterChange(e.target.value)}
+                        onChange={e => { setTopSongsFilter(e.target.value); setTopSongsPage(0) }}
                         className="w-full max-w-sm rounded-md border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:border-sky-500 focus:outline-none"
                     />
                     <div className="overflow-x-auto">
@@ -241,27 +227,13 @@ export default function SystemStats({ stats }: { stats: AdminStats | undefined }
 
                 {jobTotal > 0 && (
                     <div className="flex flex-col gap-2">
-                        <div className="flex flex-wrap gap-2">
-                            <input
-                                type="text"
-                                placeholder="filter by status, id, user, error…"
-                                value={jobFilter}
-                                onChange={e => handleJobFilterChange(e.target.value)}
-                                className="w-full max-w-sm rounded-md border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:border-sky-500 focus:outline-none"
-                            />
-                            <input
-                                type="date"
-                                value={jobDateFrom}
-                                onChange={e => handleJobDateFromChange(e.target.value)}
-                                className="rounded-md border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:border-sky-500 focus:outline-none [color-scheme:dark]"
-                            />
-                            <input
-                                type="date"
-                                value={jobDateTo}
-                                onChange={e => handleJobDateToChange(e.target.value)}
-                                className="rounded-md border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:border-sky-500 focus:outline-none [color-scheme:dark]"
-                            />
-                        </div>
+                        <input
+                            type="text"
+                            placeholder="filter by status, id, user, error, date…"
+                            value={jobFilter}
+                            onChange={e => setJobFilter(e.target.value)}
+                            className="w-full max-w-sm rounded-md border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:border-sky-500 focus:outline-none"
+                        />
                         <div className="overflow-x-auto">
                             <table className="text-sm w-full">
                                 <thead>
@@ -323,27 +295,13 @@ export default function SystemStats({ stats }: { stats: AdminStats | undefined }
             {errorTotal > 0 && (
                 <section className="flex flex-col gap-4">
                     <p className="text-gray-400 text-sm font-medium uppercase tracking-wide">errors</p>
-                    <div className="flex flex-wrap gap-2">
-                        <input
-                            type="text"
-                            placeholder="filter by message, path, method, status, user…"
-                            value={errorFilter}
-                            onChange={e => handleErrorFilterChange(e.target.value)}
-                            className="w-full max-w-sm rounded-md border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:border-sky-500 focus:outline-none"
-                        />
-                        <input
-                            type="date"
-                            value={errorDateFrom}
-                            onChange={e => handleErrorDateFromChange(e.target.value)}
-                            className="rounded-md border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:border-sky-500 focus:outline-none [color-scheme:dark]"
-                        />
-                        <input
-                            type="date"
-                            value={errorDateTo}
-                            onChange={e => handleErrorDateToChange(e.target.value)}
-                            className="rounded-md border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:border-sky-500 focus:outline-none [color-scheme:dark]"
-                        />
-                    </div>
+                    <input
+                        type="text"
+                        placeholder="filter by message, path, method, status, user, date…"
+                        value={errorFilter}
+                        onChange={e => setErrorFilter(e.target.value)}
+                        className="w-full max-w-sm rounded-md border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:border-sky-500 focus:outline-none"
+                    />
                     <div className="flex flex-col gap-1">
                         {filteredErrors.length === 0 ? (
                             <p className="text-gray-500 text-sm">no results</p>

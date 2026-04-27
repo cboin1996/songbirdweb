@@ -608,12 +608,18 @@ export interface Cut {
   fade_out: number
 }
 
+export interface FadeEdit {
+  id?: string  // client-side only
+  start: number
+  end: number
+  type: 'in' | 'out'
+}
+
 export interface EditParams {
   trim_start: number
   trim_end: number | null
   volume: number
-  fade_in: number
-  fade_out: number
+  fades: FadeEdit[]
   speed: number
   normalize: boolean
   cuts: Cut[]

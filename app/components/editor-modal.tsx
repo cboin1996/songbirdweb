@@ -3,7 +3,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import WaveSurfer from 'wavesurfer.js'
 import RegionsPlugin from 'wavesurfer.js/plugins/regions'
 import {
-  DOWNLOAD_URL, createEditJob, deleteEditDraft, Cut, EditParams, fetchEditDraft,
+  DOWNLOAD_URL, createEditJob, deleteEditDraft, Cut, EditParams, FadeEdit, fetchEditDraft,
   pollEditJob, Properties, saveEditDraft, songArtworkUrl, tagSong, artworkUrl,
   addToLibrary, removeFromLibrary, uploadSongArtwork, API_V1,
 } from '../lib/data'
@@ -48,15 +48,18 @@ const DEFAULT_PARAMS: EditParams = {
   trim_start: 0,
   trim_end: null,
   volume: 1.0,
-  fade_in: 0,
-  fade_out: 0,
+  fades: [],
   speed: 1.0,
   normalize: false,
   cuts: [],
 }
 
-function stripCutIds(params: EditParams): EditParams {
-  return { ...params, cuts: params.cuts.map(({ start, end, fade_in, fade_out }) => ({ start, end, fade_in, fade_out })) }
+function stripClientIds(params: EditParams): EditParams {
+  return {
+    ...params,
+    cuts: params.cuts.map(({ start, end, fade_in, fade_out }) => ({ start, end, fade_in, fade_out })),
+    fades: params.fades.map(({ start, end, type }) => ({ start, end, type })),
+  }
 }
 
 interface Props {
@@ -175,9 +178,10 @@ export default function EditorModal({
     fetchEditDraft(songId).then(draft => {
       if (draft) {
         const cuts: Cut[] = (draft.cuts ?? []).map(c => ({ ...c, fade_in: c.fade_in ?? 0, fade_out: c.fade_out ?? 0, id: crypto.randomUUID() }))
-        const p = { ...draft, cuts }
+        const fades: FadeEdit[] = (draft.fades ?? []).map(f => ({ ...f, id: crypto.randomUUID() }))
+        const p = { ...draft, cuts, fades }
         setParams(p)
-        if (wsReadyRef.current) syncCutRegions(cuts)
+        if (wsReadyRef.current) { syncCutRegions(cuts); syncFadeRegions(fades) }
       }
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -194,7 +198,7 @@ export default function EditorModal({
   // debounced auto-save
   const scheduleSave = useCallback((p: EditParams) => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    saveTimerRef.current = setTimeout(() => saveEditDraft(activeSongIdRef.current, stripCutIds(p)), 1000)
+    saveTimerRef.current = setTimeout(() => saveEditDraft(activeSongIdRef.current, stripClientIds(p)), 1000)
   }, [])
 
   // init WaveSurfer
@@ -237,6 +241,14 @@ export default function EditorModal({
           color: 'rgba(239,68,68,0.15)', drag: true, resize: true,
         })
       })
+      p.fades.forEach(fade => {
+        regions.addRegion({
+          id: `fade-${fade.id ?? crypto.randomUUID()}`,
+          start: fade.start, end: fade.end,
+          color: fade.type === 'in' ? 'rgba(56,189,248,0.18)' : 'rgba(251,191,36,0.18)',
+          drag: true, resize: true,
+        })
+      })
       programmaticRegionRef.current = false
     })
     ws.on('play', () => setWfPlaying(true))
@@ -259,6 +271,23 @@ export default function EditorModal({
         setParams(prev => {
           if (!regionPreDragRef.current) regionPreDragRef.current = prev
           const next = { ...prev, trim_start: r.start, trim_end: r.end }
+          scheduleSave(next)
+          return next
+        })
+      } else if (r.id.startsWith('fade-')) {
+        const fadeId = r.id.slice(5)
+        setParams(prev => {
+          if (!regionPreDragRef.current) regionPreDragRef.current = prev
+          const trimStart = prev.trim_start
+          const trimEnd = prev.trim_end ?? duration
+          const { start, end } = _clampFadeNoOverlap(prev.fades, prev.cuts, fadeId,
+            Math.max(trimStart, r.start), Math.min(trimEnd, r.end), trimStart, trimEnd)
+          if (start !== r.start || end !== r.end) {
+            programmaticRegionRef.current = true
+            r.setOptions({ start, end })
+            programmaticRegionRef.current = false
+          }
+          const next = { ...prev, fades: prev.fades.map(f => f.id === fadeId ? { ...f, start, end } : f) }
           scheduleSave(next)
           return next
         })
@@ -360,12 +389,27 @@ export default function EditorModal({
   function syncCutRegions(cuts: Cut[]) {
     if (!regionsRef.current) return
     programmaticRegionRef.current = true
-    regionsRef.current.getRegions().filter(r => r.id !== 'trim').forEach(r => r.remove())
+    regionsRef.current.getRegions().filter(r => r.id !== 'trim' && !r.id.startsWith('fade-')).forEach(r => r.remove())
     cuts.forEach(cut => {
       regionsRef.current!.addRegion({
         id: cut.id ?? crypto.randomUUID(),
         start: cut.start, end: cut.end,
         color: 'rgba(239,68,68,0.15)', drag: true, resize: true,
+      })
+    })
+    programmaticRegionRef.current = false
+  }
+
+  function syncFadeRegions(fades: FadeEdit[]) {
+    if (!regionsRef.current) return
+    programmaticRegionRef.current = true
+    regionsRef.current.getRegions().filter(r => r.id.startsWith('fade-')).forEach(r => r.remove())
+    fades.forEach(fade => {
+      regionsRef.current!.addRegion({
+        id: `fade-${fade.id ?? crypto.randomUUID()}`,
+        start: fade.start, end: fade.end,
+        color: fade.type === 'in' ? 'rgba(56,189,248,0.18)' : 'rgba(251,191,36,0.18)',
+        drag: true, resize: true,
       })
     })
     programmaticRegionRef.current = false
@@ -377,6 +421,7 @@ export default function EditorModal({
     if (region && duration > 0) region.setOptions({ start: p.trim_start, end: p.trim_end ?? duration, drag: false })
     wsRef.current?.setVolume(p.volume)
     syncCutRegions(p.cuts)
+    syncFadeRegions(p.fades)
   }
 
   function addCut() {
@@ -432,6 +477,106 @@ export default function EditorModal({
     return { start, end }
   }
 
+  function _clampFadeNoOverlap(
+    fades: FadeEdit[], cuts: Cut[], id: string,
+    start: number, end: number, trimStart: number, trimEnd: number,
+  ): { start: number; end: number } {
+    start = Math.max(trimStart, start)
+    end = Math.min(trimEnd, end)
+    if (end < start + 0.05) end = start + 0.05
+    for (const f of fades) {
+      if (f.id === id) continue
+      if (start < f.end && end > f.start) {
+        const myMid = (start + end) / 2
+        const fMid = (f.start + f.end) / 2
+        if (myMid <= fMid) { end = Math.min(end, f.start); if (end < start + 0.05) end = start + 0.05 }
+        else { start = Math.max(start, f.end); if (start > end - 0.05) start = end - 0.05 }
+      }
+    }
+    for (const c of cuts) {
+      if (start < c.end && end > c.start) {
+        const myMid = (start + end) / 2
+        const cMid = (c.start + c.end) / 2
+        if (myMid <= cMid) { end = Math.min(end, c.start); if (end < start + 0.05) end = start + 0.05 }
+        else { start = Math.max(start, c.end); if (start > end - 0.05) start = end - 0.05 }
+      }
+    }
+    return { start, end }
+  }
+
+  function addFade(type: 'in' | 'out') {
+    if (!wsReady || !duration) return
+    const DEFAULT_DUR = 2
+    const p = paramsRef.current
+    const trimStart = p.trim_start
+    const trimEnd = p.trim_end ?? duration
+    const obstacles = [...p.fades, ...p.cuts].sort((a, b) => a.start - b.start)
+    let start: number, end: number
+    if (type === 'in') {
+      start = trimStart
+      end = Math.min(trimEnd, trimStart + DEFAULT_DUR)
+      for (const o of obstacles) {
+        if (start < o.end && end > o.start) { start = o.end + 0.1; end = Math.min(trimEnd, start + DEFAULT_DUR) }
+      }
+    } else {
+      end = trimEnd
+      start = Math.max(trimStart, trimEnd - DEFAULT_DUR)
+      for (const o of [...obstacles].reverse()) {
+        if (start < o.end && end > o.start) { end = o.start - 0.1; start = Math.max(trimStart, end - DEFAULT_DUR) }
+      }
+    }
+    if (end - start < 0.5) return
+    const id = crypto.randomUUID()
+    pushHistory(paramsRef.current)
+    const color = type === 'in' ? 'rgba(56,189,248,0.18)' : 'rgba(251,191,36,0.18)'
+    regionsRef.current?.addRegion({ id: `fade-${id}`, start, end, color, drag: true, resize: true })
+    setParams(prev => ({ ...prev, fades: [...prev.fades, { id, start, end, type }] }))
+  }
+
+  function removeFade(id: string) {
+    pushHistory(paramsRef.current)
+    regionsRef.current?.getRegions().find(r => r.id === `fade-${id}`)?.remove()
+    setParams(prev => {
+      const next = { ...prev, fades: prev.fades.filter(f => f.id !== id) }
+      scheduleSave(next)
+      return next
+    })
+  }
+
+  function updateFadeDuration(id: string, newDur: number) {
+    setParams(prev => {
+      const fade = prev.fades.find(f => f.id === id)
+      if (!fade) return prev
+      const trimStart = prev.trim_start
+      const trimEnd = prev.trim_end ?? duration
+      let { start, end } = fade
+      if (fade.type === 'in') {
+        end = start + newDur
+        for (const o of [...prev.fades, ...prev.cuts]) {
+          if (o.id === id) continue
+          if (o.start >= start && end > o.start) end = Math.min(end, o.start)
+        }
+        end = Math.min(trimEnd, end)
+      } else {
+        start = end - newDur
+        for (const o of [...prev.fades, ...prev.cuts]) {
+          if (o.id === id) continue
+          if (o.end <= end && start < o.end) start = Math.max(start, o.end)
+        }
+        start = Math.max(trimStart, start)
+      }
+      const region = regionsRef.current?.getRegions().find(r => r.id === `fade-${id}`)
+      if (region) {
+        programmaticRegionRef.current = true
+        region.setOptions({ start, end })
+        programmaticRegionRef.current = false
+      }
+      const next = { ...prev, fades: prev.fades.map(f => f.id === id ? { ...f, start, end } : f) }
+      scheduleSave(next)
+      return next
+    })
+  }
+
   // (updateCutTime removed — cut timing is GUI-only via waveform drag)
 
   function handleSliderReset(key: keyof EditParams, defaultVal: number) {
@@ -460,11 +605,6 @@ export default function EditorModal({
 
   const wsPreviewRef = useRef(false)
 
-  // Schedule all gain automation for a preview window.
-  // startBufOff: where in the full buffer playback begins.
-  // totalBufDur: total duration of the buffer (seconds).
-  // segs: original-time [start,end] pairs of kept audio segments.
-  // cutsForRange: only the cuts whose start matches a segment boundary.
   function scheduleGainEvents(
     gain: GainNode,
     ctx: AudioContext,
@@ -476,17 +616,33 @@ export default function EditorModal({
   ) {
     const speed = p.speed
     const now = ctx.currentTime
-    // Real time of an absolute buffer position b
     const realOf = (b: number) => now + (b - startBufOff) / speed
 
-    // Compute gain at startBufOff (what value to start from)
+    // Compute composite initGain at startBufOff
     let initGain = p.volume
-    if (p.fade_in > 0 && startBufOff < p.fade_in) {
-      initGain = p.volume * (startBufOff / p.fade_in)
+
+    // Arbitrary fade contributions to initGain
+    for (const fade of p.fades) {
+      const bs = _origToBufOffset(fade.start, segs)
+      const be = _origToBufOffset(fade.end, segs)
+      const dur = be - bs
+      if (dur <= 0) continue
+      if (fade.type === 'in') {
+        if (startBufOff < bs) {
+          // before fade-in: full volume (no attenuation from this fade)
+        } else if (startBufOff < be) {
+          initGain = Math.min(initGain, p.volume * (startBufOff - bs) / dur)
+        }
+      } else {
+        if (startBufOff >= be) {
+          initGain = 0
+        } else if (startBufOff >= bs) {
+          initGain = Math.min(initGain, p.volume * (be - startBufOff) / dur)
+        }
+      }
     }
-    if (p.fade_out > 0 && startBufOff >= totalBufDur - p.fade_out) {
-      initGain = Math.min(initGain, p.volume * (totalBufDur - startBufOff) / p.fade_out)
-    }
+
+    // Cut fade contributions to initGain
     let bufAccum = 0
     for (let i = 0; i < segs.length - 1; i++) {
       bufAccum += segs[i][1] - segs[i][0]
@@ -502,9 +658,31 @@ export default function EditorModal({
     }
     gain.gain.setValueAtTime(initGain, now)
 
-    // Trim fade_in remainder (if we started inside it)
-    if (p.fade_in > 0 && startBufOff < p.fade_in) {
-      gain.gain.linearRampToValueAtTime(p.volume, realOf(p.fade_in))
+    // Schedule future arbitrary fade events
+    for (const fade of p.fades) {
+      const bs = _origToBufOffset(fade.start, segs)
+      const be = _origToBufOffset(fade.end, segs)
+      if (be <= startBufOff) continue
+      if (fade.type === 'in') {
+        if (bs > startBufOff) {
+          // fade-in starts in the future: jump to 0 at bs, ramp to volume at be
+          gain.gain.setValueAtTime(p.volume, realOf(bs) - 1e-4)
+          gain.gain.setValueAtTime(0, realOf(bs))
+          gain.gain.linearRampToValueAtTime(p.volume, realOf(be))
+        } else if (startBufOff < be) {
+          // started inside fade-in: ramp to volume at be
+          gain.gain.linearRampToValueAtTime(p.volume, realOf(be))
+        }
+      } else {
+        if (bs > startBufOff) {
+          // fade-out starts in the future
+          gain.gain.setValueAtTime(p.volume, realOf(bs))
+          gain.gain.linearRampToValueAtTime(0, realOf(be))
+        } else if (startBufOff < be) {
+          // started inside fade-out
+          gain.gain.linearRampToValueAtTime(0, realOf(be))
+        }
+      }
     }
 
     // Cut fades (future boundaries only)
@@ -533,18 +711,8 @@ export default function EditorModal({
           gain.gain.linearRampToValueAtTime(p.volume, realOf(B + fi))
         }
       } else if (fo > 0 && B > startBufOff) {
-        // No fade_in: restore volume after hard cut
         gain.gain.setValueAtTime(p.volume, realOf(B) + 1e-4)
       }
-    }
-
-    // Trim fade_out
-    if (p.fade_out > 0) {
-      const foStart = totalBufDur - p.fade_out
-      if (foStart > startBufOff) {
-        gain.gain.setValueAtTime(p.volume, realOf(foStart))
-      }
-      gain.gain.linearRampToValueAtTime(0, realOf(totalBufDur))
     }
   }
 
@@ -575,7 +743,7 @@ export default function EditorModal({
     const startOrig = (cursorTime >= p.trim_start && cursorTime < trimEnd) ? cursorTime : p.trim_start
 
     const hasCuts = p.cuts.length > 0
-    const needsWebAudio = hasCuts || p.speed !== 1.0 || p.fade_in > 0 || p.fade_out > 0
+    const needsWebAudio = hasCuts || p.speed !== 1.0 || p.fades.length > 0
 
     if (!needsWebAudio) {
       wsRef.current?.setVolume(p.volume)
@@ -772,7 +940,7 @@ export default function EditorModal({
   async function handleSave() {
     setJobStatus('submitting')
     setJobError('')
-    const job = await createEditJob(songId, stripCutIds(params), overwrite)
+    const job = await createEditJob(songId, stripClientIds(params), overwrite)
     if (!job) { setJobStatus('error'); setJobError('failed to start'); return }
     setJobStatus('polling')
     if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
@@ -828,7 +996,7 @@ export default function EditorModal({
   }
 
   function paramsChanged(p: EditParams) {
-    return p.trim_start !== 0 || p.trim_end !== null || p.volume !== 1 || p.fade_in !== 0 || p.fade_out !== 0 || p.speed !== 1 || p.normalize || p.cuts.length > 0
+    return p.trim_start !== 0 || p.trim_end !== null || p.volume !== 1 || p.fades.length > 0 || p.speed !== 1 || p.normalize || p.cuts.length > 0
   }
 
   function handleClose() {
@@ -1068,20 +1236,28 @@ export default function EditorModal({
                     ))}
                   </div>
                 )}
-                {duration > 0 && params.fade_in > 0 && (
-                  <div className="absolute inset-y-0 bg-sky-400/25 pointer-events-none" style={{
-                    left: `${(params.trim_start / duration) * 100}%`,
-                    width: `${Math.min(100, (params.fade_in / duration) * 100)}%`,
-                    clipPath: 'polygon(0% 50%, 100% 0%, 100% 100%)',
-                  }} />
-                )}
-                {duration > 0 && params.fade_out > 0 && (
-                  <div className="absolute inset-y-0 bg-sky-400/25 pointer-events-none" style={{
-                    right: `${((duration - trimEnd) / duration) * 100}%`,
-                    width: `${Math.min(100, (params.fade_out / duration) * 100)}%`,
-                    clipPath: 'polygon(0% 0%, 0% 100%, 100% 50%)',
-                  }} />
-                )}
+                {duration > 0 && params.fades.map(fade => {
+                  const left = `${(fade.start / duration) * 100}%`
+                  const width = `${((fade.end - fade.start) / duration) * 100}%`
+                  const isIn = fade.type === 'in'
+                  return (
+                    <React.Fragment key={fade.id}>
+                      <div className="absolute inset-y-0 pointer-events-none" style={{
+                        left, width,
+                        background: isIn
+                          ? 'linear-gradient(to right, rgba(3,7,18,0.82), transparent)'
+                          : 'linear-gradient(to left, rgba(3,7,18,0.82), transparent)',
+                      }} />
+                      <div className="absolute inset-y-0 pointer-events-none" style={{
+                        left, width,
+                        background: isIn ? 'rgba(56,189,248,0.18)' : 'rgba(251,191,36,0.18)',
+                        clipPath: isIn
+                          ? 'polygon(0% 50%, 100% 0%, 100% 100%)'
+                          : 'polygon(0% 0%, 0% 100%, 100% 50%)',
+                      }} />
+                    </React.Fragment>
+                  )
+                })}
                 {(jobStatus === 'submitting' || jobStatus === 'polling') && (
                   <div className="absolute inset-0 flex items-end justify-center gap-px px-2 pb-2 pointer-events-none overflow-hidden rounded bg-gray-950/50">
                     {WAVEFORM_SKELETON.map((h, i) => (
@@ -1143,30 +1319,22 @@ export default function EditorModal({
             {/* sliders/cuts/actions — clicking any of these keeps edit waveform active */}
             <div className="flex flex-col gap-4" onClick={() => switchToWaveform('edit')}>
 
-            {/* sliders */}
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              {([
-                ['volume', 'Volume', 0, 2, 0.05, `${Math.round(params.volume * 100)}%`, params.volume !== 1, 1],
-                ['fade_in', 'Fade in', 0, 15, 0.1, `${params.fade_in.toFixed(1)}s`, params.fade_in > 0, 0],
-                ['fade_out', 'Fade out', 0, 15, 0.1, `${params.fade_out.toFixed(1)}s`, params.fade_out > 0, 0],
-              ] as [keyof EditParams, string, number, number, number, string, boolean, number][]).map(([key, label, min, max, step, display, active, defaultVal]) => (
-                <div key={key} className="flex flex-col gap-2">
-                  <span className="text-sm flex justify-between items-center">
-                    <span className={active ? 'text-sky-500' : 'text-gray-400'}>{label}</span>
-                    <span className="flex items-center gap-2">
-                      {active && <button onClick={() => handleSliderReset(key, defaultVal)} className="text-xs text-gray-400 hover:text-sky-500 transition-colors">reset</button>}
-                      <span className={`tabular-nums ${active ? 'text-sky-500' : 'text-gray-400 dark:text-gray-600'}`}>{display}</span>
-                    </span>
-                  </span>
-                  <Slider
-                    value={params[key] as number} min={min} max={max} step={step}
-                    onChange={v => handleSliderChange(key, v)}
-                    onStart={handleSliderStart}
-                    onCommit={handleSliderCommit}
-                    label={label}
-                  />
-                </div>
-              ))}
+            {/* volume slider */}
+            <div className="flex flex-col gap-2 max-w-xs">
+              <span className="text-sm flex justify-between items-center">
+                <span className={params.volume !== 1 ? 'text-sky-500' : 'text-gray-400'}>Volume</span>
+                <span className="flex items-center gap-2">
+                  {params.volume !== 1 && <button onClick={() => handleSliderReset('volume', 1)} className="text-xs text-gray-400 hover:text-sky-500 transition-colors">reset</button>}
+                  <span className={`tabular-nums ${params.volume !== 1 ? 'text-sky-500' : 'text-gray-400 dark:text-gray-600'}`}>{Math.round(params.volume * 100)}%</span>
+                </span>
+              </span>
+              <Slider
+                value={params.volume} min={0} max={2} step={0.05}
+                onChange={v => handleSliderChange('volume', v)}
+                onStart={handleSliderStart}
+                onCommit={handleSliderCommit}
+                label="volume"
+              />
             </div>
 
             {/* speed + normalize */}
@@ -1215,12 +1383,12 @@ export default function EditorModal({
                   {params.cuts.map(cut => {
                     const sorted = [...params.cuts].sort((a, b) => a.start - b.start)
                     const idx = sorted.findIndex(c => c.id === cut.id)
-                    const trimFadeInEnd = params.trim_start + params.fade_in
-                    const trimFadeOutStart = (params.trim_end ?? duration) - params.fade_out
+                    const trimStart = params.trim_start
+                    const trimEnd = params.trim_end ?? duration
                     const prev = idx > 0 ? sorted[idx - 1] : null
                     const next = idx < sorted.length - 1 ? sorted[idx + 1] : null
-                    const maxFadeOut = Math.min(5, Math.max(0, cut.start - Math.max(trimFadeInEnd, prev ? prev.end + prev.fade_in : trimFadeInEnd)))
-                    const maxFadeIn = Math.min(5, Math.max(0, Math.min(trimFadeOutStart, next ? next.start - next.fade_out : trimFadeOutStart) - cut.end))
+                    const maxFadeOut = Math.min(5, Math.max(0, cut.start - Math.max(trimStart, prev ? prev.end + prev.fade_in : trimStart)))
+                    const maxFadeIn = Math.min(5, Math.max(0, Math.min(trimEnd, next ? next.start - next.fade_out : trimEnd) - cut.end))
                     return (
                     <div key={cut.id} className="flex flex-col gap-2 bg-red-50 dark:bg-red-950/30 rounded px-2 py-2">
                       {/* header row: icon + time display + duration + remove */}
@@ -1266,6 +1434,64 @@ export default function EditorModal({
                         </div>
                       </div>
                     </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* fades */}
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-400">Fades</span>
+                <div className="flex items-center gap-3">
+                  <button onClick={() => addFade('in')} disabled={!wsReady} className="text-sm text-sky-500 hover:text-sky-400 transition-colors disabled:opacity-40">+ fade in</button>
+                  <button onClick={() => addFade('out')} disabled={!wsReady} className="text-sm text-amber-500 hover:text-amber-400 transition-colors disabled:opacity-40">+ fade out</button>
+                </div>
+              </div>
+              {params.fades.length > 0 && (
+                <div className="flex flex-col gap-2">
+                  {params.fades.map(fade => {
+                    const dur = fade.end - fade.start
+                    const isIn = fade.type === 'in'
+                    const trimStart = params.trim_start
+                    const trimEnd = params.trim_end ?? duration
+                    // max duration: from fade.start to nearest obstacle (or trim boundary)
+                    let maxDur = isIn
+                      ? Math.min(5, trimEnd - fade.start)
+                      : Math.min(5, fade.end - trimStart)
+                    for (const o of [...params.fades, ...params.cuts]) {
+                      if (o.id === fade.id) continue
+                      if (isIn && o.start >= fade.start) maxDur = Math.min(maxDur, o.start - fade.start)
+                      if (!isIn && o.end <= fade.end) maxDur = Math.min(maxDur, fade.end - o.end)
+                    }
+                    maxDur = Math.max(0.5, maxDur)
+                    return (
+                      <div key={fade.id} className={`flex flex-col gap-2 rounded px-2 py-2 ${isIn ? 'bg-sky-950/30' : 'bg-amber-950/30'}`}>
+                        <div className="flex items-center gap-2 text-sm">
+                          <span className={`text-xs font-medium ${isIn ? 'text-sky-400' : 'text-amber-400'}`}>{isIn ? 'fade in' : 'fade out'}</span>
+                          <div className="flex items-center gap-1 flex-1 min-w-0">
+                            <span className="tabular-nums text-xs text-gray-500">{fmt(fade.start)}</span>
+                            <span className="text-gray-400 text-xs">–</span>
+                            <span className="tabular-nums text-xs text-gray-500">{fmt(fade.end)}</span>
+                            <span className="text-gray-400 dark:text-gray-600 text-xs tabular-nums">({dur.toFixed(1)}s)</span>
+                          </div>
+                          <button onClick={() => removeFade(fade.id!)} className="text-gray-400 hover:text-red-400 transition-colors shrink-0"><FaTimes size={10} /></button>
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <span className="text-xs flex justify-between">
+                            <span className={isIn ? 'text-sky-400' : 'text-amber-400'}>duration</span>
+                            <span className={`tabular-nums ${isIn ? 'text-sky-400' : 'text-amber-400'}`}>{dur.toFixed(1)}s</span>
+                          </span>
+                          <Slider
+                            value={Math.min(dur, maxDur)} min={0.5} max={maxDur} step={0.1}
+                            onChange={v => updateFadeDuration(fade.id!, v)}
+                            onStart={handleSliderStart}
+                            onCommit={handleSliderCommit}
+                            label={isIn ? 'fade in duration' : 'fade out duration'}
+                          />
+                        </div>
+                      </div>
                     )
                   })}
                 </div>
