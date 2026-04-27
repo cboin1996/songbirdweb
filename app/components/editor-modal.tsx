@@ -11,6 +11,7 @@ import { FaPlay, FaPause, FaTimes, FaUndo, FaRedo, FaExternalLinkAlt, FaTrash, F
 import Image from 'next/image'
 import { usePlayer } from './player'
 import Slider from './slider'
+import { snap as _snap } from '../lib/snap'
 
 type Tab = 'audio' | 'properties'
 
@@ -156,6 +157,7 @@ export default function EditorModal({
 
   // --- close guard ---
   const [closeConfirm, setCloseConfirm] = useState(false)
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // --- restore ---
   const [restoreConfirm, setRestoreConfirm] = useState<'original' | 'last' | null>(null)
@@ -283,8 +285,12 @@ export default function EditorModal({
           if (!regionPreDragRef.current) regionPreDragRef.current = prev
           let newStart = Math.max(0, r.start)
           let newEnd = Math.min(dur, r.end)
+          // trim must encompass all cuts and fades
+          const contentStarts = [...prev.cuts.map(c => c.start), ...prev.fades.map(f => f.start)]
+          const contentEnds = [...prev.cuts.map(c => c.end), ...prev.fades.map(f => f.end)]
+          if (contentStarts.length > 0) newStart = Math.min(newStart, Math.min(...contentStarts))
+          if (contentEnds.length > 0) newEnd = Math.max(newEnd, Math.max(...contentEnds))
           if (newEnd - newStart < MIN_REGION_DUR) {
-            // infer which handle moved and clamp the other
             if (Math.abs(newStart - prev.trim_start) >= Math.abs(newEnd - (prev.trim_end ?? dur))) {
               newStart = newEnd - MIN_REGION_DUR
             } else {
@@ -304,9 +310,12 @@ export default function EditorModal({
           if (!regionPreDragRef.current) regionPreDragRef.current = prev
           const trimStart = prev.trim_start
           const trimEnd = prev.trim_end ?? dur
+          const refFade = (regionPreDragRef.current ?? prev).fades.find(f => f.id === fadeId)
+          const origSize = refFade ? (refFade.end - refFade.start) : 0
+          const isDrag = refFade ? Math.abs((r.end - r.start) - origSize) < 0.05 : false
           const fade = prev.fades.find(f => f.id === fadeId)
           const obstacles = [...prev.fades, ...prev.cuts]
-          let { start, end } = _snap(r.start, r.end, obstacles, fadeId, trimStart, trimEnd)
+          let { start, end } = _snap(r.start, r.end, obstacles, fadeId, trimStart, trimEnd, isDrag)
           if (fade && end - start > MAX_FADE_DUR) {
             if (fade.type === 'in') end = start + MAX_FADE_DUR
             else start = end - MAX_FADE_DUR
@@ -323,8 +332,11 @@ export default function EditorModal({
           if (!regionPreDragRef.current) regionPreDragRef.current = prev
           const trimStart = prev.trim_start
           const trimEnd = prev.trim_end ?? dur
+          const refCut = (regionPreDragRef.current ?? prev).cuts.find(c => c.id === r.id)
+          const origSize = refCut ? (refCut.end - refCut.start) : 0
+          const isDrag = refCut ? Math.abs((r.end - r.start) - origSize) < 0.05 : false
           const obstacles = [...prev.cuts, ...prev.fades]
-          const { start, end } = _snap(r.start, r.end, obstacles, r.id, trimStart, trimEnd)
+          const { start, end } = _snap(r.start, r.end, obstacles, r.id, trimStart, trimEnd, isDrag)
           if (start !== r.start || end !== r.end) {
             programmaticRegionRef.current = true
             r.setOptions({ start, end })
@@ -339,7 +351,18 @@ export default function EditorModal({
       if (r.id === 'trim') {
         setParams(prev => {
           if (!regionPreDragRef.current) regionPreDragRef.current = prev
-          const next = { ...prev, trim_start: r.start, trim_end: r.end }
+          let trimStart = r.start
+          let trimEnd = r.end
+          const contentStarts = [...prev.cuts.map(c => c.start), ...prev.fades.map(f => f.start)]
+          const contentEnds = [...prev.cuts.map(c => c.end), ...prev.fades.map(f => f.end)]
+          if (contentStarts.length > 0) trimStart = Math.min(trimStart, Math.min(...contentStarts))
+          if (contentEnds.length > 0) trimEnd = Math.max(trimEnd, Math.max(...contentEnds))
+          if (trimStart !== r.start || trimEnd !== r.end) {
+            programmaticRegionRef.current = true
+            r.setOptions({ start: trimStart, end: trimEnd })
+            programmaticRegionRef.current = false
+          }
+          const next = { ...prev, trim_start: trimStart, trim_end: trimEnd }
           scheduleSave(next)
           return next
         })
@@ -350,9 +373,12 @@ export default function EditorModal({
           const trimStart = prev.trim_start
           const dur = wsRef.current?.getDuration() ?? duration
           const trimEnd = prev.trim_end ?? dur
+          const refFade = (regionPreDragRef.current ?? prev).fades.find(f => f.id === fadeId)
+          const origSize = refFade ? (refFade.end - refFade.start) : 0
+          const isDrag = refFade ? Math.abs((r.end - r.start) - origSize) < 0.05 : false
           const fade = prev.fades.find(f => f.id === fadeId)
           const obstacles = [...prev.fades, ...prev.cuts]
-          let { start, end } = _snap(r.start, r.end, obstacles, fadeId, trimStart, trimEnd)
+          let { start, end } = _snap(r.start, r.end, obstacles, fadeId, trimStart, trimEnd, isDrag)
           if (fade && end - start > MAX_FADE_DUR) {
             if (fade.type === 'in') end = start + MAX_FADE_DUR
             else start = end - MAX_FADE_DUR
@@ -371,7 +397,10 @@ export default function EditorModal({
           if (!regionPreDragRef.current) regionPreDragRef.current = prev
           const trimStart = prev.trim_start
           const trimEnd = prev.trim_end ?? duration
-          const { start, end } = _snap(r.start, r.end, [...prev.cuts, ...prev.fades], r.id, trimStart, trimEnd)
+          const refCut = (regionPreDragRef.current ?? prev).cuts.find(c => c.id === r.id)
+          const origSize = refCut ? (refCut.end - refCut.start) : 0
+          const isDrag = refCut ? Math.abs((r.end - r.start) - origSize) < 0.05 : false
+          const { start, end } = _snap(r.start, r.end, [...prev.cuts, ...prev.fades], r.id, trimStart, trimEnd, isDrag)
           if (start !== r.start || end !== r.end) {
             programmaticRegionRef.current = true
             r.setOptions({ start, end })
@@ -537,35 +566,6 @@ export default function EditorModal({
       scheduleSave(next)
       return next
     })
-  }
-
-  // Snap: clamp region within [trimStart, trimEnd] and push it away from any overlapping
-  // obstacle. Direction determined by which side of the obstacle the region's center falls on.
-  function _snap(
-    rawStart: number, rawEnd: number,
-    obstacles: Array<{ id?: string; start: number; end: number }>,
-    id: string | undefined, trimStart: number, trimEnd: number,
-  ): { start: number; end: number } {
-    let start = Math.max(trimStart, rawStart)
-    let end = Math.min(trimEnd, rawEnd)
-    const rawCenter = (rawStart + rawEnd) / 2
-    const sorted = obstacles
-      .filter(o => o.id !== id)
-      .sort((a, b) => Math.abs((a.start + a.end) / 2 - rawCenter) - Math.abs((b.start + b.end) / 2 - rawCenter))
-    for (const obs of sorted) {
-      if (start >= obs.end || end <= obs.start) continue
-      const obsCenter = (obs.start + obs.end) / 2
-      if (rawCenter <= obsCenter) {
-        end = obs.start
-        start = Math.min(start, end - MIN_REGION_DUR)
-      } else {
-        start = obs.end
-        end = Math.max(end, start + MIN_REGION_DUR)
-      }
-    }
-    start = Math.max(trimStart, start)
-    end = Math.min(trimEnd, end)
-    return { start, end }
   }
 
   function addFade(type: 'in' | 'out') {
@@ -1067,8 +1067,12 @@ export default function EditorModal({
   }
 
   function handleClose() {
-    if (paramsChanged(params) && jobStatus !== 'done') {
+    if (paramsChanged(params) && jobStatus !== 'done' && !localStorage.getItem('sb-skip-draft-banner')) {
       setCloseConfirm(true)
+      closeTimerRef.current = setTimeout(() => {
+        setCloseConfirm(false)
+        onClose()
+      }, 2500)
     } else {
       onClose()
     }
@@ -1221,10 +1225,19 @@ export default function EditorModal({
         {/* close guard */}
         {closeConfirm && (
           <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-amber-50 dark:bg-amber-950/40 border-b border-amber-200 dark:border-amber-900 shrink-0">
-            <p className="text-sm text-amber-700 dark:text-amber-400">Draft auto-saved. Close without saving new version?</p>
+            <p className="text-sm text-amber-700 dark:text-amber-400">Draft auto-saved — closing…</p>
             <div className="flex items-center gap-3 shrink-0">
-              <button onClick={onClose} className="text-sm text-red-500 hover:text-red-400 transition-colors">close anyway</button>
-              <button onClick={() => setCloseConfirm(false)} className="text-sm text-gray-500 hover:text-gray-400 transition-colors">cancel</button>
+              <button
+                onClick={() => {
+                  if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
+                  localStorage.setItem('sb-skip-draft-banner', '1')
+                  setCloseConfirm(false)
+                  onClose()
+                }}
+                className="text-xs text-gray-400 hover:text-gray-300 transition-colors"
+              >
+                don&apos;t show again
+              </button>
             </div>
           </div>
         )}
@@ -1330,34 +1343,58 @@ export default function EditorModal({
                   {(params.trim_end !== null && params.trim_end < duration) && (
                     <div className="absolute inset-y-0 right-0 bg-black/50 pointer-events-none" style={{ width: `${((duration - params.trim_end) / duration) * 100}%` }} />
                   )}
-                  {/* cut darkness */}
-                  {params.cuts.map(cut => (
-                    <div key={`dark-${cut.id}`} className="absolute inset-y-0 bg-black/50 pointer-events-none" style={{
-                      left: `${(cut.start / duration) * 100}%`,
-                      width: `${((cut.end - cut.start) / duration) * 100}%`,
-                    }} />
-                  ))}
-                  {/* fade overlays */}
-                  {params.fades.map(fade => {
-                    const left = `${(fade.start / duration) * 100}%`
-                    const width = `${((fade.end - fade.start) / duration) * 100}%`
-                    const isIn = fade.type === 'in'
-                    return (
-                      <React.Fragment key={fade.id}>
-                        <div
-                          className={`absolute inset-y-0 pointer-events-none from-black/50 to-transparent ${isIn ? 'bg-gradient-to-r' : 'bg-gradient-to-l'}`}
-                          style={{ left, width }}
-                        />
-                        <div className="absolute inset-y-0 pointer-events-none" style={{
-                          left, width,
-                          background: isIn ? 'rgba(56,189,248,0.18)' : 'rgba(251,191,36,0.18)',
-                          clipPath: isIn
-                            ? 'polygon(0% 50%, 100% 0%, 100% 100%)'
-                            : 'polygon(0% 0%, 0% 100%, 100% 50%)',
-                        }} />
+                  {/* cut/fade overlays clipped to trim region */}
+                  <div className="absolute inset-0 pointer-events-none" style={{
+                    clipPath: `inset(0 ${((duration - trimEnd) / duration * 100).toFixed(4)}% 0 ${(params.trim_start / duration * 100).toFixed(4)}%)`,
+                  }}>
+                    {/* cut darkness */}
+                    {params.cuts.map(cut => (
+                      <div key={`dark-${cut.id}`} className="absolute inset-y-0 bg-black/50" style={{
+                        left: `${(cut.start / duration) * 100}%`,
+                        width: `${((cut.end - cut.start) / duration) * 100}%`,
+                      }} />
+                    ))}
+                    {/* fade overlays */}
+                    {params.fades.map(fade => {
+                      const left = `${(fade.start / duration) * 100}%`
+                      const width = `${((fade.end - fade.start) / duration) * 100}%`
+                      const isIn = fade.type === 'in'
+                      return (
+                        <React.Fragment key={fade.id}>
+                          <div
+                            className={`absolute inset-y-0 from-black/50 to-transparent ${isIn ? 'bg-gradient-to-r' : 'bg-gradient-to-l'}`}
+                            style={{ left, width }}
+                          />
+                          <div className="absolute inset-y-0" style={{
+                            left, width,
+                            background: isIn ? 'rgba(56,189,248,0.18)' : 'rgba(251,191,36,0.18)',
+                            clipPath: isIn
+                              ? 'polygon(0% 50%, 100% 0%, 100% 100%)'
+                              : 'polygon(0% 0%, 0% 100%, 100% 50%)',
+                          }} />
+                        </React.Fragment>
+                      )
+                    })}
+                    {/* cut fade ramps */}
+                    {params.cuts.map(cut => (
+                      <React.Fragment key={`ramp-${cut.id}`}>
+                        {cut.fade_out > 0 && (
+                          <div className="absolute inset-y-0 bg-red-400/25" style={{
+                            left: `${Math.max(0, (cut.start - cut.fade_out) / duration) * 100}%`,
+                            width: `${(cut.fade_out / duration) * 100}%`,
+                            clipPath: 'polygon(0% 0%, 0% 100%, 100% 50%)',
+                          }} />
+                        )}
+                        {cut.fade_in > 0 && (
+                          <div className="absolute inset-y-0 bg-red-400/25" style={{
+                            left: `${(cut.end / duration) * 100}%`,
+                            width: `${(cut.fade_in / duration) * 100}%`,
+                            clipPath: 'polygon(0% 50%, 100% 0%, 100% 100%)',
+                          }} />
+                        )}
                       </React.Fragment>
-                    )
-                  })}
+                    ))}
+                  </div>
                 </>}
                 {(jobStatus === 'submitting' || jobStatus === 'polling') && (
                   <div className="absolute inset-0 flex items-end justify-center gap-px px-2 pb-2 pointer-events-none overflow-hidden rounded bg-gray-950/50">
@@ -1367,24 +1404,6 @@ export default function EditorModal({
                     ))}
                   </div>
                 )}
-                {duration > 0 && params.cuts.map(cut => (
-                  <React.Fragment key={cut.id}>
-                    {cut.fade_out > 0 && (
-                      <div className="absolute inset-y-0 bg-red-400/25 pointer-events-none" style={{
-                        left: `${Math.max(0, (cut.start - cut.fade_out) / duration) * 100}%`,
-                        width: `${(cut.fade_out / duration) * 100}%`,
-                        clipPath: 'polygon(0% 0%, 0% 100%, 100% 50%)',
-                      }} />
-                    )}
-                    {cut.fade_in > 0 && (
-                      <div className="absolute inset-y-0 bg-red-400/25 pointer-events-none" style={{
-                        left: `${(cut.end / duration) * 100}%`,
-                        width: `${(cut.fade_in / duration) * 100}%`,
-                        clipPath: 'polygon(0% 50%, 100% 0%, 100% 100%)',
-                      }} />
-                    )}
-                  </React.Fragment>
-                ))}
               </div>
 
               {/* transport row inside edit waveform card */}
