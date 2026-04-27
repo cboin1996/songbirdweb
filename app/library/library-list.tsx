@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import Image from "next/image"
 import { useRouter, useSearchParams } from "next/navigation"
-import { LibrarySong, Playlist, artworkUrl, fetchLibrarySongs, fetchPlaylists, publishEligibleSongs } from "../lib/data"
+import { LibrarySong, Playlist, artworkUrl, fetchLibrarySongs, fetchPlaylists, publishEligibleSongs, removeFromLibrary, downloadSongToFile } from "../lib/data"
 import { cacheSong, getCachedSongIds } from "../lib/offline"
 import { useOnline } from "../lib/use-online"
 import Song from "../components/song"
@@ -106,6 +106,10 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     const [playlists, setPlaylists] = useState<Playlist[]>([])
     const [publishing, setPublishing] = useState(false)
     const [publishResult, setPublishResult] = useState<number | null>(null)
+    const [selectMode, setSelectMode] = useState(false)
+    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+    const [lastSelectedId, setLastSelectedId] = useState<string | null>(null)
+    const [bulkLoading, setBulkLoading] = useState(false)
 
     const privateSongCount = useMemo(() => songs.filter(s => s.owner_id !== null).length, [songs])
     const playlistStubs = useMemo(() => playlists.map(p => ({ id: p.id, name: p.name })), [playlists])
@@ -116,6 +120,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     }, [])
 
     function changeViewMode(v: ViewMode) {
+        if (v !== 'songs' && selectMode) exitSelectMode()
         setViewMode(v)
         router.replace(`${routes.library}?view=${v}`, { scroll: false })
     }
@@ -318,6 +323,75 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         play({ uuid: first.uuid, properties: first.properties, last_position: first.last_position, last_played_at: first.last_played_at }, queue, { label: album.collectionName, href: routes.library })
     }
 
+    function enterSelectMode(songId?: string) {
+        setSelectMode(true)
+        if (songId) {
+            setSelectedIds(new Set([songId]))
+            setLastSelectedId(songId)
+        }
+    }
+
+    function exitSelectMode() {
+        setSelectMode(false)
+        setSelectedIds(new Set())
+        setLastSelectedId(null)
+    }
+
+    function handleSelect(songId: string, shiftKey = false) {
+        setSelectedIds(prev => {
+            const next = new Set(prev)
+            if (shiftKey && lastSelectedId) {
+                const flat = [...songGrouped.values()].flat()
+                const ids = flat.map(s => s.uuid)
+                const fromIdx = ids.indexOf(lastSelectedId)
+                const toIdx = ids.indexOf(songId)
+                if (fromIdx !== -1 && toIdx !== -1) {
+                    const [lo, hi] = fromIdx < toIdx ? [fromIdx, toIdx] : [toIdx, fromIdx]
+                    for (let i = lo; i <= hi; i++) next.add(ids[i])
+                }
+            } else {
+                if (next.has(songId)) next.delete(songId)
+                else next.add(songId)
+            }
+            return next
+        })
+        setLastSelectedId(songId)
+    }
+
+    async function bulkRemoveFromLibrary() {
+        setBulkLoading(true)
+        await Promise.all([...selectedIds].map(id => removeFromLibrary(id)))
+        setSongs(prev => prev.filter(s => !selectedIds.has(s.uuid)))
+        exitSelectMode()
+        setBulkLoading(false)
+    }
+
+    async function bulkSaveOffline() {
+        setBulkLoading(true)
+        for (const id of selectedIds) {
+            if (!cachedIds.has(id)) {
+                try {
+                    await cacheSong(id)
+                    setCachedIds(prev => new Set([...prev, id]))
+                } catch {}
+            }
+        }
+        exitSelectMode()
+        setBulkLoading(false)
+    }
+
+    async function bulkDownload() {
+        setBulkLoading(true)
+        for (const id of selectedIds) {
+            const song = songs.find(s => s.uuid === id)
+            if (song?.properties) {
+                await downloadSongToFile(id, song.properties.trackName, song.properties.artistName)
+            }
+        }
+        exitSelectMode()
+        setBulkLoading(false)
+    }
+
     if (songs.length === 0) {
         return <p className="text-gray-400 text-sm py-4">library is empty</p>
     }
@@ -344,6 +418,18 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                     >
                         <FaCloudDownloadAlt size={12} />
                         {savingAll ? `${saveAllProgress.done}/${saveAllProgress.total}` : 'save all offline'}
+                    </button>
+                )}
+                {viewMode === 'songs' && (
+                    <button
+                        onClick={selectMode ? exitSelectMode : () => enterSelectMode()}
+                        className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors border ${selectMode ? 'bg-sky-500 text-white border-sky-500' : 'text-gray-400 hover:text-sky-500 border-gray-200 dark:border-gray-800 hover:border-sky-500'}`}
+                    >
+                        {selectMode
+                            ? selectedIds.size > 0
+                                ? `${selectedIds.size} selected`
+                                : 'Cancel'
+                            : 'Select'}
                     </button>
                 )}
                 {privateSongCount > 0 && viewMode !== 'playlists' && (
@@ -456,8 +542,12 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                 <Song
                                     song={{ songId: song.uuid, properties: song.properties, artworkCached: song.artwork_cached, parentSongId: song.parent_song_id, rootSongId: song.root_song_id }}
                                     selected={current?.uuid === song.uuid}
-                                    onClick={() => {
+                                    onClick={(e?: React.MouseEvent) => {
                                         if (!song.properties) return
+                                        if (selectMode) {
+                                            handleSelect(song.uuid, e?.shiftKey)
+                                            return
+                                        }
                                         const queue = allSortedSongs
                                             .filter(s => s.properties)
                                             .map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at }))
@@ -481,6 +571,10 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                     isPrivate={!!song.owner_id}
                                     playlists={playlistStubs}
                                     onPlaylistAdd={refreshPlaylists}
+                                    selectMode={selectMode}
+                                    isSelected={selectedIds.has(song.uuid)}
+                                    onSelect={(id) => handleSelect(id)}
+                                    onLongPress={(id) => { if (!selectMode) enterSelectMode(id) }}
                                 />
                                 </div>
                             ))}
@@ -489,16 +583,48 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                 ))
             }
 
+            {/* Bulk action bar */}
+            {selectMode && selectedIds.size > 0 && (
+                <div className="fixed bottom-24 left-0 right-0 z-50 flex justify-center px-4 pointer-events-none">
+                    <div className="pointer-events-auto bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-2xl px-4 py-3 flex gap-3 items-center">
+                        {bulkLoading ? (
+                            <span className="text-sm text-gray-500">Working…</span>
+                        ) : (
+                            <>
+                                <button
+                                    onClick={bulkRemoveFromLibrary}
+                                    className="px-4 py-2 rounded-xl text-sm font-medium bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 active:bg-red-200 touch-manipulation min-h-[44px]"
+                                >
+                                    Remove
+                                </button>
+                                <button
+                                    onClick={bulkSaveOffline}
+                                    className="px-4 py-2 rounded-xl text-sm font-medium bg-sky-50 dark:bg-sky-950/40 text-sky-600 dark:text-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900/50 active:bg-sky-200 touch-manipulation min-h-[44px]"
+                                >
+                                    Save offline
+                                </button>
+                                <button
+                                    onClick={bulkDownload}
+                                    className="px-4 py-2 rounded-xl text-sm font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 active:bg-gray-300 touch-manipulation min-h-[44px]"
+                                >
+                                    Download
+                                </button>
+                            </>
+                        )}
+                    </div>
+                </div>
+            )}
+
             {/* A-Z index */}
-            {viewMode !== 'playlists' && <div className="fixed right-0 top-1/2 -translate-y-1/2 z-50 flex flex-col items-center py-2">
+            {viewMode !== 'playlists' && <div className="fixed right-0 top-1/2 -translate-y-1/2 z-50 flex flex-col items-center py-2 touch-none select-none">
                 {ALPHABET.map(letter => (
                     <button
                         key={letter}
                         onClick={() => scrollTo(letter)}
                         disabled={!presentLetters.has(letter)}
-                        className={`text-[10px] font-semibold w-5 h-4 leading-none transition-colors ${
+                        className={`text-[10px] font-semibold w-7 h-5 leading-none transition-colors ${
                             presentLetters.has(letter)
-                                ? 'text-sky-500 hover:text-sky-300'
+                                ? 'text-sky-500 active:text-sky-300'
                                 : 'text-gray-200 dark:text-gray-700 cursor-default'
                         }`}
                     >

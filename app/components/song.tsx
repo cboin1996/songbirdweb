@@ -11,10 +11,10 @@ import EditorModal from "./editor-modal";
 import { useUser } from "../lib/user-context";
 import { useOnline } from "../lib/use-online";
 
-export default function Song({ song, selected, onClick, inLibrary: initialInLibrary, cachedOffline: initialCachedOffline, onRemove, onCacheChange, compact, rank, editContext, onEditComplete, isPrivate, playlists, onPlaylistAdd }: {
+export default function Song({ song, selected, onClick, inLibrary: initialInLibrary, cachedOffline: initialCachedOffline, onRemove, onCacheChange, compact, rank, editContext, onEditComplete, isPrivate, playlists, onPlaylistAdd, selectMode, isSelected, onSelect, onLongPress }: {
     song: DownloadedSong,
     selected: boolean,
-    onClick: () => void,
+    onClick: (e?: React.MouseEvent) => void,
     inLibrary: boolean,
     cachedOffline?: boolean,
     onRemove?: () => void,
@@ -26,6 +26,10 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
     isPrivate?: boolean,
     playlists?: { id: string; name: string }[],
     onPlaylistAdd?: () => void,
+    selectMode?: boolean,
+    isSelected?: boolean,
+    onSelect?: (songId: string) => void,
+    onLongPress?: (songId: string) => void,
 }) {
     const { isAdmin } = useUser()
     const online = useOnline()
@@ -50,6 +54,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
     const [playlistPickerOpen, setPlaylistPickerOpen] = useState(false)
     const [addedToPlaylist, setAddedToPlaylist] = useState<string | null>(null)
     const kebabRef = useRef<HTMLButtonElement>(null)
+    const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
     const { play, pause, resume, current, isPlaying, insertNext } = usePlayer()
     const isCurrentSong = current?.uuid === song.songId
 
@@ -70,12 +75,31 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
         setLibraryPending(false)
     }
 
-    function handleCardClick() {
+    function handleCardClick(e?: React.MouseEvent) {
+        if (selectMode) {
+            if (song.songId && onSelect) onSelect(song.songId)
+            return
+        }
         if (song.songId && isCurrentSong) {
             if (isPlaying) pause()
             else resume()
         } else {
-            onClick()
+            onClick(e)
+        }
+    }
+
+    function handleTouchStart() {
+        if (!song.songId || !onLongPress) return
+        longPressTimer.current = setTimeout(() => {
+            longPressTimer.current = null
+            onLongPress(song.songId!)
+        }, 500)
+    }
+
+    function cancelLongPress() {
+        if (longPressTimer.current) {
+            clearTimeout(longPressTimer.current)
+            longPressTimer.current = null
         }
     }
 
@@ -138,10 +162,17 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
         router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
     }
 
-    function openKebab(e: React.MouseEvent) {
+    function openKebab(e: React.MouseEvent | React.TouchEvent) {
         e.stopPropagation()
         const rect = kebabRef.current?.getBoundingClientRect()
-        if (rect) setKebabPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right })
+        if (rect) {
+            const menuWidth = 155
+            const rightEdge = window.innerWidth - rect.right
+            setKebabPos({
+                top: rect.bottom + 4,
+                right: Math.max(0, Math.min(rightEdge, window.innerWidth - menuWidth - 4)),
+            })
+        }
         setKebabOpen(o => !o)
     }
 
@@ -156,21 +187,21 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
             >
                 <button onClick={() => { setKebabOpen(false); handleDownload() }}
                     disabled={!online}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed">
+                    className="w-full text-left px-3 py-3 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation">
                     Download
                 </button>
                 <button onClick={() => { setKebabOpen(false); insertNext({ uuid: song.songId!, properties: song.properties }) }}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700">
+                    className="w-full text-left px-3 py-3 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 touch-manipulation">
                     Play next
                 </button>
                 <button onClick={() => { setKebabOpen(false); handleShare() }}
                     disabled={!online}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed">
+                    className="w-full text-left px-3 py-3 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation">
                     {copied ? 'Link copied!' : 'Copy share link'}
                 </button>
                 <button onClick={() => { setKebabOpen(false); handleOfflineToggle() }}
                     disabled={offlinePending || (!online && !offlineCached)}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed">
+                    className="w-full text-left px-3 py-3 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation">
                     {offlinePending
                         ? `Saving… ${offlineProgress > 0 ? Math.round(offlineProgress * 100) + '%' : ''}`
                         : offlineCached ? 'Remove offline copy' : 'Save offline'}
@@ -180,7 +211,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                         <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
                         <button
                             onClick={() => setPlaylistPickerOpen(o => !o)}
-                            className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-between"
+                            className="w-full text-left px-3 py-3 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 touch-manipulation flex items-center justify-between"
                         >
                             Add to playlist
                             <span className="text-gray-400 text-xs">{playlistPickerOpen ? '▲' : '▼'}</span>
@@ -209,7 +240,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                 <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
                 <button onClick={() => { setKebabOpen(false); openEditor() }}
                     disabled={!online}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed">
+                    className="w-full text-left px-3 py-3 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation">
                     Edit
                 </button>
             </div>
@@ -219,7 +250,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
 
     const kebabMenu = song.songId ? (
         <div onClick={e => e.stopPropagation()}>
-            <button ref={kebabRef} data-testid="song-kebab" onClick={openKebab} title="more" className="cursor-pointer text-gray-400 hover:text-sky-500 p-0.5">
+            <button ref={kebabRef} data-testid="song-kebab" onClick={openKebab} title="more" className="cursor-pointer text-gray-400 hover:text-sky-500 active:text-sky-500 p-2 -m-1 touch-manipulation">
                 <FaEllipsisV size={12} />
             </button>
             {kebabDropdown}
@@ -253,6 +284,18 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
         </div>
     )
 
+    const checkboxOverlay = selectMode ? (
+        <div className="absolute top-2 left-2 z-10 pointer-events-none">
+            <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${isSelected ? 'bg-sky-500 border-sky-500' : 'border-gray-400 bg-white/80 dark:bg-gray-900/80'}`}>
+                {isSelected && (
+                    <svg viewBox="0 0 12 10" className="w-3 h-3 text-white" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="1,5 4.5,9 11,1" />
+                    </svg>
+                )}
+            </div>
+        </div>
+    ) : null
+
     const modal = editorOpen && song.songId ? (
         <EditorModal
             songId={song.songId}
@@ -273,20 +316,26 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                 {modal}
                 <div
                     data-testid="song-card"
-                    onClick={handleCardClick}
+                    onClick={e => handleCardClick(e)}
                     role="button"
                     tabIndex={0}
                     onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && handleCardClick()}
-                    className={`flex items-center gap-3 w-full text-left rounded-md p-2 transition-colors cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-900 ${selected ? 'bg-gray-100 dark:bg-gray-800' : ''}`}
+                    onTouchStart={handleTouchStart}
+                    onTouchEnd={cancelLongPress}
+                    onTouchMove={cancelLongPress}
+                    className={`relative flex items-center gap-3 w-full text-left rounded-md p-2 transition-colors cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-900 touch-manipulation ${isSelected ? 'bg-sky-50 dark:bg-sky-950/30' : selected ? 'bg-gray-100 dark:bg-gray-800' : ''}`}
                 >
+                    {checkboxOverlay}
                     {rank !== undefined && (
                         <span className="text-gray-400 tabular-nums w-5 text-right shrink-0 text-sm">{rank}</span>
                     )}
-                    {songArtworkUrl(song.songId, song.artworkCached, song.properties.artworkUrl100, 200) ? (
-                        <Image src={songArtworkUrl(song.songId, song.artworkCached, song.properties.artworkUrl100, 200)!} alt="" width={36} height={36} className="rounded shrink-0" />
-                    ) : (
-                        <div className="w-9 h-9 rounded shrink-0 bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-base">🎵</div>
-                    )}
+                    <div className={`shrink-0 transition-all ${selectMode ? 'ml-7' : ''}`}>
+                        {songArtworkUrl(song.songId, song.artworkCached, song.properties.artworkUrl100, 200) ? (
+                            <Image src={songArtworkUrl(song.songId, song.artworkCached, song.properties.artworkUrl100, 200)!} alt="" width={36} height={36} className="rounded" />
+                        ) : (
+                            <div className="w-9 h-9 rounded bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-base">🎵</div>
+                        )}
+                    </div>
                     <div className="flex flex-col min-w-0 flex-1">
                         <span className={`text-sm font-medium truncate flex items-center gap-1 ${isCurrentSong ? 'text-sky-500' : ''}`}>
                             {isPrivate && <FaLock size={9} className="text-gray-400 shrink-0" />}
@@ -294,9 +343,11 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                         </span>
                         <span className="text-xs text-sky-500 truncate">{song.properties.artistName || 'Unknown artist'} · {song.properties.collectionName || 'Unknown album'}</span>
                     </div>
-                    <div onClick={e => e.stopPropagation()}>
-                        {actions}
-                    </div>
+                    {!selectMode && (
+                        <div onClick={e => e.stopPropagation()}>
+                            {actions}
+                        </div>
+                    )}
                 </div>
             </>
         )
@@ -307,14 +358,18 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
             {modal}
             <div
                 data-testid="song-card"
-                onClick={handleCardClick}
+                onClick={e => handleCardClick(e)}
                 role="button"
                 tabIndex={0}
                 onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && handleCardClick()}
-                className={`dark:hover:bg-gray-900 hover:bg-gray-200 rounded-md p-2 w-full cursor-pointer ${selected ? 'bg-gray-300 dark:bg-gray-800' : ''}`}
+                onTouchStart={handleTouchStart}
+                onTouchEnd={cancelLongPress}
+                onTouchMove={cancelLongPress}
+                className={`relative dark:hover:bg-gray-900 hover:bg-gray-200 rounded-md p-2 w-full cursor-pointer touch-manipulation ${isSelected ? 'bg-sky-50 dark:bg-sky-950/30' : selected ? 'bg-gray-300 dark:bg-gray-800' : ''}`}
             >
+                {checkboxOverlay}
                 <div className="flex flex-row justify-between">
-                    <div className="flex flex-row rounded-lg min-w-0">
+                    <div className={`flex flex-row rounded-lg min-w-0 transition-all ${selectMode ? 'ml-8' : ''}`}>
                         <div className="shrink-0">
                             {songArtworkUrl(song.songId, song.artworkCached, song.properties.artworkUrl100, 400) ? (
                                 <Image className="rounded-md object-contain w-16 h-16 md:w-24 md:h-24" alt="" src={songArtworkUrl(song.songId, song.artworkCached, song.properties.artworkUrl100, 400)!} width={96} height={96} />
@@ -337,9 +392,11 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                             {downloadError && <span className="text-red-500 text-sm">download failed, try again</span>}
                         </div>
                     </div>
-                    <div className="flex flex-col gap-2 items-center justify-center shrink-0 ml-2" onClick={e => e.stopPropagation()}>
-                        {actions}
-                    </div>
+                    {!selectMode && (
+                        <div className="flex flex-col gap-2 items-center justify-center shrink-0 ml-2" onClick={e => e.stopPropagation()}>
+                            {actions}
+                        </div>
+                    )}
                 </div>
             </div>
         </>
