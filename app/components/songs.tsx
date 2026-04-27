@@ -107,6 +107,7 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
                                     }
                                 }}
                                 inLibrary={song.songId ? libraryIds.has(song.songId) : false}
+                                showSource={true}
                             />
                         )
                     })}

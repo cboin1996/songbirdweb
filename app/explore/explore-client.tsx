@@ -22,7 +22,7 @@ const SORTS: { value: SortBy; label: string }[] = [
     { value: 'recently_played', label: 'recently played' },
 ]
 
-type AnyItem = SongWithCount | RecentlyPlayedSong | RecentlySavedSong | { uuid: string; url: string; properties: ExploreData['recently_added'][0]['properties'] }
+type AnyItem = SongWithCount | RecentlyPlayedSong | RecentlySavedSong | { uuid: string; url?: string; properties: ExploreData['recently_added'][0]['properties']; source?: string | null }
 
 function matchesSearch(item: AnyItem, query: string): boolean {
     if (!query) return true
@@ -47,10 +47,11 @@ function itemStat(item: AnyItem, sortBy: SortBy): string | null {
     return null
 }
 
-function SongGrid({ songs, libraryIds, sortBy }: {
+function SongGrid({ songs, libraryIds, sortBy, showSource }: {
     songs: AnyItem[]
     libraryIds: Set<string>
     sortBy: SortBy
+    showSource?: boolean
 }) {
     const { play, current } = usePlayer()
     if (songs.length === 0) return <p className="text-gray-400 text-sm py-4">no data yet</p>
@@ -59,7 +60,7 @@ function SongGrid({ songs, libraryIds, sortBy }: {
         <div className="grid 2xl:grid-cols-4 xl:grid-cols-3 lg:grid-cols-2 gap-2 md:gap-8 rounded-2xl justify-items-stretch">
             {songs.map(s => {
                 if (!s.properties) return null
-                const song = { songId: s.uuid, properties: s.properties }
+                const song = { songId: s.uuid, properties: s.properties, source: ('source' in s ? s.source : undefined) ?? undefined }
                 const stat = itemStat(s, sortBy)
                 return (
                     <div key={s.uuid} className="flex flex-col gap-1">
@@ -69,6 +70,7 @@ function SongGrid({ songs, libraryIds, sortBy }: {
                             onClick={() => play({ uuid: s.uuid, properties: s.properties! }, queue, { label: 'Explore', href: routes.explore })}
                             inLibrary={libraryIds.has(s.uuid)}
                             editContext={{ label: 'Explore', href: routes.explore }}
+                            showSource={showSource}
                         />
                         {stat && <span className="text-xs text-gray-400 px-1">{stat}</span>}
                     </div>
@@ -195,7 +197,7 @@ export default function ExploreClient({ data, window }: { data: ExploreData | un
                                         {sortLabel}
                                         {!recentSelected && <span className="ml-1 text-gray-300 dark:text-gray-600">· {windowLabel}</span>}
                                     </h2>
-                                    <SongGrid songs={mainList} libraryIds={libraryIds} sortBy={sortBy} />
+                                    <SongGrid songs={mainList} libraryIds={libraryIds} sortBy={sortBy} showSource={true} />
                                 </div>
                                 {yourList && (
                                     <div>
@@ -203,7 +205,22 @@ export default function ExploreClient({ data, window }: { data: ExploreData | un
                                             your {sortLabel}
                                             {showWindow && <span className="ml-1 text-gray-300 dark:text-gray-600">· {windowLabel}</span>}
                                         </h2>
-                                        <SongGrid songs={yourList} libraryIds={libraryIds} sortBy={sortBy} />
+                                        <SongGrid songs={yourList} libraryIds={libraryIds} sortBy={sortBy} showSource={true} />
+                                    </div>
+                                )}
+                                {data && data.community_popular.length > 0 && (
+                                    <div>
+                                        <h2 className="text-sm font-medium text-gray-400 mb-4">
+                                            from the community
+                                            {!recentSelected && <span className="ml-1 text-gray-300 dark:text-gray-600">· {windowLabel}</span>}
+                                        </h2>
+                                        <SongGrid songs={data.community_popular.filter(s => matchesSearch(s, search))} libraryIds={libraryIds} sortBy={sortBy} showSource={true} />
+                                    </div>
+                                )}
+                                {data && data.community_recent.length > 0 && (
+                                    <div>
+                                        <h2 className="text-sm font-medium text-gray-400 mb-4">recently added by the community</h2>
+                                        <SongGrid songs={data.community_recent.filter(s => matchesSearch(s, search))} libraryIds={libraryIds} sortBy={sortBy} showSource={true} />
                                     </div>
                                 )}
                             </>

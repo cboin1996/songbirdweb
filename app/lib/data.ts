@@ -161,6 +161,7 @@ export interface LibrarySong {
   parent_song_id: string | null
   root_song_id: string | null
   owner_id: string | null
+  source?: string | null
   added_at: string
   last_position: number
   last_played_at: string | null
@@ -205,6 +206,7 @@ export interface SongWithCount {
   uuid: string
   properties: Properties | null
   count: number
+  source?: string | null
 }
 
 export interface RecentlyPlayedSong {
@@ -223,11 +225,13 @@ export interface ExploreData {
   most_played: SongWithCount[]
   most_downloaded: SongWithCount[]
   most_libraryed: SongWithCount[]
-  recently_added: { uuid: string; url: string; properties: Properties | null; added_at?: string }[]
+  recently_added: { uuid: string; url: string; properties: Properties | null; added_at?: string; source?: string | null }[]
   your_most_played: SongWithCount[]
   your_most_downloaded: SongWithCount[]
   your_recently_saved: RecentlySavedSong[]
   your_recently_played: RecentlyPlayedSong[]
+  community_recent: { uuid: string; url: string; properties: Properties | null; source?: string | null }[]
+  community_popular: SongWithCount[]
 }
 
 export async function fetchExplore(window: ExploreWindow = 'week'): Promise<ExploreData | undefined> {
@@ -262,6 +266,7 @@ export interface DownloadedSong {
   artworkCached?: boolean;
   parentSongId?: string | null;
   rootSongId?: string | null;
+  source?: string | null;
 }
 
 export function artworkUrl(url: string, size: number): string {
