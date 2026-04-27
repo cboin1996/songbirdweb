@@ -10,8 +10,9 @@ import { usePlayer } from "./player";
 import EditorModal from "./editor-modal";
 import { useUser } from "../lib/user-context";
 import { useOnline } from "../lib/use-online";
+import CommunityBadge from "./community-badge";
 
-export default function Song({ song, selected, onClick, inLibrary: initialInLibrary, cachedOffline: initialCachedOffline, onRemove, onCacheChange, compact, rank, editContext, onEditComplete, isPrivate, playlists, onPlaylistAdd, selectMode, isSelected, onSelect, onLongPress }: {
+export default function Song({ song, selected, onClick, inLibrary: initialInLibrary, cachedOffline: initialCachedOffline, onRemove, onCacheChange, compact, rank, editContext, onEditComplete, isPrivate, playlists, onPlaylistAdd, selectMode, isSelected, onSelect, onLongPress, showSource }: {
     song: DownloadedSong,
     selected: boolean,
     onClick: (e?: React.MouseEvent) => void,
@@ -30,6 +31,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
     isSelected?: boolean,
     onSelect?: (songId: string) => void,
     onLongPress?: (songId: string) => void,
+    showSource?: boolean,
 }) {
     const { isAdmin } = useUser()
     const online = useOnline()
@@ -340,6 +342,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                         <span className={`text-sm font-medium truncate flex items-center gap-1 ${isCurrentSong ? 'text-sky-500' : ''}`}>
                             {isPrivate && <FaLock size={9} className="text-gray-400 shrink-0" />}
                             {song.properties.trackName || 'Unknown title'}
+                            {showSource && song.source === 'community' && <CommunityBadge />}
                         </span>
                         <span className="text-xs text-sky-500 truncate">{song.properties.artistName || 'Unknown artist'} · {song.properties.collectionName || 'Unknown album'}</span>
                     </div>
@@ -381,6 +384,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                             <span className="text-lg md:text-2xl font-medium text-left truncate flex items-center gap-1.5">
                                 {isPrivate && <FaLock size={12} className="text-gray-400 shrink-0" />}
                                 {song.properties.trackName || 'Unknown title'}
+                                {showSource && song.source === 'community' && <CommunityBadge />}
                             </span>
                             <span className="font-medium text-sky-500 text-left truncate">{`${song.properties.artistName || 'Unknown artist'} · ${song.properties.collectionName || 'Unknown album'}`}</span>
                             <span className="flex gap-2 font-medium text-gray-500">

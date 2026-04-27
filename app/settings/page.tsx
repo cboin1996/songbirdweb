@@ -64,7 +64,7 @@ function OfflineStorage() {
     return (
         <div>
             <p className="text-gray-400 text-sm pb-2">offline storage</p>
-            <div className="flex flex-col gap-3 w-64">
+            <div className="flex flex-col gap-3 w-full max-w-xs">
                 <div className="flex flex-col gap-1">
                     <div className="flex justify-between text-xs text-gray-400">
                         <span>{formatBytes(estimate.used)} used</span>
@@ -125,7 +125,7 @@ export default function Page() {
                 <OfflineStorage />
                 <div>
                     <p className="text-gray-400 text-sm pb-2">change password</p>
-                    <form onSubmit={handleSubmit} className="flex flex-col gap-2 w-64">
+                    <form onSubmit={handleSubmit} className="flex flex-col gap-2 w-full max-w-xs">
                         <PasswordField
                             placeholder="current password"
                             value={currentPassword}
