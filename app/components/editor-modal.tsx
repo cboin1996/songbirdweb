@@ -1403,9 +1403,9 @@ export default function EditorModal({
                   <span className={params.normalize ? 'text-sky-500' : 'text-gray-400'}>Normalize</span>
                 </label>
                 {isAdmin && (
-                  <label className="flex items-center gap-1.5 text-xs text-gray-400 select-none">
-                    <input type="checkbox" checked={overwrite} onChange={e => setOverwrite(e.target.checked)} className="accent-sky-500" />
-                    overwrite
+                  <label className="flex items-center gap-1.5 text-xs select-none cursor-pointer">
+                    <input type="checkbox" checked={overwrite} onChange={e => setOverwrite(e.target.checked)} className="accent-red-500" />
+                    <span className={overwrite ? 'text-red-400 font-medium' : 'text-gray-400'}>overwrite original</span>
                   </label>
                 )}
               </div>

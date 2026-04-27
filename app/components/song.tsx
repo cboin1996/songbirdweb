@@ -41,9 +41,8 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
     const [editorOpen, setEditorOpen] = useState(() => searchParams.get('edit') === song.songId)
 
     useEffect(() => {
-        if (searchParams.get('edit') === song.songId && !editorOpen) setEditorOpen(true)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [])
+        if (searchParams.get('edit') === song.songId) setEditorOpen(true)
+    }, [searchParams, song.songId])
     const [kebabOpen, setKebabOpen] = useState(false)
     const [kebabPos, setKebabPos] = useState({ top: 0, right: 0 })
     const [playlistPickerOpen, setPlaylistPickerOpen] = useState(false)

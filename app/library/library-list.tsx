@@ -317,7 +317,6 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
 
     return (
         <div className="relative pr-7">
-            <EditsBanner />
             {/* Sticky toolbar */}
             <div className="sticky top-11 z-40 bg-white/90 dark:bg-gray-950/90 backdrop-blur-md py-3 flex flex-wrap gap-3 items-center border-b border-gray-100 dark:border-gray-800 mb-2">
                 {viewMode !== 'playlists' && (
@@ -329,6 +328,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                         play all
                     </button>
                 )}
+                <EditsBanner />
                 {viewMode !== 'playlists' && (
                     <button
                         onClick={saveAllOffline}
