@@ -163,12 +163,19 @@ export default function EditorModal({
   const overlayElemsRef = useRef<Map<string, HTMLElement>>(new Map())
 
   // --- edit clipboard (cut/copy/paste) ---
-  type ClipboardEntry = { kind: 'cut'; data: Cut } | { kind: 'fade'; data: FadeEdit }
+  type ClipboardSingle = { kind: 'cut'; data: Cut } | { kind: 'fade'; data: FadeEdit }
+  type ClipboardEntry = ClipboardSingle | { kind: 'all'; cuts: Cut[]; fades: FadeEdit[] }
   const clipboardRef = useRef<ClipboardEntry | null>(null)
+
+  // --- multi-select (all) ---
+  const [allSelected, setAllSelected] = useState(false)
+  const allSelectedRef = useRef(false)
 
   // --- fade handle drag (capture listener, always reads latest handler via ref) ---
   const fadeHandleDragRef = useRef<(e: PointerEvent) => void>(() => {})
   const fadeHandleHoverRef = useRef<(e: MouseEvent) => void>(() => {})
+  // which fade zone is hovered: { cutId, side: 'left'|'right' } or null
+  const hoveredFadeRef = useRef<{ cutId: string; side: 'left' | 'right' } | null>(null)
 
   // --- region drag vs resize detection (true = body drag, false = handle resize) ---
   const isRegionDragRef = useRef(false)
@@ -191,6 +198,15 @@ export default function EditorModal({
   const [closeConfirm, setCloseConfirm] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // --- paste warning ---
+  const [pasteWarning, setPasteWarning] = useState<string | null>(null)
+  const pasteWarnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  function showPasteWarning(msg: string) {
+    if (pasteWarnTimerRef.current) clearTimeout(pasteWarnTimerRef.current)
+    setPasteWarning(msg)
+    pasteWarnTimerRef.current = setTimeout(() => setPasteWarning(null), 4000)
+  }
 
   // --- restore ---
   const [restoreConfirm, setRestoreConfirm] = useState<'original' | 'last' | null>(null)
@@ -289,18 +305,38 @@ export default function EditorModal({
       if (fadeIn > 0) ctx.fillRect(xR, midY - 0.5, xFI - xR, 1)
       ctx.beginPath(); ctx.moveTo(xFI, 2); ctx.lineTo(xFI, 2 + HS); ctx.lineTo(xFI + HS, midY); ctx.closePath(); ctx.fill()
     }
-    // Selected cut: outline the full fade+cut zone
-    const selId = selectedRegionIdRef.current
-    if (selId) {
-      const selCut = p.cuts.find(c => c.id === selId)
-      if (selCut) {
-        const x1 = Math.max(0, ((selCut.start - (selCut.fade_out ?? 0)) / dur) * width)
-        const x2 = Math.min(width, ((selCut.end + (selCut.fade_in ?? 0)) / dur) * width)
-        ctx.strokeStyle = '#38bdf8'
-        ctx.lineWidth = 1.5
+    // Selected cut(s): outline the full fade+cut zone
+    const cutsToOutline = allSelectedRef.current
+      ? p.cuts
+      : p.cuts.filter(c => c.id === selectedRegionIdRef.current)
+    ctx.strokeStyle = '#dc2626'
+    ctx.lineWidth = 1.5
+    for (const selCut of cutsToOutline) {
+      const x1 = Math.max(0, ((selCut.start - (selCut.fade_out ?? 0)) / dur) * width)
+      const x2 = Math.min(width, ((selCut.end + (selCut.fade_in ?? 0)) / dur) * width)
+      ctx.beginPath()
+      if (ctx.roundRect) ctx.roundRect(x1, 1, x2 - x1, height - 2, 2)
+      else ctx.rect(x1, 1, x2 - x1, height - 2)
+      ctx.stroke()
+    }
+    // Hovered fade zone: outline just that fade portion
+    const hov = hoveredFadeRef.current
+    if (hov) {
+      const hovCut = p.cuts.find(c => c.id === hov.cutId)
+      if (hovCut) {
+        let hx1: number, hx2: number
+        if (hov.side === 'left') {
+          hx1 = Math.max(0, ((hovCut.start - (hovCut.fade_out ?? 0)) / dur) * width)
+          hx2 = (hovCut.start / dur) * width
+        } else {
+          hx1 = (hovCut.end / dur) * width
+          hx2 = Math.min(width, ((hovCut.end + (hovCut.fade_in ?? 0)) / dur) * width)
+        }
+        ctx.strokeStyle = '#dc2626'
+        ctx.lineWidth = 1
         ctx.beginPath()
-        if (ctx.roundRect) ctx.roundRect(x1, 1, x2 - x1, height - 2, 2)
-        else ctx.rect(x1, 1, x2 - x1, height - 2)
+        if (ctx.roundRect) ctx.roundRect(hx1, 1, hx2 - hx1, height - 2, 2)
+        else ctx.rect(hx1, 1, hx2 - hx1, height - 2)
         ctx.stroke()
       }
     }
@@ -338,19 +374,45 @@ export default function EditorModal({
   // keep refs in sync for stale-closure-safe event handlers
   useEffect(() => { loopingRef.current = looping }, [looping])
   useEffect(() => { wsReadyRef.current = wsReady }, [wsReady])
-  useEffect(() => {
-    selectedRegionIdRef.current = selectedRegionId
+  useEffect(() => { allSelectedRef.current = allSelected }, [allSelected])
+
+  function applyRegionOutlines(selId: string | null, selAll: boolean) {
     regionElemsRef.current.forEach((el, id) => {
       const isCut = !id.startsWith('fade-') && id !== 'trim'
-      // cuts: selection shown via canvas rect (full fade extent); fades/trim use WS outline
-      el.style.outline = id === selectedRegionId && !isCut ? '2px solid #38bdf8' : ''
+      const isSelected = selAll ? !isCut : (id === selId && !isCut)
+      if ((selAll && !isCut) || (!selAll && id === selId && !isCut)) {
+        let color = '#38bdf8'
+        if (id.startsWith('fade-')) {
+          const fade = paramsRef.current.fades.find(f => f.id === id.slice(5))
+          color = fade?.type === 'out' ? '#f59e0b' : '#38bdf8'
+        }
+        el.style.outline = `2px solid ${color}`
+      } else {
+        el.style.outline = ''
+      }
       el.style.outlineOffset = '1px'
+      void isSelected // suppress unused warning
     })
+  }
+
+  useEffect(() => {
+    selectedRegionIdRef.current = selectedRegionId
+    applyRegionOutlines(selectedRegionId, allSelectedRef.current)
     if (waveRafRef.current) cancelAnimationFrame(waveRafRef.current)
     waveRafRef.current = requestAnimationFrame(() => {
       if (peaksRef.current && waveCtxRef.current) renderWave(peaksRef.current, waveCtxRef.current)
     })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedRegionId, renderWave])
+
+  useEffect(() => {
+    applyRegionOutlines(selectedRegionIdRef.current, allSelected)
+    if (waveRafRef.current) cancelAnimationFrame(waveRafRef.current)
+    waveRafRef.current = requestAnimationFrame(() => {
+      if (peaksRef.current && waveCtxRef.current) renderWave(peaksRef.current, waveCtxRef.current)
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allSelected, renderWave])
   useEffect(() => {
     paramsRef.current = params
     trimParamsRef.current = { trim_start: params.trim_start, trim_end: params.trim_end }
@@ -513,6 +575,7 @@ export default function EditorModal({
       // click → select (stop propagation so waveform click doesn't also fire)
       el.addEventListener('click', e => {
         e.stopPropagation()
+        setAllSelected(false)
         setSelectedRegionId(prev => prev === region.id ? null : region.id)
         setContextMenu(null)
         setRegionContextMenu(null)
@@ -570,14 +633,16 @@ export default function EditorModal({
             Object.assign(overlay.style, {
               position: 'absolute', top: '0', height: '100%',
               pointerEvents: 'none', boxSizing: 'border-box',
-              border: '2px solid rgb(14,165,233)',
+              border: `2px solid ${handleColor}`,
             })
             container.appendChild(overlay)
             overlayElemsRef.current.set(region.id, overlay)
             syncOverlay()
           }
         } else {
-          el.style.boxShadow = '0 0 0 2px rgb(14,165,233)'
+          const isFadeOut = region.id.startsWith('fade-') &&
+            paramsRef.current.fades.find(f => f.id === region.id.slice(5))?.type === 'out'
+          el.style.boxShadow = `0 0 0 2px ${isFadeOut ? '#f59e0b' : '#38bdf8'}`
         }
       })
       el.addEventListener('mouseleave', () => {
@@ -815,11 +880,21 @@ export default function EditorModal({
     if (!container) return
     const downHandler = (e: PointerEvent) => fadeHandleDragRef.current(e)
     const moveHandler = (e: MouseEvent) => fadeHandleHoverRef.current(e)
+    const leaveHandler = () => {
+      if (!hoveredFadeRef.current) return
+      hoveredFadeRef.current = null
+      if (waveRafRef.current) cancelAnimationFrame(waveRafRef.current)
+      waveRafRef.current = requestAnimationFrame(() => {
+        if (peaksRef.current && waveCtxRef.current) renderWave(peaksRef.current, waveCtxRef.current)
+      })
+    }
     container.addEventListener('pointerdown', downHandler, { capture: true })
     container.addEventListener('mousemove', moveHandler)
+    container.addEventListener('mouseleave', leaveHandler)
     return () => {
       container.removeEventListener('pointerdown', downHandler, { capture: true })
       container.removeEventListener('mousemove', moveHandler)
+      container.removeEventListener('mouseleave', leaveHandler)
     }
   }, [])
 
@@ -1051,6 +1126,82 @@ export default function EditorModal({
       scheduleSave(next)
       return next
     })
+  }
+
+  function executePaste(atTime?: number) {
+    const entry = clipboardRef.current
+    if (!entry) return
+    const p = paramsRef.current
+    const dur = wsRef.current?.getDuration() ?? 0
+    const trimStart = p.trim_start
+    const trimEnd = p.trim_end ?? dur
+    pushHistory(p)
+
+    // compute delta for "paste here" — shift so earliest edge aligns with atTime
+    let delta = 0
+    if (atTime !== undefined) {
+      if (entry.kind === 'all') {
+        const earliest = Math.min(
+          ...entry.cuts.map(c => c.start),
+          ...entry.fades.map(f => f.start),
+          Infinity,
+        )
+        delta = earliest === Infinity ? 0 : atTime - earliest
+      } else {
+        delta = atTime - entry.data.start
+      }
+    }
+
+    let dropped = 0; let clamped = 0
+
+    function applyBounds(rawStart: number, rawEnd: number) {
+      const s = Math.max(trimStart, rawStart)
+      const e = Math.min(trimEnd, rawEnd)
+      const fits = e - s >= 0.01
+      if (!fits) dropped++
+      else if (s !== rawStart || e !== rawEnd) clamped++
+      return fits ? { start: s, end: e } : null
+    }
+
+    if (entry.kind === 'all') {
+      const newCuts = entry.cuts.flatMap(c => {
+        const b = applyBounds(c.start + delta, c.end + delta)
+        return b ? [{ ...c, id: crypto.randomUUID(), ...b }] : []
+      })
+      const newFades = entry.fades.flatMap(f => {
+        const b = applyBounds(f.start + delta, f.end + delta)
+        return b ? [{ ...f, id: crypto.randomUUID(), ...b }] : []
+      })
+      const ac = [...p.cuts, ...newCuts]; const af = [...p.fades, ...newFades]
+      setParams(prev => ({ ...prev, cuts: ac, fades: af }))
+      syncCutRegions(ac); syncFadeRegions(af)
+      setAllSelected(true); setSelectedRegionId(null)
+    } else if (entry.kind === 'cut') {
+      const b = applyBounds(entry.data.start + delta, entry.data.end + delta)
+      if (b) {
+        const id = crypto.randomUUID()
+        const nc: Cut = { ...entry.data, id, ...b }
+        setParams(prev => ({ ...prev, cuts: [...prev.cuts, nc] }))
+        syncCutRegions([...p.cuts, nc])
+        setSelectedRegionId(id); setAllSelected(false)
+      }
+    } else {
+      const b = applyBounds(entry.data.start + delta, entry.data.end + delta)
+      if (b) {
+        const id = crypto.randomUUID()
+        const nf: FadeEdit = { ...entry.data, id, ...b }
+        setParams(prev => ({ ...prev, fades: [...prev.fades, nf] }))
+        syncFadeRegions([...p.fades, nf])
+        setSelectedRegionId(`fade-${id}`); setAllSelected(false)
+      }
+    }
+
+    if (dropped > 0 || clamped > 0) {
+      const parts = []
+      if (dropped > 0) parts.push(`${dropped} ${dropped === 1 ? 'edit' : 'edits'} outside trim and removed`)
+      if (clamped > 0) parts.push(`${clamped} clipped to fit`)
+      showPasteWarning(parts.join(', ') + '.')
+    }
   }
 
   function removeSelected() {
@@ -1562,6 +1713,7 @@ export default function EditorModal({
 
   function handleWaveformClick(e: React.MouseEvent<HTMLDivElement>) {
     setSelectedRegionId(null)
+    setAllSelected(false)
     setRegionContextMenu(null)
     if (!wsReady || !duration || !waveRef.current) return
     const rect = waveRef.current.getBoundingClientRect()
@@ -1580,6 +1732,7 @@ export default function EditorModal({
 
     if (e.key === 'Escape') {
       e.preventDefault()
+      if (allSelectedRef.current) { setAllSelected(false); return }
       if (selectedRegionIdRef.current) { setSelectedRegionId(null); setRegionContextMenu(null); return }
       handleClose()
       return
@@ -1611,20 +1764,28 @@ export default function EditorModal({
     // copy / cut / paste / select-all for regions
     if (!inInput && (e.metaKey || e.ctrlKey) && e.key === 'a') {
       e.preventDefault()
-      const allIds = [
-        ...paramsRef.current.cuts.map(c => c.id!).filter(Boolean),
-        ...paramsRef.current.fades.map(f => `fade-${f.id!}`).filter(Boolean),
-      ]
-      if (allIds.length === 0) return
-      const cur = selectedRegionIdRef.current
-      const next = cur ? allIds[(allIds.indexOf(cur) + 1) % allIds.length] : allIds[0]
-      setSelectedRegionId(next)
+      const p = paramsRef.current
+      if (p.cuts.length === 0 && p.fades.length === 0) return
+      setAllSelected(true)
+      setSelectedRegionId(null)
       return
     }
     if (!inInput && (e.metaKey || e.ctrlKey) && (e.key === 'c' || e.key === 'x')) {
+      e.preventDefault()
+      if (allSelectedRef.current) {
+        const p = paramsRef.current
+        clipboardRef.current = { kind: 'all', cuts: p.cuts.map(c => ({ ...c })), fades: p.fades.map(f => ({ ...f })) }
+        if (e.key === 'x') {
+          pushHistory(p)
+          setParams(prev => ({ ...prev, cuts: [], fades: [] }))
+          syncCutRegions([])
+          syncFadeRegions([])
+          setAllSelected(false)
+        }
+        return
+      }
       const id = selectedRegionIdRef.current
       if (!id || id === 'trim') return
-      e.preventDefault()
       if (id.startsWith('fade-')) {
         const fade = paramsRef.current.fades.find(f => f.id === id.slice(5))
         if (fade) clipboardRef.current = { kind: 'fade', data: { ...fade } }
@@ -1636,26 +1797,9 @@ export default function EditorModal({
       return
     }
     if (!inInput && (e.metaKey || e.ctrlKey) && e.key === 'v') {
-      const entry = clipboardRef.current
-      if (!entry) return
+      if (!clipboardRef.current) return
       e.preventDefault()
-      const cursor = wsRef.current?.getCurrentTime() ?? paramsRef.current.trim_start
-      pushHistory(paramsRef.current)
-      if (entry.kind === 'cut') {
-        const size = entry.data.end - entry.data.start
-        const id = crypto.randomUUID()
-        const newCut: Cut = { ...entry.data, id, start: cursor, end: cursor + size }
-        setParams(prev => ({ ...prev, cuts: [...prev.cuts, newCut] }))
-        syncCutRegions([...paramsRef.current.cuts, newCut])
-        setSelectedRegionId(id)
-      } else {
-        const size = entry.data.end - entry.data.start
-        const id = crypto.randomUUID()
-        const newFade: FadeEdit = { ...entry.data, id, start: cursor, end: cursor + size }
-        setParams(prev => ({ ...prev, fades: [...prev.fades, newFade] }))
-        syncFadeRegions([...paramsRef.current.fades, newFade])
-        setSelectedRegionId(`fade-${id}`)
-      }
+      executePaste()
       return
     }
     if (!inInput && (e.key === 'j' || e.key === 'k')) {
@@ -1743,20 +1887,32 @@ export default function EditorModal({
     const rect = container.getBoundingClientRect()
     const hoverTime = ((e.clientX - rect.left) / rect.width) * dur
     const HIT_SEC = (12 / rect.width) * dur
-    let overHandle = false
+    let newHov: { cutId: string; side: 'left' | 'right' } | null = null
     for (const cut of paramsRef.current.cuts) {
       if (!cut.id) continue
       const foTime = cut.start - (cut.fade_out ?? 0)
       const fiTime = cut.end + (cut.fade_in ?? 0)
-      if ((hoverTime >= foTime - HIT_SEC && hoverTime <= cut.start) ||
-          (hoverTime >= cut.end && hoverTime <= fiTime + HIT_SEC)) {
-        overHandle = true
+      if (hoverTime >= foTime - HIT_SEC && hoverTime <= cut.start) {
+        newHov = { cutId: cut.id, side: 'left' }
+        break
+      }
+      if (hoverTime >= cut.end && hoverTime <= fiTime + HIT_SEC) {
+        newHov = { cutId: cut.id, side: 'right' }
         break
       }
     }
+    const prev = hoveredFadeRef.current
+    const changed = prev?.cutId !== newHov?.cutId || prev?.side !== newHov?.side
+    hoveredFadeRef.current = newHov
     const trimEl = regionElemsRef.current.get('trim') as HTMLElement | undefined
-    container.style.cursor = overHandle ? 'ew-resize' : ''
-    if (trimEl) trimEl.style.cursor = overHandle ? 'ew-resize' : ''
+    container.style.cursor = newHov ? 'ew-resize' : ''
+    if (trimEl) trimEl.style.cursor = newHov ? 'ew-resize' : ''
+    if (changed) {
+      if (waveRafRef.current) cancelAnimationFrame(waveRafRef.current)
+      waveRafRef.current = requestAnimationFrame(() => {
+        if (peaksRef.current && waveCtxRef.current) renderWave(peaksRef.current, waveCtxRef.current)
+      })
+    }
   }
 
   const trimEnd = params.trim_end ?? duration
@@ -2006,6 +2162,16 @@ export default function EditorModal({
                   </div>
                 )}
               </div>
+
+              {pasteWarning && (
+                <div
+                  className="mx-2 mt-1 px-3 py-1.5 rounded text-xs bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300 flex items-center justify-between gap-2 cursor-pointer"
+                  onClick={() => setPasteWarning(null)}
+                >
+                  <span>{pasteWarning}</span>
+                  <span className="shrink-0 text-amber-400">✕</span>
+                </div>
+              )}
 
               {/* transport row inside edit waveform card */}
               <div className="flex items-center gap-3 px-2 pb-2 border-t border-gray-100 dark:border-gray-800 pt-1.5" onClick={e => e.stopPropagation()}>
@@ -2320,6 +2486,21 @@ export default function EditorModal({
           >
             Fade out to here
           </button>
+          {clipboardRef.current && <>
+            <div className="border-t border-gray-100 dark:border-gray-800 my-1" />
+            <button
+              className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+              onClick={() => { executePaste(); setContextMenu(null) }}
+            >
+              Paste
+            </button>
+            <button
+              className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+              onClick={() => { executePaste(contextMenu.time); setContextMenu(null) }}
+            >
+              Paste here
+            </button>
+          </>}
         </div>
       )}
 
@@ -2331,12 +2512,33 @@ export default function EditorModal({
           onClick={e => e.stopPropagation()}
           onMouseLeave={() => setRegionContextMenu(null)}
         >
-          <button
-            className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 text-red-400 transition-colors"
-            onClick={() => { removeSelected(); setRegionContextMenu(null) }}
-          >
-            Remove
-          </button>
+          {(() => {
+            const id = regionContextMenu.regionId
+            const isFade = id.startsWith('fade-')
+            const cut = isFade ? null : paramsRef.current.cuts.find(c => c.id === id)
+            const fade = isFade ? paramsRef.current.fades.find(f => f.id === id.slice(5)) : null
+            return <>
+              <button className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors" onClick={() => {
+                if (fade) clipboardRef.current = { kind: 'fade', data: { ...fade } }
+                else if (cut) clipboardRef.current = { kind: 'cut', data: { ...cut } }
+                setRegionContextMenu(null)
+              }}>Copy</button>
+              <button className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors" onClick={() => {
+                if (fade) clipboardRef.current = { kind: 'fade', data: { ...fade } }
+                else if (cut) clipboardRef.current = { kind: 'cut', data: { ...cut } }
+                removeSelected(); setRegionContextMenu(null)
+              }}>Cut</button>
+              {clipboardRef.current && (
+                <button className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors" onClick={() => {
+                  executePaste();
+                  setRegionContextMenu(null)
+                }}>Paste</button>
+              )}
+              <div className="border-t border-gray-100 dark:border-gray-800 my-1" />
+              <button className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 text-red-400 transition-colors"
+                onClick={() => { removeSelected(); setRegionContextMenu(null) }}>Remove</button>
+            </>
+          })()}
         </div>
       )}
 
