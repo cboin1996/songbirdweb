@@ -23,6 +23,11 @@ export default function ImportJobsTable({
   const [jobs, setJobs] = useState<ImportJobResult[]>(initialJobs)
   const [total, setTotal] = useState(initialTotal)
   const [filter, setFilter] = useState('')
+
+  useEffect(() => {
+    setJobs(initialJobs)
+    setTotal(initialTotal)
+  }, [initialJobs, initialTotal])
   const [page, setPage] = useState(0)
   const intervalsRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map())
 
