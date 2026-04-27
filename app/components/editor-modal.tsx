@@ -11,8 +11,9 @@ import { FaPlay, FaPause, FaTimes, FaUndo, FaRedo, FaTrash, FaSync, FaCut } from
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { usePlayer } from './player'
-import Slider from './slider'
+
 import { snap as _snap } from '../lib/snap'
+import ScrubInput from './scrub-input'
 
 type Tab = 'audio' | 'properties'
 
@@ -2299,28 +2300,45 @@ export default function EditorModal({
             <div className="flex flex-col gap-4" onClick={() => switchToWaveform('edit')}>
 
             {/* volume · speed · normalize · overwrite */}
-            <div className="flex items-end gap-3 flex-wrap">
-              <div className="flex flex-col gap-1.5 min-w-28 flex-1">
-                <span className="text-xs flex justify-between items-center">
-                  <span className={params.volume !== 1 ? 'text-sky-500' : 'text-gray-400'}>Vol</span>
-                  <span className="flex items-center gap-1.5">
-                    {params.volume !== 1 && <button onClick={() => handleSliderReset('volume', 1)} className="text-[10px] text-gray-400 hover:text-sky-500 transition-colors">reset</button>}
-                    <span className={`tabular-nums ${params.volume !== 1 ? 'text-sky-500' : 'text-gray-400 dark:text-gray-600'}`}>{Math.round(params.volume * 100)}%</span>
-                  </span>
-                </span>
-                <Slider value={params.volume} min={0} max={2} step={0.05} onChange={v => handleSliderChange('volume', v)} onStart={handleSliderStart} onCommit={handleSliderCommit} label="volume" />
-              </div>
-              <div className="flex flex-col gap-1.5 min-w-28 flex-1">
-                <span className="text-xs flex justify-between items-center">
-                  <span className={params.speed !== 1 ? 'text-sky-500' : 'text-gray-400'}>Speed</span>
-                  <span className="flex items-center gap-1.5">
-                    {params.speed !== 1 && <button onClick={() => handleSliderReset('speed', 1)} className="text-[10px] text-gray-400 hover:text-sky-500 transition-colors">reset</button>}
-                    <span className={`tabular-nums ${params.speed !== 1 ? 'text-sky-500' : 'text-gray-400 dark:text-gray-600'}`}>{params.speed.toFixed(2)}×</span>
-                  </span>
-                </span>
-                <Slider value={params.speed} min={0.25} max={4} step={0.05} onChange={v => handleSliderChange('speed', v)} onStart={handleSliderStart} onCommit={handleSliderCommit} disabled={!wsReady} label="speed" />
-              </div>
-              <div className="flex items-center gap-3 pb-0.5 shrink-0">
+            <div className="flex items-center gap-4 flex-wrap text-xs">
+              <span className="flex items-center gap-1.5">
+                <span className={params.volume !== 1 ? 'text-sky-500' : 'text-gray-400'}>Vol</span>
+                <ScrubInput
+                  value={params.volume <= 0 ? -Infinity : 20 * Math.log10(params.volume)}
+                  min={-40} max={6} step={0.3}
+                  format={db => isFinite(db) ? `${db >= 0 ? '+' : ''}${db.toFixed(1)} dB` : '-∞ dB'}
+                  parse={s => Math.pow(10, parseFloat(s.replace(/[^0-9.\-+]/g, '')) / 20)}
+                  onChange={db => handleSliderChange('volume', Math.pow(10, db / 20))}
+                  onStart={handleSliderStart}
+                  onCommit={db => { handleSliderCommit(); handleSliderChange('volume', Math.pow(10, db / 20)) }}
+                  modified={params.volume !== 1}
+                  label="volume"
+                />
+                {params.volume !== 1 && (
+                  <button onClick={() => handleSliderReset('volume', 1)} className="text-[10px] text-gray-400 hover:text-sky-500 transition-colors">↺</button>
+                )}
+              </span>
+              <span className="text-gray-200 dark:text-gray-700 select-none">·</span>
+              <span className="flex items-center gap-1.5">
+                <span className={params.speed !== 1 ? 'text-sky-500' : 'text-gray-400'}>Speed</span>
+                <ScrubInput
+                  value={params.speed}
+                  min={0.25} max={4} step={0.01}
+                  format={v => `${v.toFixed(2)}×`}
+                  parse={s => parseFloat(s.replace('×', ''))}
+                  onChange={v => handleSliderChange('speed', v)}
+                  onStart={handleSliderStart}
+                  onCommit={v => { handleSliderCommit(); handleSliderChange('speed', v) }}
+                  modified={params.speed !== 1}
+                  disabled={!wsReady}
+                  label="speed"
+                />
+                {params.speed !== 1 && (
+                  <button onClick={() => handleSliderReset('speed', 1)} className="text-[10px] text-gray-400 hover:text-sky-500 transition-colors">↺</button>
+                )}
+              </span>
+              <span className="text-gray-200 dark:text-gray-700 select-none">·</span>
+              <div className="flex items-center gap-3 shrink-0">
                 <label className="flex items-center gap-1.5 text-xs select-none" title="Boost/lower gain so the loudest peak reaches 0 dBFS — maximises loudness without clipping">
                   <input type="checkbox" checked={params.normalize} onChange={e => { pushHistory(paramsRef.current); setParams(prev => { const next = { ...prev, normalize: e.target.checked }; scheduleSave(next); return next }) }} className="accent-sky-500" />
                   <span className={params.normalize ? 'text-sky-500' : 'text-gray-400'}>Normalize</span>
