@@ -7,8 +7,9 @@ import {
   pollEditJob, Properties, saveEditDraft, songArtworkUrl, tagSong, artworkUrl,
   addToLibrary, removeFromLibrary, uploadSongArtwork, API_V1,
 } from '../lib/data'
-import { FaPlay, FaPause, FaTimes, FaUndo, FaRedo, FaExternalLinkAlt, FaTrash, FaSync, FaCut } from 'react-icons/fa'
+import { FaPlay, FaPause, FaTimes, FaUndo, FaRedo, FaTrash, FaSync, FaCut } from 'react-icons/fa'
 import Image from 'next/image'
+import { useRouter } from 'next/navigation'
 import { usePlayer } from './player'
 import Slider from './slider'
 import { snap as _snap } from '../lib/snap'
@@ -74,14 +75,12 @@ interface Props {
   parentSongId?: string | null
   rootSongId?: string | null
   isAdmin: boolean
-  editContext?: { label: string; href: string }
-  onClose: () => void
-  onEditComplete?: () => void
 }
 
 export default function EditorModal({
-  songId, properties: initialProperties, artworkCached, parentSongId, rootSongId, isAdmin, editContext, onClose, onEditComplete,
+  songId, properties: initialProperties, artworkCached, parentSongId, rootSongId, isAdmin,
 }: Props) {
+  const router = useRouter()
   const modalRef = useRef<HTMLDivElement>(null)
   const [tab, setTab] = useState<Tab>('audio')
 
@@ -1652,7 +1651,7 @@ export default function EditorModal({
     await removeFromLibrary(activeSongId)
     await addToLibrary(restoredId)
     setRestoring(false)
-    onEditComplete?.()
+
     resetToSong(restoredId, null)
   }
 
@@ -1662,7 +1661,7 @@ export default function EditorModal({
     await removeFromLibrary(activeSongId)
     await addToLibrary(parentSongId)
     setRestoring(false)
-    onEditComplete?.()
+
     resetToSong(parentSongId, null)
   }
 
@@ -1689,7 +1688,7 @@ export default function EditorModal({
         pollIntervalRef.current = null
         setJobStatus('done')
         await deleteEditDraft(activeSongIdRef.current)
-        onEditComplete?.()
+    
         setWsReady(false)
         setParams(DEFAULT_PARAMS)
         historyRef.current = []
@@ -1733,10 +1732,10 @@ export default function EditorModal({
       setCloseConfirm(true)
       closeTimerRef.current = setTimeout(() => {
         setCloseConfirm(false)
-        onClose()
+        router.back()
       }, 2500)
     } else {
-      onClose()
+      router.back()
     }
   }
 
@@ -2018,17 +2017,13 @@ export default function EditorModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 sm:p-4"
-      onClick={handleClose}
+      ref={modalRef}
+      tabIndex={-1}
+      onKeyDown={handleKeyDown}
+      data-testid="editor-modal"
+      className="fixed inset-0 z-50 bg-white dark:bg-gray-950 flex flex-col overflow-y-auto outline-none"
+      onClick={() => setRegionContextMenu(null)}
     >
-      <div
-        ref={modalRef}
-        tabIndex={-1}
-        onKeyDown={handleKeyDown}
-        data-testid="editor-modal"
-        className="bg-white dark:bg-gray-950 border border-gray-100 dark:border-gray-800 w-full sm:rounded-xl sm:max-w-3xl lg:max-w-4xl sm:max-h-[92vh] h-full sm:h-auto overflow-y-auto flex flex-col outline-none"
-        onClick={e => { e.stopPropagation(); setRegionContextMenu(null) }}
-      >
         {/* header */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 dark:border-gray-800 shrink-0">
           {artSrc && (
@@ -2049,19 +2044,6 @@ export default function EditorModal({
               )
             })()}
           </div>
-          {editContext && (
-            <a
-              href={editContext.href}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={e => e.stopPropagation()}
-              className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-sky-500 transition-colors shrink-0"
-              title={`open ${editContext.label}`}
-            >
-              <span className="hidden sm:inline">{editContext.label}</span>
-              <FaExternalLinkAlt size={10} />
-            </a>
-          )}
           <button onClick={handleClose} data-testid="editor-close" className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 shrink-0 p-1 ml-1 transition-colors">
             <FaTimes size={13} />
           </button>
@@ -2077,7 +2059,7 @@ export default function EditorModal({
                   if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
                   localStorage.setItem('sb-skip-draft-banner', '1')
                   setCloseConfirm(false)
-                  onClose()
+                  router.back()
                 }}
                 className="text-xs text-gray-400 hover:text-gray-300 transition-colors"
               >
@@ -2542,7 +2524,6 @@ export default function EditorModal({
             </div>
           </div>
         )}
-      </div>
 
       {/* unified region context menu — trim = add/paste/select-all; cut/fade = copy/cut/paste/remove */}
       {regionContextMenu && (

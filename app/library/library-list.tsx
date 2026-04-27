@@ -517,8 +517,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                         return next
                                     })}
                                     compact={!isDesktop}
-                                    editContext={{ label: 'Library', href: `${routes.library}?song=${song.uuid}` }}
-                                    onEditComplete={refreshSongs}
+
                                     isPrivate={!!song.owner_id}
                                     playlists={playlistStubs}
                                     onPlaylistAdd={refreshPlaylists}
@@ -566,8 +565,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                         return next
                                     })}
                                     compact={!isDesktop}
-                                    editContext={{ label: 'Library', href: `${routes.library}?song=${song.uuid}` }}
-                                    onEditComplete={refreshSongs}
+
                                     isPrivate={!!song.owner_id}
                                     playlists={playlistStubs}
                                     onPlaylistAdd={refreshPlaylists}

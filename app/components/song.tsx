@@ -1,18 +1,17 @@
 'use client'
-import { useEffect, useRef, useState } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import { addToLibrary, removeFromLibrary, downloadSongToFile, createShareToken, DownloadedSong, songArtworkUrl, addSongToPlaylist } from "../lib/data";
 import { cacheSong, uncacheSong } from "../lib/offline";
 import { FaBookmark, FaRegBookmark, FaPlay, FaPause, FaEllipsisV, FaLock } from "react-icons/fa";
 import Image from "next/image";
 import { usePlayer } from "./player";
-import EditorModal from "./editor-modal";
 import { useUser } from "../lib/user-context";
 import { useOnline } from "../lib/use-online";
 import CommunityBadge from "./community-badge";
 
-export default function Song({ song, selected, onClick, inLibrary: initialInLibrary, cachedOffline: initialCachedOffline, onRemove, onCacheChange, compact, rank, editContext, onEditComplete, isPrivate, playlists, onPlaylistAdd, selectMode, isSelected, onSelect, onLongPress, showSource }: {
+export default function Song({ song, selected, onClick, inLibrary: initialInLibrary, cachedOffline: initialCachedOffline, onRemove, onCacheChange, compact, rank, isPrivate, playlists, onPlaylistAdd, selectMode, isSelected, onSelect, onLongPress, showSource }: {
     song: DownloadedSong,
     selected: boolean,
     onClick: (e?: React.MouseEvent) => void,
@@ -22,8 +21,6 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
     onCacheChange?: (songId: string, cached: boolean) => void,
     compact?: boolean,
     rank?: number,
-    editContext?: { label: string; href: string },
-    onEditComplete?: () => void,
     isPrivate?: boolean,
     playlists?: { id: string; name: string }[],
     onPlaylistAdd?: () => void,
@@ -36,8 +33,6 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
     const { isAdmin } = useUser()
     const online = useOnline()
     const router = useRouter()
-    const pathname = usePathname()
-    const searchParams = useSearchParams()
     const [inLibrary, setInLibrary] = useState(initialInLibrary)
     const [libraryPending, setLibraryPending] = useState(false)
     const [libraryError, setLibraryError] = useState(false)
@@ -46,11 +41,6 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
     const [offlineCached, setOfflineCached] = useState(initialCachedOffline ?? false)
     const [offlinePending, setOfflinePending] = useState(false)
     const [offlineProgress, setOfflineProgress] = useState(0)
-    const [editorOpen, setEditorOpen] = useState(() => searchParams.get('edit') === song.songId)
-
-    useEffect(() => {
-        if (searchParams.get('edit') === song.songId) setEditorOpen(true)
-    }, [searchParams, song.songId])
     const [kebabOpen, setKebabOpen] = useState(false)
     const [kebabPos, setKebabPos] = useState({ top: 0, right: 0 })
     const [playlistPickerOpen, setPlaylistPickerOpen] = useState(false)
@@ -150,18 +140,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
     }
 
     function openEditor() {
-        setEditorOpen(true)
-        const p = new URLSearchParams(searchParams.toString())
-        p.set('edit', song.songId!)
-        router.replace(`${pathname}?${p.toString()}`, { scroll: false })
-    }
-
-    function closeEditor() {
-        setEditorOpen(false)
-        const p = new URLSearchParams(searchParams.toString())
-        p.delete('edit')
-        const qs = p.toString()
-        router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
+        router.push(`/songs/${song.songId}/edit`)
     }
 
     function openKebab(e: React.MouseEvent | React.TouchEvent) {
@@ -298,24 +277,9 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
         </div>
     ) : null
 
-    const modal = editorOpen && song.songId ? (
-        <EditorModal
-            songId={song.songId}
-            properties={song.properties}
-            artworkCached={song.artworkCached}
-            parentSongId={song.parentSongId}
-            rootSongId={song.rootSongId}
-            isAdmin={isAdmin ?? false}
-            editContext={editContext}
-            onClose={closeEditor}
-            onEditComplete={onEditComplete}
-        />
-    ) : null
-
     if (compact) {
         return (
             <>
-                {modal}
                 <div
                     data-testid="song-card"
                     onClick={e => handleCardClick(e)}
@@ -358,7 +322,6 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
 
     return (
         <>
-            {modal}
             <div
                 data-testid="song-card"
                 onClick={e => handleCardClick(e)}

@@ -69,7 +69,6 @@ function SongGrid({ songs, libraryIds, sortBy, showSource }: {
                             selected={current?.uuid === s.uuid}
                             onClick={() => play({ uuid: s.uuid, properties: s.properties! }, queue, { label: 'Explore', href: routes.explore })}
                             inLibrary={libraryIds.has(s.uuid)}
-                            editContext={{ label: 'Explore', href: routes.explore }}
                             showSource={showSource}
                         />
                         {stat && <span className="text-xs text-gray-400 px-1">{stat}</span>}
