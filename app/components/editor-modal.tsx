@@ -179,6 +179,7 @@ export default function EditorModal({
 
   // --- region drag vs resize detection (true = body drag, false = handle resize) ---
   const isRegionDragRef = useRef(false)
+  const resizeHandleRef = useRef<'left' | 'right' | null>(null)
 
   // --- job submit ---
   const [jobStatus, setJobStatus] = useState<'idle' | 'submitting' | 'polling' | 'done' | 'error'>('idle')
@@ -186,13 +187,12 @@ export default function EditorModal({
   const [overwrite, setOverwrite] = useState(false)
 
   // --- waveform context menu ---
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; time: number } | null>(null)
 
   // --- region selection ---
   const [selectedRegionId, setSelectedRegionId] = useState<string | null>(null)
   const selectedRegionIdRef = useRef<string | null>(null)
   const regionElemsRef = useRef<Map<string, HTMLElement>>(new Map())
-  const [regionContextMenu, setRegionContextMenu] = useState<{ x: number; y: number; regionId: string } | null>(null)
+  const [regionContextMenu, setRegionContextMenu] = useState<{ x: number; y: number; regionId: string; time?: number } | null>(null)
 
   // --- close guard ---
   const [closeConfirm, setCloseConfirm] = useState(false)
@@ -221,7 +221,8 @@ export default function EditorModal({
 
   const mainWaveCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const renderWave = useCallback((peaks: Array<Float32Array | number[]>, ctx: CanvasRenderingContext2D) => {
-    if (!mainWaveCanvasRef.current) mainWaveCanvasRef.current = ctx.canvas
+    const isReplacement = mainWaveCanvasRef.current && !mainWaveCanvasRef.current.isConnected
+    if (!mainWaveCanvasRef.current || isReplacement) mainWaveCanvasRef.current = ctx.canvas
     if (ctx.canvas !== mainWaveCanvasRef.current) {
       ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height)
       return
@@ -287,7 +288,7 @@ export default function EditorModal({
       ctx.fill()
     }
     // Fade handle bar + triangle — triangle sits at fade extent, bar connects to cut edge
-    const HS = 7
+    const HS = 7 * (window.devicePixelRatio ?? 1)
     for (const cut of p.cuts) {
       if (cut.start > trimEnd || cut.end < trimStart) continue
       const fadeOut = cut.fade_out ?? 0
@@ -544,10 +545,11 @@ export default function EditorModal({
       const handleColor = isTrim ? '#0369a1'
         : isCut ? '#b91c1c'
         : (paramsRef.current.fades.find(f => f.id === region.id.slice(5))?.type === 'in' ? '#0369a1' : '#92400e')
+      const handleW = navigator.maxTouchPoints > 0 ? '4px' : '10px'
       el.querySelectorAll<HTMLElement>('[part*="region-handle"]').forEach(h => {
         const isLeft = h.getAttribute('part')?.includes('left') ?? false
         Object.assign(h.style, {
-          width: '10px',
+          width: handleW,
           backgroundColor: 'transparent',
           borderLeft: isLeft ? `2px solid ${handleColor}` : 'none',
           borderRight: !isLeft ? `2px solid ${handleColor}` : 'none',
@@ -577,34 +579,53 @@ export default function EditorModal({
         e.stopPropagation()
         setAllSelected(false)
         setSelectedRegionId(prev => prev === region.id ? null : region.id)
-        setContextMenu(null)
         setRegionContextMenu(null)
       })
 
       el.addEventListener('pointerdown', e => {
         const target = e.target as Element
-        isRegionDragRef.current = !target.matches('[part*="region-handle"], [part*="region-handle"] *')
+        const isHandle = target.matches('[part*="region-handle"], [part*="region-handle"] *')
+        isRegionDragRef.current = !isHandle
+        if (isHandle) {
+          const handleEl = (target.closest('[part*="region-handle"]') ?? target) as Element
+          resizeHandleRef.current = handleEl.getAttribute('part')?.includes('left') ? 'left' : 'right'
+        } else {
+          resizeHandleRef.current = null
+        }
       })
 
       el.addEventListener('contextmenu', e => {
         e.preventDefault()
-        if (isTrim) return  // let it bubble to handleWaveformContextMenu
         e.stopPropagation()
+        if (isTrim) {
+          const dur = wsRef.current?.getDuration() ?? 0
+          const rect = el.parentElement?.getBoundingClientRect() ?? el.getBoundingClientRect()
+          const time = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)) * dur
+          setRegionContextMenu({ x: e.clientX, y: e.clientY, regionId: region.id, time })
+          return
+        }
         setSelectedRegionId(region.id)
-        setContextMenu(null)
         setRegionContextMenu({ x: e.clientX, y: e.clientY, regionId: region.id })
       })
 
       // long press → region context menu (mobile)
       let longPressTimer: ReturnType<typeof setTimeout> | null = null
       el.addEventListener('touchstart', e => {
-        if (isTrim) return
+        if (isTrim) {
+          longPressTimer = setTimeout(() => {
+            const touch = e.touches[0]
+            const dur = wsRef.current?.getDuration() ?? 0
+            const rect = el.parentElement?.getBoundingClientRect() ?? el.getBoundingClientRect()
+            const time = Math.max(0, Math.min(1, (touch.clientX - rect.left) / rect.width)) * dur
+            setRegionContextMenu({ x: touch.clientX, y: touch.clientY, regionId: region.id, time })
+          }, 800)
+          return
+        }
         longPressTimer = setTimeout(() => {
           const touch = e.touches[0]
           setSelectedRegionId(region.id)
-          setContextMenu(null)
           setRegionContextMenu({ x: touch.clientX, y: touch.clientY, regionId: region.id })
-        }, 500)
+        }, 800)
       }, { passive: true })
       el.addEventListener('touchend', () => { if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null } })
       el.addEventListener('touchmove', () => { if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null } })
@@ -718,10 +739,30 @@ export default function EditorModal({
             ...prev.fades,
             ...prev.cuts.map(c => ({ id: c.id, start: c.start - (c.fade_out ?? 0), end: c.end + (c.fade_in ?? 0) })),
           ]
-          let { start, end } = _snap(r.start, r.end, obstacles, fadeId, trimStart, trimEnd, isDrag, origSize)
-          if (fade && end - start > MAX_FADE_DUR + 0.01) {
-            if (fade.type === 'in') end = start + MAX_FADE_DUR
-            else start = end - MAX_FADE_DUR
+          let start: number, end: number
+          if (isDrag) {
+            const snapped = _snap(r.start, r.end, obstacles, fadeId, trimStart, trimEnd, true, origSize)
+            start = snapped.start; end = snapped.end
+          } else if (fade) {
+            if (fade.type === 'in') {
+              end = fade.end
+              start = Math.max(trimStart, r.start)
+              for (const obs of obstacles.filter(o => o.id !== fadeId)) {
+                if (start < obs.end && end > obs.start) start = obs.end
+              }
+              if (end - start < MIN_REGION_DUR) start = end - MIN_REGION_DUR
+              if (end - start > MAX_FADE_DUR) start = end - MAX_FADE_DUR
+            } else {
+              start = fade.start
+              end = Math.min(trimEnd, r.end)
+              for (const obs of obstacles.filter(o => o.id !== fadeId)) {
+                if (start < obs.end && end > obs.start) end = obs.start
+              }
+              if (end - start < MIN_REGION_DUR) end = start + MIN_REGION_DUR
+              if (end - start > MAX_FADE_DUR) end = start + MAX_FADE_DUR
+            }
+          } else {
+            start = r.start; end = r.end
           }
           if (start !== r.start || end !== r.end) {
             programmaticRegionRef.current = true
@@ -752,8 +793,24 @@ export default function EditorModal({
             const ext = _snap(r.start - fadeOut, r.end + fadeIn, obstacles, r.id, trimStart, trimEnd, true, origExtSize)
             start = ext.start + fadeOut
             end = ext.end - fadeIn
+          } else if (cut) {
+            if (resizeHandleRef.current === 'left') {
+              end = cut.end
+              start = Math.max(trimStart, r.start)
+              for (const obs of obstacles.filter(o => o.id !== r.id)) {
+                if (start < obs.end && end > obs.start) start = obs.end
+              }
+              if (end - start < MIN_REGION_DUR) start = end - MIN_REGION_DUR
+            } else {
+              start = cut.start
+              end = Math.min(trimEnd, r.end)
+              for (const obs of obstacles.filter(o => o.id !== r.id)) {
+                if (start < obs.end && end > obs.start) end = obs.start
+              }
+              if (end - start < MIN_REGION_DUR) end = start + MIN_REGION_DUR
+            }
           } else {
-            ;({ start, end } = _snap(r.start, r.end, obstacles, r.id, trimStart, trimEnd, false))
+            start = r.start; end = r.end
           }
           if (start !== r.start || end !== r.end) {
             programmaticRegionRef.current = true
@@ -796,10 +853,30 @@ export default function EditorModal({
             ...prev.fades,
             ...prev.cuts.map(c => ({ id: c.id, start: c.start - (c.fade_out ?? 0), end: c.end + (c.fade_in ?? 0) })),
           ]
-          let { start, end } = _snap(r.start, r.end, obstacles, fadeId, trimStart, trimEnd, isDrag, origSize)
-          if (fade && end - start > MAX_FADE_DUR + 0.01) {
-            if (fade.type === 'in') end = start + MAX_FADE_DUR
-            else start = end - MAX_FADE_DUR
+          let start: number, end: number
+          if (isDrag) {
+            const snapped = _snap(r.start, r.end, obstacles, fadeId, trimStart, trimEnd, true, origSize)
+            start = snapped.start; end = snapped.end
+          } else if (fade) {
+            if (fade.type === 'in') {
+              end = fade.end
+              start = Math.max(trimStart, r.start)
+              for (const obs of obstacles.filter(o => o.id !== fadeId)) {
+                if (start < obs.end && end > obs.start) start = obs.end
+              }
+              if (end - start < MIN_REGION_DUR) start = end - MIN_REGION_DUR
+              if (end - start > MAX_FADE_DUR) start = end - MAX_FADE_DUR
+            } else {
+              start = fade.start
+              end = Math.min(trimEnd, r.end)
+              for (const obs of obstacles.filter(o => o.id !== fadeId)) {
+                if (start < obs.end && end > obs.start) end = obs.start
+              }
+              if (end - start < MIN_REGION_DUR) end = start + MIN_REGION_DUR
+              if (end - start > MAX_FADE_DUR) end = start + MAX_FADE_DUR
+            }
+          } else {
+            start = r.start; end = r.end
           }
           if (start !== r.start || end !== r.end) {
             programmaticRegionRef.current = true
@@ -833,8 +910,24 @@ export default function EditorModal({
             const ext = _snap(r.start - fadeOut, r.end + fadeIn, obstacles, r.id, trimStart, trimEnd, true, origExtSize)
             start = ext.start + fadeOut
             end = ext.end - fadeIn
+          } else if (cut) {
+            if (resizeHandleRef.current === 'left') {
+              end = cut.end
+              start = Math.max(trimStart, r.start)
+              for (const obs of obstacles.filter(o => o.id !== r.id)) {
+                if (start < obs.end && end > obs.start) start = obs.end
+              }
+              if (end - start < MIN_REGION_DUR) start = end - MIN_REGION_DUR
+            } else {
+              start = cut.start
+              end = Math.min(trimEnd, r.end)
+              for (const obs of obstacles.filter(o => o.id !== r.id)) {
+                if (start < obs.end && end > obs.start) end = obs.start
+              }
+              if (end - start < MIN_REGION_DUR) end = start + MIN_REGION_DUR
+            }
           } else {
-            ;({ start, end } = _snap(r.start, r.end, obstacles, r.id, trimStart, trimEnd, false))
+            start = r.start; end = r.end
           }
           if (start !== r.start || end !== r.end) {
             programmaticRegionRef.current = true
@@ -850,6 +943,7 @@ export default function EditorModal({
 
     function handleRegionDragEnd() {
       isRegionDragRef.current = false
+      resizeHandleRef.current = null
       const snapshot = regionPreDragRef.current
       if (!snapshot) return
       regionPreDragRef.current = null
@@ -1703,14 +1797,6 @@ export default function EditorModal({
     window.addEventListener('touchend', onEnd)
   }
 
-  function handleWaveformContextMenu(e: React.MouseEvent<HTMLDivElement>) {
-    e.preventDefault()
-    if (!wsReady || !duration || !waveRef.current) return
-    const rect = waveRef.current.getBoundingClientRect()
-    const progress = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
-    setContextMenu({ x: e.clientX, y: e.clientY, time: progress * duration })
-  }
-
   function handleWaveformClick(e: React.MouseEvent<HTMLDivElement>) {
     setSelectedRegionId(null)
     setAllSelected(false)
@@ -1839,7 +1925,7 @@ export default function EditorModal({
     if (!dur) return
     const rect = container.getBoundingClientRect()
     const clickTime = ((e.clientX - rect.left) / rect.width) * dur
-    const HIT_SEC = (12 / rect.width) * dur
+    const HIT_SEC = ((e.pointerType === 'touch' ? 32 : 12) / rect.width) * dur
     for (const cut of paramsRef.current.cuts) {
       if (!cut.id) continue
       const fadeOut = cut.fade_out ?? 0
@@ -1941,7 +2027,7 @@ export default function EditorModal({
         onKeyDown={handleKeyDown}
         data-testid="editor-modal"
         className="bg-white dark:bg-gray-950 border border-gray-100 dark:border-gray-800 w-full sm:rounded-xl sm:max-w-3xl lg:max-w-4xl sm:max-h-[92vh] h-full sm:h-auto overflow-y-auto flex flex-col outline-none"
-        onClick={e => { e.stopPropagation(); setContextMenu(null) }}
+        onClick={e => { e.stopPropagation(); setRegionContextMenu(null) }}
       >
         {/* header */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 dark:border-gray-800 shrink-0">
@@ -2132,7 +2218,7 @@ export default function EditorModal({
                     }}
                     onPointerLeave={() => { if (hoverPlayheadRef.current) hoverPlayheadRef.current.style.display = 'none' }}
                   />
-                  <div ref={waveRef} data-testid="waveform" onClick={handleWaveformClick} onContextMenu={handleWaveformContextMenu} className="w-full rounded overflow-hidden min-h-[80px] cursor-crosshair" />
+                  <div ref={waveRef} data-testid="waveform" onClick={handleWaveformClick} className="w-full rounded overflow-hidden min-h-[80px] cursor-crosshair" />
                   {/* Playhead — spans ruler + waveform, no pointer events so regions still receive clicks */}
                   <div
                     ref={playheadRef}
@@ -2458,63 +2544,46 @@ export default function EditorModal({
         )}
       </div>
 
-      {/* waveform right-click context menu */}
-      {contextMenu && (
-        <div
-          className="fixed z-[70] bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl py-1 min-w-[160px] text-sm"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
-          onClick={e => e.stopPropagation()}
-          onMouseLeave={() => setContextMenu(null)}
-        >
-          <div className="px-3 py-1 text-[10px] text-gray-400 border-b border-gray-100 dark:border-gray-800 font-mono tabular-nums">
-            {fmt(contextMenu.time)}
-          </div>
-          <button
-            className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 text-red-400 transition-colors"
-            onClick={() => { addCutAtTime(contextMenu.time); setContextMenu(null) }}
-          >
-            Add cut here
-          </button>
-          <button
-            className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 text-sky-400 transition-colors"
-            onClick={() => { addFadeAtTime(contextMenu.time, 'in'); setContextMenu(null) }}
-          >
-            Fade in from here
-          </button>
-          <button
-            className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 text-amber-400 transition-colors"
-            onClick={() => { addFadeAtTime(contextMenu.time, 'out'); setContextMenu(null) }}
-          >
-            Fade out to here
-          </button>
-          {clipboardRef.current && <>
-            <div className="border-t border-gray-100 dark:border-gray-800 my-1" />
-            <button
-              className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-              onClick={() => { executePaste(); setContextMenu(null) }}
-            >
-              Paste
-            </button>
-            <button
-              className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-              onClick={() => { executePaste(contextMenu.time); setContextMenu(null) }}
-            >
-              Paste here
-            </button>
-          </>}
-        </div>
-      )}
-
-      {/* region right-click / long-press context menu */}
+      {/* unified region context menu — trim = add/paste/select-all; cut/fade = copy/cut/paste/remove */}
       {regionContextMenu && (
         <div
-          className="fixed z-[70] bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl py-1 min-w-[140px] text-sm"
+          className="fixed z-[70] bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl py-1 min-w-[160px] text-sm"
           style={{ left: regionContextMenu.x, top: regionContextMenu.y }}
           onClick={e => e.stopPropagation()}
           onMouseLeave={() => setRegionContextMenu(null)}
         >
           {(() => {
             const id = regionContextMenu.regionId
+            const time = regionContextMenu.time
+            if (id === 'trim') {
+              return <>
+                {time !== undefined && (
+                  <div className="px-3 py-1 text-[10px] text-gray-400 border-b border-gray-100 dark:border-gray-800 font-mono tabular-nums">
+                    {fmt(time)}
+                  </div>
+                )}
+                <button className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 text-red-400 transition-colors"
+                  onClick={() => { if (time !== undefined) addCutAtTime(time); setRegionContextMenu(null) }}>Add cut here</button>
+                <button className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 text-sky-400 transition-colors"
+                  onClick={() => { if (time !== undefined) addFadeAtTime(time, 'in'); setRegionContextMenu(null) }}>Fade in from here</button>
+                <button className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 text-amber-400 transition-colors"
+                  onClick={() => { if (time !== undefined) addFadeAtTime(time, 'out'); setRegionContextMenu(null) }}>Fade out to here</button>
+                {clipboardRef.current && <>
+                  <div className="border-t border-gray-100 dark:border-gray-800 my-1" />
+                  <button className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                    onClick={() => { executePaste(); setRegionContextMenu(null) }}>Paste</button>
+                  {time !== undefined && (
+                    <button className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                      onClick={() => { executePaste(time); setRegionContextMenu(null) }}>Paste here</button>
+                  )}
+                </>}
+                {(params.cuts.length > 0 || params.fades.length > 0) && <>
+                  <div className="border-t border-gray-100 dark:border-gray-800 my-1" />
+                  <button className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                    onClick={() => { setAllSelected(true); setSelectedRegionId(null); setRegionContextMenu(null) }}>Select all</button>
+                </>}
+              </>
+            }
             const isFade = id.startsWith('fade-')
             const cut = isFade ? null : paramsRef.current.cuts.find(c => c.id === id)
             const fade = isFade ? paramsRef.current.fades.find(f => f.id === id.slice(5)) : null
@@ -2531,8 +2600,7 @@ export default function EditorModal({
               }}>Cut</button>
               {clipboardRef.current && (
                 <button className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors" onClick={() => {
-                  executePaste();
-                  setRegionContextMenu(null)
+                  executePaste(); setRegionContextMenu(null)
                 }}>Paste</button>
               )}
               <div className="border-t border-gray-100 dark:border-gray-800 my-1" />
