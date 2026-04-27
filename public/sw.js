@@ -16,10 +16,12 @@ self.addEventListener('activate', event => {
     self.clients.claim()
 })
 
-// Navigation requests: network first, fall back to /offline when network is gone
+// Navigation requests: network first, fall back to /offline on failure or non-ok response
 self.addEventListener('fetch', event => {
     if (event.request.mode !== 'navigate') return
     event.respondWith(
-        fetch(event.request).catch(() => caches.match('/offline'))
+        fetch(event.request)
+            .then(r => (r.ok ? r : caches.match('/offline').then(c => c ?? r)))
+            .catch(() => caches.match('/offline'))
     )
 })

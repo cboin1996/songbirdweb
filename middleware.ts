@@ -42,7 +42,12 @@ export async function middleware(request: NextRequest) {
   if (isLoginPage || isSharePage || isOfflinePage) return NextResponse.next()
 
   if (refreshToken) {
-    const newToken = await refreshAccessToken(refreshToken.value)
+    let newToken: string | null = null
+    try {
+      newToken = await refreshAccessToken(refreshToken.value)
+    } catch {
+      return NextResponse.redirect(new URL('/offline', request.url))
+    }
     if (newToken) {
       const cookieStr = request.cookies.getAll()
         .filter(c => c.name !== 'access_token')
