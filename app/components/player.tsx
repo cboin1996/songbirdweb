@@ -115,7 +115,7 @@ function ProgressBar({ current, duration, onSeek }: {
                     className="h-full bg-sky-500 rounded-full relative"
                     style={{ width: `${pct}%` }}
                 >
-                    <div className="absolute right-0 top-1/2 -translate-y-1/2 w-2.5 h-2.5 bg-sky-500 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
+                    <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-sky-500 rounded-full opacity-0 group-hover:opacity-100 group-active:opacity-100 transition-opacity touch-manipulation" />
                 </div>
             </div>
             <span className="text-xs text-gray-400 tabular-nums w-8 shrink-0">-{fmt((duration || 0) - current)}</span>
@@ -137,6 +137,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const [showQueue, setShowQueue] = useState(false)
     const [volume, setVolume] = useState(1)
     const pendingPosition = useRef<number>(0)
+    const shouldPlayRef = useRef(false)
+    const loadGenRef = useRef(0)
     const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const blobUrlRef = useRef<string | null>(null)
     // refs mirror state so stable callbacks always see latest values
@@ -152,21 +154,24 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     async function loadSong(song: PlayableSong, fromStart = false) {
         const audio = audioRef.current
         if (!audio) return
+        const gen = ++loadGenRef.current
         pendingPosition.current = fromStart ? 0 : (song.last_position ?? 0)
-        // revoke previous blob URL to free memory
         if (blobUrlRef.current) {
             URL.revokeObjectURL(blobUrlRef.current)
             blobUrlRef.current = null
         }
         const cachedFile = await getSongFile(song.uuid)
+        if (gen !== loadGenRef.current) return  // newer loadSong started, abort
         if (cachedFile) {
             blobUrlRef.current = URL.createObjectURL(cachedFile)
             audio.src = blobUrlRef.current
         } else {
             audio.src = `${DOWNLOAD_URL}/${song.uuid}`
         }
+        shouldPlayRef.current = true
         audio.load()
-        audio.currentTime = 0
+        setCurrentTime(0)
+        setDuration(0)
         setCurrent(song)
         setIsPlaying(true)
     }
@@ -295,21 +300,43 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         })
     }
 
+    // Stable listeners — never re-register, so canplay/durationchange are never missed
     useEffect(() => {
         const audio = audioRef.current
         if (!audio) return
-
         function onCanPlay() {
             if (pendingPosition.current > 0) {
                 audio!.currentTime = pendingPosition.current
                 pendingPosition.current = 0
             }
-            audio!.play().catch(() => {})
+            if (shouldPlayRef.current) {
+                shouldPlayRef.current = false
+                audio!.play().catch(() => {})
+            }
         }
         function onPlay() { setIsPlaying(true) }
         function onPause() { setIsPlaying(false) }
         function onTimeUpdate() { setCurrentTime(audio!.currentTime) }
         function onDurationChange() { setDuration(audio!.duration) }
+        audio.addEventListener('play', onPlay)
+        audio.addEventListener('pause', onPause)
+        audio.addEventListener('canplay', onCanPlay)
+        audio.addEventListener('timeupdate', onTimeUpdate)
+        audio.addEventListener('durationchange', onDurationChange)
+        return () => {
+            audio.removeEventListener('play', onPlay)
+            audio.removeEventListener('pause', onPause)
+            audio.removeEventListener('canplay', onCanPlay)
+            audio.removeEventListener('timeupdate', onTimeUpdate)
+            audio.removeEventListener('durationchange', onDurationChange)
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
+
+    // current-dependent: onEnded needs current to save position
+    useEffect(() => {
+        const audio = audioRef.current
+        if (!audio) return
         function onEnded() {
             setIsPlaying(false)
             if (current) savePosition(current, 0)
@@ -321,21 +348,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 skipNext()
             }
         }
-
-        audio.addEventListener('play', onPlay)
-        audio.addEventListener('pause', onPause)
-        audio.addEventListener('canplay', onCanPlay)
-        audio.addEventListener('timeupdate', onTimeUpdate)
-        audio.addEventListener('durationchange', onDurationChange)
         audio.addEventListener('ended', onEnded)
-        return () => {
-            audio.removeEventListener('play', onPlay)
-            audio.removeEventListener('pause', onPause)
-            audio.removeEventListener('canplay', onCanPlay)
-            audio.removeEventListener('timeupdate', onTimeUpdate)
-            audio.removeEventListener('durationchange', onDurationChange)
-            audio.removeEventListener('ended', onEnded)
-        }
+        return () => audio.removeEventListener('ended', onEnded)
     }, [current, savePosition, skipNext])
 
     useEffect(() => {
@@ -558,11 +572,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                 <button data-testid="player-queue-toggle" onClick={() => setShowQueue(v => !v)} className={`shrink-0 ${showQueue ? activeClass : idleClass}`}>
                                     <FaList size={12} />
                                 </button>
-                                <div className="hidden sm:flex items-center gap-1.5 shrink-0">
+                                <div className="flex items-center gap-1.5 shrink-0">
                                     <button onClick={() => setVolume(v => v > 0 ? 0 : 1)} className={idleClass}>
                                         {volume === 0 ? <FaVolumeMute size={12} /> : <FaVolumeUp size={12} />}
                                     </button>
-                                    <div className="w-16">
+                                    <div className="hidden sm:block w-16">
                                         <Slider value={volume} min={0} max={1} step={0.02} onChange={setVolume} label="volume" />
                                     </div>
                                 </div>
