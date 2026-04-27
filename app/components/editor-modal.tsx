@@ -440,9 +440,11 @@ export default function EditorModal({
       ctx.clearRect(0, 0, w, h)
       const candidates = [0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120]
       const pxPerSec = w / duration
-      const majorInterval = candidates.find(c => c * pxPerSec >= 70) ?? 120
+      const fontSize = Math.max(10, Math.min(14, Math.round(w / 28)))
+      ctx.font = `${fontSize}px system-ui, sans-serif`
+      const minLabelPx = ctx.measureText('0:00').width + fontSize * 2
+      const majorInterval = candidates.find(c => c * pxPerSec >= minLabelPx) ?? 120
       const minorInterval = majorInterval / 4
-      ctx.font = '9px system-ui, sans-serif'
       ctx.textAlign = 'center'
       ctx.textBaseline = 'top'
       for (let t = 0; t <= duration + 1e-6; t += minorInterval) {
@@ -461,8 +463,15 @@ export default function EditorModal({
       }
     }
     if (!duration) return
-    if (timelineCanvasRef.current) drawRuler(timelineCanvasRef.current)
-    if (origTimelineCanvasRef.current) drawRuler(origTimelineCanvasRef.current)
+    const canvases = [timelineCanvasRef.current, origTimelineCanvasRef.current].filter((c): c is HTMLCanvasElement => !!c)
+    canvases.forEach(drawRuler)
+    let raf: number | null = null
+    const ro = new ResizeObserver(() => {
+      if (raf !== null) cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => { raf = null; canvases.forEach(drawRuler) })
+    })
+    canvases.forEach(c => ro.observe(c))
+    return () => { ro.disconnect(); if (raf !== null) cancelAnimationFrame(raf) }
   }, [duration])
 
   // debounced auto-save
@@ -952,7 +961,21 @@ export default function EditorModal({
     window.addEventListener('touchend', handleRegionDragEnd)
     window.addEventListener('pointerup', handleRegionDragEnd)
 
+    // WaveSurfer debounces its own resize by 100ms — bypass it so regions
+    // and waveform stay in sync during continuous window/orientation resize.
+    let waveResizeRaf: number | null = null
+    const waveRo = new ResizeObserver(() => {
+      if (waveResizeRaf !== null) cancelAnimationFrame(waveResizeRaf)
+      waveResizeRaf = requestAnimationFrame(() => {
+        waveResizeRaf = null
+        ws.getRenderer().reRender()
+      })
+    })
+    waveRo.observe(waveRef.current)
+
     return () => {
+      waveRo.disconnect()
+      if (waveResizeRaf !== null) cancelAnimationFrame(waveResizeRaf)
       window.removeEventListener('mouseup', handleRegionDragEnd)
       window.removeEventListener('touchend', handleRegionDragEnd)
       window.removeEventListener('pointerup', handleRegionDragEnd)
