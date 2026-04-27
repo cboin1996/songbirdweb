@@ -1326,64 +1326,47 @@ export default function EditorModal({
             {/* sliders/cuts/actions — clicking any of these keeps edit waveform active */}
             <div className="flex flex-col gap-4" onClick={() => switchToWaveform('edit')}>
 
-            {/* volume slider */}
-            <div className="flex flex-col gap-2 max-w-xs">
-              <span className="text-sm flex justify-between items-center">
-                <span className={params.volume !== 1 ? 'text-sky-500' : 'text-gray-400'}>Volume</span>
-                <span className="flex items-center gap-2">
-                  {params.volume !== 1 && <button onClick={() => handleSliderReset('volume', 1)} className="text-xs text-gray-400 hover:text-sky-500 transition-colors">reset</button>}
-                  <span className={`tabular-nums ${params.volume !== 1 ? 'text-sky-500' : 'text-gray-400 dark:text-gray-600'}`}>{Math.round(params.volume * 100)}%</span>
+            {/* volume · speed · normalize · overwrite */}
+            <div className="flex items-end gap-3 flex-wrap">
+              <div className="flex flex-col gap-1.5 min-w-28 flex-1">
+                <span className="text-xs flex justify-between items-center">
+                  <span className={params.volume !== 1 ? 'text-sky-500' : 'text-gray-400'}>Vol</span>
+                  <span className="flex items-center gap-1.5">
+                    {params.volume !== 1 && <button onClick={() => handleSliderReset('volume', 1)} className="text-[10px] text-gray-400 hover:text-sky-500 transition-colors">reset</button>}
+                    <span className={`tabular-nums ${params.volume !== 1 ? 'text-sky-500' : 'text-gray-400 dark:text-gray-600'}`}>{Math.round(params.volume * 100)}%</span>
+                  </span>
                 </span>
-              </span>
-              <Slider
-                value={params.volume} min={0} max={2} step={0.05}
-                onChange={v => handleSliderChange('volume', v)}
-                onStart={handleSliderStart}
-                onCommit={handleSliderCommit}
-                label="volume"
-              />
-            </div>
-
-            {/* speed + normalize */}
-            <div className="flex items-center gap-4 flex-wrap">
-              <div className="flex flex-col gap-2 flex-1 min-w-40">
-                <span className="text-sm flex justify-between items-center">
+                <Slider value={params.volume} min={0} max={2} step={0.05} onChange={v => handleSliderChange('volume', v)} onStart={handleSliderStart} onCommit={handleSliderCommit} label="volume" />
+              </div>
+              <div className="flex flex-col gap-1.5 min-w-28 flex-1">
+                <span className="text-xs flex justify-between items-center">
                   <span className={params.speed !== 1 ? 'text-sky-500' : 'text-gray-400'}>Speed</span>
-                  <span className="flex items-center gap-2">
-                    {params.speed !== 1 && <button onClick={() => handleSliderReset('speed', 1)} className="text-xs text-gray-400 hover:text-sky-500 transition-colors">reset</button>}
+                  <span className="flex items-center gap-1.5">
+                    {params.speed !== 1 && <button onClick={() => handleSliderReset('speed', 1)} className="text-[10px] text-gray-400 hover:text-sky-500 transition-colors">reset</button>}
                     <span className={`tabular-nums ${params.speed !== 1 ? 'text-sky-500' : 'text-gray-400 dark:text-gray-600'}`}>{params.speed.toFixed(2)}×</span>
                   </span>
                 </span>
-                <Slider
-                  value={params.speed} min={0.25} max={4} step={0.05}
-                  onChange={v => handleSliderChange('speed', v)}
-                  onStart={handleSliderStart}
-                  onCommit={handleSliderCommit}
-                  disabled={!wsReady}
-                  label="speed"
-                />
+                <Slider value={params.speed} min={0.25} max={4} step={0.05} onChange={v => handleSliderChange('speed', v)} onStart={handleSliderStart} onCommit={handleSliderCommit} disabled={!wsReady} label="speed" />
               </div>
-              <label className="flex items-center gap-2 text-sm select-none shrink-0" title="Boost/lower gain so the loudest peak reaches 0 dBFS — maximises loudness without clipping">
-                <input
-                  type="checkbox"
-                  checked={params.normalize}
-                  onChange={e => {
-                    pushHistory(paramsRef.current)
-                    setParams(prev => { const next = { ...prev, normalize: e.target.checked }; scheduleSave(next); return next })
-                  }}
-                  className="accent-sky-500"
-                />
-                <span className={params.normalize ? 'text-sky-500' : 'text-gray-400'}>Normalize</span>
-              </label>
+              <div className="flex items-center gap-3 pb-0.5 shrink-0">
+                <label className="flex items-center gap-1.5 text-xs select-none" title="Boost/lower gain so the loudest peak reaches 0 dBFS — maximises loudness without clipping">
+                  <input type="checkbox" checked={params.normalize} onChange={e => { pushHistory(paramsRef.current); setParams(prev => { const next = { ...prev, normalize: e.target.checked }; scheduleSave(next); return next }) }} className="accent-sky-500" />
+                  <span className={params.normalize ? 'text-sky-500' : 'text-gray-400'}>Normalize</span>
+                </label>
+                {isAdmin && (
+                  <label className="flex items-center gap-1.5 text-xs text-gray-400 select-none">
+                    <input type="checkbox" checked={overwrite} onChange={e => setOverwrite(e.target.checked)} className="accent-sky-500" />
+                    overwrite
+                  </label>
+                )}
+              </div>
             </div>
 
             {/* cuts */}
             <div className="flex flex-col gap-2">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
                 <span className="text-sm text-gray-400">Cuts</span>
-                <button onClick={addCut} disabled={!wsReady} className="text-sm text-sky-500 hover:text-sky-400 transition-colors disabled:opacity-40">
-                  + add cut
-                </button>
+                <button onClick={addCut} disabled={!wsReady} className="text-sm text-sky-500 hover:text-sky-400 transition-colors disabled:opacity-40">+ add cut</button>
               </div>
               {params.cuts.length > 0 && (
                 <div className="flex flex-col gap-2">
@@ -1449,12 +1432,10 @@ export default function EditorModal({
 
             {/* fades */}
             <div className="flex flex-col gap-2">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
                 <span className="text-sm text-gray-400">Fades</span>
-                <div className="flex items-center gap-3">
-                  <button onClick={() => addFade('in')} disabled={!wsReady} className="text-sm text-sky-500 hover:text-sky-400 transition-colors disabled:opacity-40">+ fade in</button>
-                  <button onClick={() => addFade('out')} disabled={!wsReady} className="text-sm text-amber-500 hover:text-amber-400 transition-colors disabled:opacity-40">+ fade out</button>
-                </div>
+                <button onClick={() => addFade('in')} disabled={!wsReady} className="text-sm text-sky-500 hover:text-sky-400 transition-colors disabled:opacity-40">+ fade in</button>
+                <button onClick={() => addFade('out')} disabled={!wsReady} className="text-sm text-amber-500 hover:text-amber-400 transition-colors disabled:opacity-40">+ fade out</button>
               </div>
               {params.fades.length > 0 && (
                 <div className="flex flex-col gap-2">
@@ -1504,13 +1485,6 @@ export default function EditorModal({
                 </div>
               )}
             </div>
-
-            {isAdmin && (
-              <label className="flex items-center gap-2 text-sm text-gray-400 select-none">
-                <input type="checkbox" checked={overwrite} onChange={e => setOverwrite(e.target.checked)} className="accent-sky-500" />
-                overwrite original
-              </label>
-            )}
 
             {/* actions */}
             <div className="flex items-center gap-2 flex-wrap pt-1">
