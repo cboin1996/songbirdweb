@@ -265,6 +265,15 @@ export default function EditorModal({
       }
     })
     ws.on('error', (err: Error) => { if (err?.name !== 'AbortError') console.error('WaveSurfer:', err) })
+    regions.on('region-update', r => {
+      if (programmaticRegionRef.current) return
+      if (r.id !== 'trim' && !r.id.startsWith('fade-')) {
+        setParams(prev => {
+          if (!regionPreDragRef.current) regionPreDragRef.current = prev
+          return { ...prev, cuts: prev.cuts.map(c => c.id === r.id ? { ...c, start: r.start, end: r.end } : c) }
+        })
+      }
+    })
     regions.on('region-updated', r => {
       if (programmaticRegionRef.current) return
       if (r.id === 'trim') {
@@ -1242,12 +1251,10 @@ export default function EditorModal({
                   const isIn = fade.type === 'in'
                   return (
                     <React.Fragment key={fade.id}>
-                      <div className="absolute inset-y-0 pointer-events-none" style={{
-                        left, width,
-                        background: isIn
-                          ? 'linear-gradient(to right, rgba(3,7,18,0.82), transparent)'
-                          : 'linear-gradient(to left, rgba(3,7,18,0.82), transparent)',
-                      }} />
+                      <div
+                        className={`absolute inset-y-0 pointer-events-none from-white/80 dark:from-gray-950/80 to-transparent ${isIn ? 'bg-gradient-to-r' : 'bg-gradient-to-l'}`}
+                        style={{ left, width }}
+                      />
                       <div className="absolute inset-y-0 pointer-events-none" style={{
                         left, width,
                         background: isIn ? 'rgba(56,189,248,0.18)' : 'rgba(251,191,36,0.18)',
