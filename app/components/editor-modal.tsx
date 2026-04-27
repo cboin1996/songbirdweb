@@ -1,15 +1,16 @@
 'use client'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import WaveSurfer from 'wavesurfer.js'
 import RegionsPlugin from 'wavesurfer.js/plugins/regions'
 import {
-  BASE_URL, createEditJob, deleteEditDraft, Cut, EditParams, fetchEditDraft,
+  DOWNLOAD_URL, createEditJob, deleteEditDraft, Cut, EditParams, fetchEditDraft,
   pollEditJob, Properties, saveEditDraft, songArtworkUrl, tagSong, artworkUrl,
-  addToLibrary, removeFromLibrary,
+  addToLibrary, removeFromLibrary, uploadSongArtwork, API_V1,
 } from '../lib/data'
 import { FaPlay, FaPause, FaTimes, FaUndo, FaRedo, FaExternalLinkAlt, FaTrash, FaSync, FaCut } from 'react-icons/fa'
 import Image from 'next/image'
 import { usePlayer } from './player'
+import Slider from './slider'
 
 type Tab = 'audio' | 'properties'
 
@@ -35,31 +36,13 @@ function _origToBufOffset(origTime: number, segs: [number, number][]): number {
   return off
 }
 
-function Slider({ value, min, max, step, onChange, onStart, onCommit, disabled, label }: {
-  value: number; min: number; max: number; step: number
-  onChange: (v: number) => void; onStart?: () => void; onCommit?: () => void; disabled?: boolean; label?: string
-}) {
-  const pct = ((value - min) / (max - min)) * 100
-  return (
-    <div className={`relative flex items-center h-5 group ${disabled ? 'opacity-30' : 'cursor-pointer'}`}>
-      <div className="absolute inset-x-0 h-0.5 bg-gray-200 dark:bg-gray-700 rounded-full">
-        <div className="h-full bg-sky-500 rounded-full" style={{ width: `${pct}%` }} />
-      </div>
-      <div
-        className="absolute w-2.5 h-2.5 bg-sky-500 rounded-full -translate-x-1/2 pointer-events-none"
-        style={{ left: `${pct}%` }}
-      />
-      <input
-        type="range" min={min} max={max} step={step} value={value} disabled={disabled}
-        aria-label={label}
-        onMouseDown={onStart} onTouchStart={onStart}
-        onChange={e => onChange(parseFloat(e.target.value))}
-        onMouseUp={onCommit} onTouchEnd={onCommit}
-        className="absolute inset-0 w-full opacity-0 cursor-pointer disabled:cursor-default"
-      />
-    </div>
-  )
-}
+// Deterministic bar heights for the waveform loading skeleton (0-100%)
+const WAVEFORM_SKELETON = Array.from({ length: 80 }, (_, i) => {
+  const t = i / 79
+  const env = Math.sin(t * Math.PI) * 0.7 + 0.3
+  const wave = Math.abs(Math.sin(i * 1.7) * 0.5 + Math.sin(i * 0.9) * 0.3 + Math.sin(i * 3.1) * 0.2)
+  return Math.max(4, Math.round(wave * env * 88 + 6))
+})
 
 const DEFAULT_PARAMS: EditParams = {
   trim_start: 0,
@@ -104,6 +87,7 @@ export default function EditorModal({
   const paramsRef = useRef<EditParams>(DEFAULT_PARAMS)
   const pendingSnapshotRef = useRef<EditParams | null>(null)
   const regionPreDragRef = useRef<EditParams | null>(null)
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [canUndo, setCanUndo] = useState(false)
   const [canRedo, setCanRedo] = useState(false)
 
@@ -115,9 +99,27 @@ export default function EditorModal({
   const wsReadyRef = useRef(false)
   const [wfPlaying, setWfPlaying] = useState(false)
   const [looping, setLooping] = useState(false)
-  const [zoom, setZoom] = useState(0) // 0 = auto-fit to container
   const loopingRef = useRef(false)
   const trimParamsRef = useRef({ trim_start: 0, trim_end: null as number | null })
+
+  // --- original waveform ---
+  const origWaveRef = useRef<HTMLDivElement>(null)
+  const wsOrigRef = useRef<WaveSurfer | null>(null)
+  const [origReady, setOrigReady] = useState(false)
+  const [origPlaying, setOrigPlaying] = useState(false)
+
+  // active waveform: ref for stale-closure-safe event handlers, state for render
+  const activeWaveformRef = useRef<'orig' | 'edit'>('edit')
+  const [activeWaveform, setActiveWaveform] = useState<'orig' | 'edit'>('edit')
+  function switchToWaveform(w: 'orig' | 'edit') {
+    activeWaveformRef.current = w
+    setActiveWaveform(w)
+  }
+
+  // tracks the "current" edit song — transitions to result_song_id after a non-overwrite save
+  const [activeSongId, setActiveSongId] = useState(songId)
+  const activeSongIdRef = useRef(songId)
+  const [activeRootSongId, setActiveRootSongId] = useState<string | null | undefined>(rootSongId)
 
   // --- preview (Web Audio) ---
   const previewSrcRef = useRef<AudioBufferSourceNode | null>(null)
@@ -152,6 +154,8 @@ export default function EditorModal({
   const [props, setProps] = useState<Properties>(initialProperties)
   const [propStatus, setPropStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [artworkPreviewError, setArtworkPreviewError] = useState(false)
+  const [artworkUploadStatus, setArtworkUploadStatus] = useState<'idle' | 'uploading' | 'done' | 'error'>('idle')
+  const artworkInputRef = useRef<HTMLInputElement>(null)
 
   // focus modal on mount so Space key is captured
   useEffect(() => { modalRef.current?.focus() }, [])
@@ -160,6 +164,7 @@ export default function EditorModal({
   useEffect(() => {
     if (playerIsPlaying) {
       wsRef.current?.pause()
+      wsOrigRef.current?.pause()
       stopPreview()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -189,8 +194,8 @@ export default function EditorModal({
   // debounced auto-save
   const scheduleSave = useCallback((p: EditParams) => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    saveTimerRef.current = setTimeout(() => saveEditDraft(songId, stripCutIds(p)), 1000)
-  }, [songId])
+    saveTimerRef.current = setTimeout(() => saveEditDraft(activeSongIdRef.current, stripCutIds(p)), 1000)
+  }, [])
 
   // init WaveSurfer
   useEffect(() => {
@@ -200,14 +205,17 @@ export default function EditorModal({
     const ws = WaveSurfer.create({
       container: waveRef.current,
       waveColor: '#475569',
-      progressColor: '#475569',
+      progressColor: '#38bdf8',
       cursorColor: '#38bdf8',
-      height: 112,
+      height: 80,
+      barWidth: 2,
+      barGap: 1,
+      barRadius: 2,
       plugins: [regions],
       fetchParams: { credentials: 'include' },
     })
     wsRef.current = ws
-    ws.load(`${BASE_URL}/download/${songId}`).catch((err: Error) => {
+    ws.load(`${DOWNLOAD_URL}/${songId}`).catch((err: Error) => {
       if (err?.name !== 'AbortError') console.error('WaveSurfer load:', err)
     })
     ws.on('ready', () => {
@@ -257,7 +265,13 @@ export default function EditorModal({
       } else {
         setParams(prev => {
           if (!regionPreDragRef.current) regionPreDragRef.current = prev
-          const next = { ...prev, cuts: prev.cuts.map(c => c.id === r.id ? { ...c, start: r.start, end: r.end } : c) }
+          const { start, end } = _clampCutNoOverlap(prev.cuts, r.id, r.start, r.end)
+          if (start !== r.start || end !== r.end) {
+            programmaticRegionRef.current = true
+            r.setOptions({ start, end })
+            programmaticRegionRef.current = false
+          }
+          const next = { ...prev, cuts: prev.cuts.map(c => c.id === r.id ? { ...c, start, end } : c) }
           scheduleSave(next)
           return next
         })
@@ -276,17 +290,41 @@ export default function EditorModal({
     return () => {
       window.removeEventListener('mouseup', handleRegionDragEnd)
       window.removeEventListener('touchend', handleRegionDragEnd)
+      if (pollIntervalRef.current) { clearInterval(pollIntervalRef.current); pollIntervalRef.current = null }
       wsRef.current = null
       regionsRef.current = null
       ws.destroy()
     }
   }, [songId, scheduleSave])
 
+  // original waveform — read-only, no regions
+  useEffect(() => {
+    if (!origWaveRef.current) return
+    const ws = WaveSurfer.create({
+      container: origWaveRef.current,
+      waveColor: '#64748b',
+      progressColor: '#38bdf8',
+      cursorColor: '#38bdf8',
+      height: 80,
+      barWidth: 2,
+      barGap: 1,
+      barRadius: 2,
+      fetchParams: { credentials: 'include' },
+    })
+    wsOrigRef.current = ws
+    ws.load(`${DOWNLOAD_URL}/${songId}`).catch((err: Error) => {
+      if (err?.name !== 'AbortError') console.error('WaveSurfer orig:', err)
+    })
+    ws.on('ready', () => setOrigReady(true))
+    ws.on('play', () => setOrigPlaying(true))
+    ws.on('pause', () => setOrigPlaying(false))
+    ws.on('finish', () => setOrigPlaying(false))
+    ws.on('error', (err: Error) => { if (err?.name !== 'AbortError') console.error('WaveSurfer orig:', err) })
+    return () => { wsOrigRef.current = null; ws.destroy() }
+  }, [songId])
+
   // sync volume — clamp to [0,1] since HTMLMediaElement.volume only accepts that range
   useEffect(() => { wsRef.current?.setVolume(Math.min(1, params.volume)) }, [params.volume])
-
-  // sync zoom
-  useEffect(() => { if (wsReady) wsRef.current?.zoom(zoom) }, [zoom, wsReady])
 
   function pushHistory(snapshot: EditParams) {
     historyRef.current = [...historyRef.current.slice(-19), snapshot]
@@ -343,10 +381,19 @@ export default function EditorModal({
 
   function addCut() {
     if (!wsReady || !duration) return
-    const center = wsRef.current?.getCurrentTime() ?? duration / 2
-    const span = Math.min(10, duration * 0.15)  // 10s or 15% of song, whichever is smaller
-    const start = Math.max(0, Math.min(duration - span, center - span / 2))
+    const span = Math.min(10, duration * 0.15)
+    const sorted = [...paramsRef.current.cuts].sort((a, b) => a.start - b.start)
+    // Try cursor position, then scan forward for a free gap
+    let start = Math.max(0, Math.min(duration - span, (wsRef.current?.getCurrentTime() ?? duration / 2) - span / 2))
+    for (let i = 0; i <= sorted.length; i++) {
+      const end = Math.min(duration, start + span)
+      if (end - start < 0.5) return // no room
+      const hit = sorted.find(c => start < c.end && end > c.start)
+      if (!hit) break
+      start = hit.end + 0.1
+    }
     const end = Math.min(duration, start + span)
+    if (end - start < 0.5) return
     const id = crypto.randomUUID()
     pushHistory(paramsRef.current)
     regionsRef.current?.addRegion({ id, start, end, color: 'rgba(239,68,68,0.15)', drag: true, resize: true })
@@ -367,31 +414,29 @@ export default function EditorModal({
     })
   }
 
-  function updateCutTime(id: string, key: 'start' | 'end', raw: string) {
-    const parsed = parseFloat(raw)
-    if (isNaN(parsed) || parsed < 0) return
-    pushHistory(paramsRef.current)
-    setParams(prev => {
-      const next = { ...prev, cuts: prev.cuts.map(c => {
-        if (c.id !== id) return c
-        const updated = { ...c, [key]: Math.min(parsed, duration) }
-        if (updated.start >= updated.end) {
-          if (key === 'start') updated.end = Math.min(duration, updated.start + 1)
-          else updated.start = Math.max(0, updated.end - 1)
+  function _clampCutNoOverlap(cuts: Cut[], id: string, start: number, end: number): { start: number; end: number } {
+    for (const other of cuts) {
+      if (other.id === id) continue
+      if (start < other.end && end > other.start) {
+        const myMid = (start + end) / 2
+        const otherMid = (other.start + other.end) / 2
+        if (myMid <= otherMid) {
+          end = Math.min(end, other.start)
+          if (end < start + 0.05) end = start + 0.05
+        } else {
+          start = Math.max(start, other.end)
+          if (start > end - 0.05) start = end - 0.05
         }
-        return updated
-      })}
-      scheduleSave(next)
-      // sync region position
-      const region = regionsRef.current?.getRegions().find(r => r.id === id)
-      const cut = next.cuts.find(c => c.id === id)
-      if (region && cut) {
-        programmaticRegionRef.current = true
-        region.setOptions({ start: cut.start, end: cut.end })
-        programmaticRegionRef.current = false
       }
-      return next
-    })
+    }
+    return { start, end }
+  }
+
+  // (updateCutTime removed — cut timing is GUI-only via waveform drag)
+
+  function handleSliderReset(key: keyof EditParams, defaultVal: number) {
+    pushHistory(paramsRef.current)
+    setParams(prev => { const next = { ...prev, [key]: defaultVal }; scheduleSave(next); return next })
   }
 
   function handleSliderStart() {
@@ -415,10 +460,98 @@ export default function EditorModal({
 
   const wsPreviewRef = useRef(false)
 
+  // Schedule all gain automation for a preview window.
+  // startBufOff: where in the full buffer playback begins.
+  // totalBufDur: total duration of the buffer (seconds).
+  // segs: original-time [start,end] pairs of kept audio segments.
+  // cutsForRange: only the cuts whose start matches a segment boundary.
+  function scheduleGainEvents(
+    gain: GainNode,
+    ctx: AudioContext,
+    startBufOff: number,
+    totalBufDur: number,
+    segs: [number, number][],
+    cutsForRange: Cut[],
+    p: EditParams
+  ) {
+    const speed = p.speed
+    const now = ctx.currentTime
+    // Real time of an absolute buffer position b
+    const realOf = (b: number) => now + (b - startBufOff) / speed
+
+    // Compute gain at startBufOff (what value to start from)
+    let initGain = p.volume
+    if (p.fade_in > 0 && startBufOff < p.fade_in) {
+      initGain = p.volume * (startBufOff / p.fade_in)
+    }
+    if (p.fade_out > 0 && startBufOff >= totalBufDur - p.fade_out) {
+      initGain = Math.min(initGain, p.volume * (totalBufDur - startBufOff) / p.fade_out)
+    }
+    let bufAccum = 0
+    for (let i = 0; i < segs.length - 1; i++) {
+      bufAccum += segs[i][1] - segs[i][0]
+      const B = bufAccum
+      const cut = cutsForRange.find(c => Math.abs(c.start - segs[i][1]) < 0.05)
+      if (!cut) continue
+      if (cut.fade_out > 0 && startBufOff >= B - cut.fade_out && startBufOff < B) {
+        initGain = Math.min(initGain, p.volume * (B - startBufOff) / cut.fade_out)
+      }
+      if (cut.fade_in > 0 && startBufOff >= B && startBufOff < B + cut.fade_in) {
+        initGain = Math.min(initGain, p.volume * (startBufOff - B) / cut.fade_in)
+      }
+    }
+    gain.gain.setValueAtTime(initGain, now)
+
+    // Trim fade_in remainder (if we started inside it)
+    if (p.fade_in > 0 && startBufOff < p.fade_in) {
+      gain.gain.linearRampToValueAtTime(p.volume, realOf(p.fade_in))
+    }
+
+    // Cut fades (future boundaries only)
+    bufAccum = 0
+    for (let i = 0; i < segs.length - 1; i++) {
+      bufAccum += segs[i][1] - segs[i][0]
+      const B = bufAccum
+      const cut = cutsForRange.find(c => Math.abs(c.start - segs[i][1]) < 0.05)
+      if (!cut) continue
+      const fo = cut.fade_out
+      const fi = cut.fade_in
+      if (fo > 0) {
+        const foStart = B - fo
+        if (foStart > startBufOff) {
+          gain.gain.setValueAtTime(p.volume, realOf(foStart))
+          gain.gain.linearRampToValueAtTime(0, realOf(B))
+        } else if (startBufOff < B) {
+          gain.gain.linearRampToValueAtTime(0, realOf(B))
+        }
+      }
+      if (fi > 0) {
+        if (B > startBufOff) {
+          if (fo === 0) gain.gain.setValueAtTime(0, realOf(B))
+          gain.gain.linearRampToValueAtTime(p.volume, realOf(B + fi))
+        } else if (startBufOff < B + fi) {
+          gain.gain.linearRampToValueAtTime(p.volume, realOf(B + fi))
+        }
+      } else if (fo > 0 && B > startBufOff) {
+        // No fade_in: restore volume after hard cut
+        gain.gain.setValueAtTime(p.volume, realOf(B) + 1e-4)
+      }
+    }
+
+    // Trim fade_out
+    if (p.fade_out > 0) {
+      const foStart = totalBufDur - p.fade_out
+      if (foStart > startBufOff) {
+        gain.gain.setValueAtTime(p.volume, realOf(foStart))
+      }
+      gain.gain.linearRampToValueAtTime(0, realOf(totalBufDur))
+    }
+  }
+
   function stopPreview() {
     const wasWebAudio = previewSrcRef.current !== null
     if (previewRafRef.current) { cancelAnimationFrame(previewRafRef.current); previewRafRef.current = null }
-    try { previewSrcRef.current?.stop() } catch {}
+    if (previewSrcRef.current) { previewSrcRef.current.onended = null; try { previewSrcRef.current.stop() } catch {} }
     previewCtxRef.current?.close()
     previewSrcRef.current = null
     previewCtxRef.current = null
@@ -432,6 +565,7 @@ export default function EditorModal({
   async function handlePreview() {
     if (previewing) { stopPreview(); return }
     wsRef.current?.pause()
+    wsOrigRef.current?.pause()
     pausePlayer()
 
     const p = paramsRef.current
@@ -453,7 +587,7 @@ export default function EditorModal({
 
     const raw = wsRef.current?.getDecodedData()
     if (!raw) return
-    const ctx = new AudioContext({ sampleRate: raw.sampleRate })
+    const ctx = new AudioContext()
     if (ctx.state === 'suspended') await ctx.resume()
 
     const sr = raw.sampleRate
@@ -499,17 +633,7 @@ export default function EditorModal({
     source.playbackRate.value = p.speed
 
     const gain = ctx.createGain()
-    const now = ctx.currentTime
-    // real-time duration accounts for speed: buffer plays faster/slower
-    const realDur = remainingBufDur / p.speed
-
-    gain.gain.setValueAtTime(p.fade_in > 0 ? 0 : p.volume, now)
-    if (p.fade_in > 0) gain.gain.linearRampToValueAtTime(p.volume, now + Math.min(p.fade_in, realDur))
-    if (p.fade_out > 0) {
-      const outStart = Math.max(now, now + realDur - p.fade_out)
-      gain.gain.setValueAtTime(p.volume, outStart)
-      gain.gain.linearRampToValueAtTime(0, now + realDur)
-    }
+    scheduleGainEvents(gain, ctx, startBufOff, trimmed.duration, segsSec, cutsInRange, p)
 
     source.connect(gain)
     gain.connect(ctx.destination)
@@ -550,11 +674,14 @@ export default function EditorModal({
     const remaining = buffer.duration - bufOff
     if (remaining <= 0) return
     if (previewRafRef.current) { cancelAnimationFrame(previewRafRef.current); previewRafRef.current = null }
-    try { previewSrcRef.current?.stop() } catch {}
+    if (previewSrcRef.current) { previewSrcRef.current.onended = null; try { previewSrcRef.current.stop() } catch {} }
     previewSrcRef.current = null
     const p = paramsRef.current
+    const cutsForSeek = p.cuts.filter(c =>
+      segs.some((seg, i) => i < segs.length - 1 && Math.abs(c.start - seg[1]) < 0.05)
+    )
     const gain = ctx.createGain()
-    gain.gain.setValueAtTime(p.volume, ctx.currentTime)
+    scheduleGainEvents(gain, ctx, bufOff, buffer.duration, segs, cutsForSeek, p)
     const source = ctx.createBufferSource()
     source.buffer = buffer
     source.playbackRate.value = p.speed
@@ -600,24 +727,46 @@ export default function EditorModal({
     applyParams(DEFAULT_PARAMS)
   }
 
+  function resetToSong(id: string, newRootId: string | null) {
+    activeSongIdRef.current = id
+    setActiveSongId(id)
+    setActiveRootSongId(newRootId)
+    setRestoreConfirm(null)
+    setParams(DEFAULT_PARAMS)
+    historyRef.current = []
+    redoStackRef.current = []
+    setCanUndo(false)
+    setCanRedo(false)
+    setJobStatus('idle')
+    setWsReady(false)
+    setOrigReady(false)
+    regionsRef.current?.getRegions().forEach(r => r.remove())
+    wsRef.current?.load(`${DOWNLOAD_URL}/${id}`).catch((err: Error) => {
+      if (err?.name !== 'AbortError') console.error('WaveSurfer reload:', err)
+    })
+    wsOrigRef.current?.load(`${DOWNLOAD_URL}/${id}`).catch((err: Error) => {
+      if (err?.name !== 'AbortError') console.error('WaveSurfer orig reload:', err)
+    })
+  }
+
   async function handleRestoreOriginal() {
-    if (!rootSongId) return
+    const restoredId = rootSongId ?? songId
     setRestoring(true)
-    await removeFromLibrary(songId)
-    await addToLibrary(rootSongId)
+    await removeFromLibrary(activeSongId)
+    await addToLibrary(restoredId)
     setRestoring(false)
     onEditComplete?.()
-    onClose()
+    resetToSong(restoredId, null)
   }
 
   async function handleRevertLastSave() {
     if (!parentSongId) return
     setRestoring(true)
-    await removeFromLibrary(songId)
+    await removeFromLibrary(activeSongId)
     await addToLibrary(parentSongId)
     setRestoring(false)
     onEditComplete?.()
-    onClose()
+    resetToSong(parentSongId, null)
   }
 
   async function handleSave() {
@@ -626,34 +775,45 @@ export default function EditorModal({
     const job = await createEditJob(songId, stripCutIds(params), overwrite)
     if (!job) { setJobStatus('error'); setJobError('failed to start'); return }
     setJobStatus('polling')
+    if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
     let attempts = 0
-    const interval = setInterval(async () => {
+    pollIntervalRef.current = setInterval(async () => {
       attempts++
       const result = await pollEditJob(job.job_id)
       if (!result || attempts > 60) {
-        clearInterval(interval)
+        clearInterval(pollIntervalRef.current!)
+        pollIntervalRef.current = null
         setJobStatus('error')
         setJobError(result?.error ?? 'timed out')
         return
       }
       if (result.status === 'done') {
-        clearInterval(interval)
+        clearInterval(pollIntervalRef.current!)
+        pollIntervalRef.current = null
         setJobStatus('done')
-        await deleteEditDraft(songId)
+        await deleteEditDraft(activeSongIdRef.current)
         onEditComplete?.()
-        if (overwrite) {
-          setWsReady(false)
-          setParams(DEFAULT_PARAMS)
-          historyRef.current = []
-          setCanUndo(false)
-          regionsRef.current?.getRegions().forEach(r => r.remove())
-          wsRef.current?.load(`${BASE_URL}/download/${songId}`).catch((err: Error) => {
-            if (err?.name !== 'AbortError') console.error('WaveSurfer reload:', err)
-          })
+        setWsReady(false)
+        setParams(DEFAULT_PARAMS)
+        historyRef.current = []
+        redoStackRef.current = []
+        setCanUndo(false)
+        setCanRedo(false)
+        regionsRef.current?.getRegions().forEach(r => r.remove())
+        const newId = result.result_song_id
+        if (!overwrite && newId) {
+          activeSongIdRef.current = newId
+          setActiveSongId(newId)
+          setActiveRootSongId(rootSongId ?? songId)
         }
+        const loadId = !overwrite && newId ? newId : activeSongIdRef.current
+        wsRef.current?.load(`${DOWNLOAD_URL}/${loadId}`).catch((err: Error) => {
+          if (err?.name !== 'AbortError') console.error('WaveSurfer reload:', err)
+        })
       }
       if (result.status === 'failed') {
-        clearInterval(interval)
+        clearInterval(pollIntervalRef.current!)
+        pollIntervalRef.current = null
         setJobStatus('error')
         setJobError(result.error ?? 'ffmpeg failed')
       }
@@ -705,8 +865,12 @@ export default function EditorModal({
     if (e.key === ' ' && !inInput) {
       e.preventDefault()
       e.stopPropagation()
-      if (previewing) stopPreview()
-      else toggleWaveform()
+      if (activeWaveformRef.current === 'orig') {
+        if (origPlaying) wsOrigRef.current?.pause()
+        else { pausePlayer(); wsOrigRef.current?.play() }
+      } else {
+        handlePreview()
+      }
     }
     if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
       e.preventDefault()
@@ -716,17 +880,31 @@ export default function EditorModal({
       e.preventDefault()
       redo()
     }
-    if (!inInput && wsReady && duration) {
+    if (!inInput && (e.key === 'j' || e.key === 'k')) {
+      e.preventDefault()
+      switchToWaveform(e.key === 'k' ? 'orig' : 'edit')
+    }
+    if (!inInput && (e.key === 'h' || e.key === 'l')) {
+      e.preventDefault()
       const SEEK_SEC = 5
-      if (e.key === 'h') {
-        e.preventDefault()
-        const t = Math.max(0, (wsRef.current?.getCurrentTime() ?? 0) - SEEK_SEC)
-        wsRef.current?.setTime(t)
-      }
-      if (e.key === 'l') {
-        e.preventDefault()
-        const t = Math.min(duration, (wsRef.current?.getCurrentTime() ?? 0) + SEEK_SEC)
-        wsRef.current?.setTime(t)
+      const delta = e.key === 'h' ? -SEEK_SEC : SEEK_SEC
+      if (activeWaveformRef.current === 'orig') {
+        const ws = wsOrigRef.current
+        if (!ws || !origReady) return
+        const t = Math.max(0, Math.min(ws.getDuration(), (ws.getCurrentTime() ?? 0) + delta))
+        ws.setTime(t)
+      } else {
+        if (!wsReady || !duration) return
+        if (previewing && previewCtxRef.current) {
+          const p = paramsRef.current
+          const pEnd = p.trim_end ?? duration
+          const currentT = wsRef.current?.getCurrentTime() ?? p.trim_start
+          const t = Math.max(p.trim_start, Math.min(pEnd, currentT + delta))
+          seekWebAudioPreview(t)
+        } else {
+          const t = Math.max(0, Math.min(duration, (wsRef.current?.getCurrentTime() ?? 0) + delta))
+          wsRef.current?.setTime(t)
+        }
       }
     }
   }
@@ -740,6 +918,11 @@ export default function EditorModal({
 
   const btnPrimary = 'px-3 py-1 rounded-full text-sm font-medium transition-colors disabled:opacity-40 bg-sky-500 hover:bg-sky-400 text-white'
   const btnGhost = 'text-gray-400 hover:text-sky-500 transition-colors disabled:opacity-30'
+  const Kbd = ({ children }: { children: React.ReactNode }) => (
+    <kbd className="inline-flex items-center justify-center px-1.5 py-px text-[10px] font-mono bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-gray-500 dark:text-gray-400 leading-none">
+      {children}
+    </kbd>
+  )
 
   return (
     <div
@@ -808,52 +991,138 @@ export default function EditorModal({
         {/* audio tab */}
         {tab === 'audio' && (
           <div className="p-4 flex flex-col gap-4">
-            {/* waveform with fade overlays */}
-            <div className="relative">
-              <div ref={waveRef} data-testid="waveform" onClick={handleWaveformClick} className="w-full rounded-lg overflow-hidden bg-white dark:bg-gray-950 min-h-[112px] cursor-crosshair" />
-              <span data-testid="version-badge" className={`absolute top-1 right-1 text-[10px] px-1.5 py-0.5 rounded pointer-events-none select-none font-medium ${previewing ? 'bg-orange-500/20 text-orange-400' : rootSongId ? 'bg-amber-500/20 text-amber-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
-                {previewing ? 'preview' : rootSongId ? 'edited' : 'original'}
-              </span>
-              {!wsReady && (
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  <div className="w-5 h-5 rounded-full border-2 border-gray-200 dark:border-gray-700 border-t-sky-500 animate-spin" />
+
+            {/* original waveform */}
+            <div
+              className={`rounded-lg border transition-colors cursor-pointer ${activeWaveform === 'orig' ? 'border-sky-500/40' : activeRootSongId && activeRootSongId !== activeSongId ? 'border-amber-400/30' : 'border-gray-100 dark:border-gray-800'}`}
+              onClick={() => switchToWaveform('orig')}
+            >
+              <div className="flex items-center justify-between gap-2 px-2 pt-2">
+                <div className="flex items-center gap-2">
+                  <span className={`text-xs font-medium ${activeRootSongId && activeRootSongId !== activeSongId ? 'text-amber-400' : 'text-gray-400'}`}>
+                    {activeRootSongId && activeRootSongId !== activeSongId ? 'prev. edit' : 'original'}
+                  </span>
+                  {activeRootSongId && activeRootSongId !== activeSongId && (
+                    <span className="text-[10px] text-amber-400/60">this song is already an edit</span>
+                  )}
                 </div>
-              )}
-              {duration > 0 && params.fade_in > 0 && (
-                <div
-                  className="absolute inset-y-0 bg-sky-400/25 pointer-events-none"
-                  style={{
+              </div>
+              <div className="relative px-2 pb-2">
+                <div ref={origWaveRef} className="w-full min-h-[80px]" />
+                {!origReady && (
+                  <div className="absolute inset-0 flex items-end justify-center gap-px px-2 pb-2 pointer-events-none overflow-hidden">
+                    {WAVEFORM_SKELETON.slice(0, 80).map((h, i) => (
+                      <div key={i} className="flex-1 bg-gray-200 dark:bg-gray-800 rounded-sm animate-pulse"
+                        style={{ height: `${h * 0.6}%`, animationDelay: `${(i % 8) * 60}ms` }} />
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-2 px-2 pb-2 border-t border-gray-100 dark:border-gray-800 pt-1.5">
+                <button
+                  onClick={e => { e.stopPropagation(); switchToWaveform('orig'); if (origPlaying) wsOrigRef.current?.pause(); else { pausePlayer(); wsRef.current?.pause(); stopPreview(); wsOrigRef.current?.play() } }}
+                  disabled={!origReady}
+                  className={`shrink-0 ${origReady ? 'text-sky-500 hover:text-sky-400' : 'text-gray-300 dark:text-gray-700'}`}
+                >
+                  {origPlaying ? <FaPause size={12} /> : <FaPlay size={12} />}
+                </button>
+                <span className="text-xs text-gray-400 flex-1">
+                  {activeRootSongId && activeRootSongId !== activeSongId ? 'prev. edit · space when focused' : 'original · space when focused'}
+                </span>
+                {activeRootSongId && activeRootSongId !== activeSongId && (
+                  <button
+                    onClick={e => { e.stopPropagation(); setRestoreConfirm('original') }}
+                    className="text-xs text-amber-400 hover:text-amber-300 transition-colors shrink-0 border border-amber-400/40 hover:border-amber-300/60 rounded px-2 py-0.5"
+                  >
+                    restore original
+                  </button>
+                )}
+                {parentSongId && parentSongId !== rootSongId && (
+                  <button
+                    onClick={e => { e.stopPropagation(); setRestoreConfirm('last') }}
+                    className="text-xs text-gray-400 hover:text-gray-300 transition-colors shrink-0"
+                  >
+                    revert to last save
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* edit waveform with fade overlays */}
+            <div
+              className={`rounded-lg border transition-colors ${activeWaveform === 'edit' ? 'border-sky-500/40' : 'border-gray-100 dark:border-gray-800'}`}
+              onClick={() => switchToWaveform('edit')}
+            >
+              <div className="flex items-center gap-2 px-2 pt-2">
+                <span className={`text-xs font-medium ${previewing ? 'text-orange-400' : jobStatus === 'submitting' || jobStatus === 'polling' ? 'text-sky-400' : activeRootSongId ? 'text-amber-400' : 'text-gray-400'}`}>
+                  {previewing ? 'preview' : jobStatus === 'submitting' ? 'submitting…' : jobStatus === 'polling' ? 'processing…' : activeRootSongId ? 'edited' : 'edit'}
+                </span>
+              </div>
+              <div className="relative px-2 pb-2">
+                <div ref={waveRef} data-testid="waveform" onClick={handleWaveformClick} className="w-full rounded overflow-hidden min-h-[80px] cursor-crosshair" />
+                {!wsReady && (
+                  <div className="absolute inset-0 flex items-end justify-center gap-px px-2 pb-2 pointer-events-none overflow-hidden">
+                    {WAVEFORM_SKELETON.map((h, i) => (
+                      <div key={i} className="flex-1 bg-gray-200 dark:bg-gray-800 rounded-sm animate-pulse"
+                        style={{ height: `${h}%`, animationDelay: `${(i % 8) * 60}ms` }} />
+                    ))}
+                  </div>
+                )}
+                {duration > 0 && params.fade_in > 0 && (
+                  <div className="absolute inset-y-0 bg-sky-400/25 pointer-events-none" style={{
                     left: `${(params.trim_start / duration) * 100}%`,
                     width: `${Math.min(100, (params.fade_in / duration) * 100)}%`,
                     clipPath: 'polygon(0% 50%, 100% 0%, 100% 100%)',
-                  }}
-                />
-              )}
-              {duration > 0 && params.fade_out > 0 && (
-                <div
-                  className="absolute inset-y-0 bg-sky-400/25 pointer-events-none"
-                  style={{
+                  }} />
+                )}
+                {duration > 0 && params.fade_out > 0 && (
+                  <div className="absolute inset-y-0 bg-sky-400/25 pointer-events-none" style={{
                     right: `${((duration - trimEnd) / duration) * 100}%`,
                     width: `${Math.min(100, (params.fade_out / duration) * 100)}%`,
                     clipPath: 'polygon(0% 0%, 0% 100%, 100% 50%)',
-                  }}
-                />
-              )}
-            </div>
+                  }} />
+                )}
+                {(jobStatus === 'submitting' || jobStatus === 'polling') && (
+                  <div className="absolute inset-0 flex items-end justify-center gap-px px-2 pb-2 pointer-events-none overflow-hidden rounded bg-gray-950/50">
+                    {WAVEFORM_SKELETON.map((h, i) => (
+                      <div key={i} className="flex-1 bg-sky-500/40 rounded-sm animate-pulse"
+                        style={{ height: `${h}%`, animationDelay: `${(i % 8) * 60}ms` }} />
+                    ))}
+                  </div>
+                )}
+                {duration > 0 && params.cuts.map(cut => (
+                  <React.Fragment key={cut.id}>
+                    {cut.fade_out > 0 && (
+                      <div className="absolute inset-y-0 bg-red-400/25 pointer-events-none" style={{
+                        left: `${Math.max(0, (cut.start - cut.fade_out) / duration) * 100}%`,
+                        width: `${(cut.fade_out / duration) * 100}%`,
+                        clipPath: 'polygon(0% 0%, 0% 100%, 100% 50%)',
+                      }} />
+                    )}
+                    {cut.fade_in > 0 && (
+                      <div className="absolute inset-y-0 bg-red-400/25 pointer-events-none" style={{
+                        left: `${(cut.end / duration) * 100}%`,
+                        width: `${(cut.fade_in / duration) * 100}%`,
+                        clipPath: 'polygon(0% 50%, 100% 0%, 100% 100%)',
+                      }} />
+                    )}
+                  </React.Fragment>
+                ))}
+              </div>
 
-            {/* transport row */}
-            <div className="flex items-center gap-3">
-              <button onClick={toggleWaveform} disabled={!wsReady} title={wfPlaying ? 'pause' : 'play'} className={`shrink-0 ${wsReady ? 'text-sky-500 hover:text-sky-400' : 'text-gray-300 dark:text-gray-700'}`}>
-                {wfPlaying ? <FaPause size={14} /> : <FaPlay size={14} />}
-              </button>
-              <button
-                onClick={() => setLooping(l => !l)}
-                disabled={!wsReady}
-                title="loop trim region"
-                className={`${btnGhost} shrink-0 ${looping ? 'text-sky-500' : ''}`}
-              >
-                <FaSync size={11} />
-              </button>
+              {/* transport row inside edit waveform card */}
+              <div className="flex items-center gap-3 px-2 pb-2 border-t border-gray-100 dark:border-gray-800 pt-1.5" onClick={e => e.stopPropagation()}>
+                <button onClick={() => { switchToWaveform('edit'); handlePreview() }} disabled={!wsReady} title={previewing ? 'stop preview' : 'preview with edits'} className={`shrink-0 ${wsReady ? 'text-sky-500 hover:text-sky-400' : 'text-gray-300 dark:text-gray-700'}`}>
+                  {previewing ? <FaPause size={12} /> : <FaPlay size={12} />}
+                </button>
+                <button
+                  onClick={() => setLooping(l => !l)}
+                  disabled={!wsReady}
+                  title="loop trim region"
+                  className={`${btnGhost} shrink-0 ${looping ? 'text-sky-500' : ''}`}
+                >
+                  <FaSync size={11} />
+                </button>
               <span className="text-sm text-gray-400 tabular-nums">
                 {fmt(params.trim_start)}–{fmt(trimEnd)}
                 <span className="text-gray-300 dark:text-gray-600"> / {fmt(duration)}</span>
@@ -869,40 +1138,25 @@ export default function EditorModal({
                 <FaRedo size={13} />
               </button>
             </div>
+            </div>{/* end edit waveform card */}
 
-            {/* zoom */}
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-gray-400 shrink-0">zoom</span>
-              <Slider value={zoom} min={0} max={400} step={10} onChange={setZoom} disabled={!wsReady} label="zoom" />
-              <button
-                onClick={() => {
-                  if (!wsRef.current || !waveRef.current) return
-                  const trimEnd = paramsRef.current.trim_end ?? duration
-                  const span = trimEnd - paramsRef.current.trim_start
-                  if (span <= 0) return
-                  const pxPerSec = waveRef.current.clientWidth / span
-                  wsRef.current.zoom(pxPerSec)
-                  wsRef.current.setTime(paramsRef.current.trim_start)
-                }}
-                disabled={!wsReady}
-                title="fit trim region"
-                className={`${btnGhost} shrink-0 text-xs`}
-              >
-                fit trim
-              </button>
-            </div>
+            {/* sliders/cuts/actions — clicking any of these keeps edit waveform active */}
+            <div className="flex flex-col gap-4" onClick={() => switchToWaveform('edit')}>
 
             {/* sliders */}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               {([
-                ['volume', 'Volume', 0, 2, 0.05, `${Math.round(params.volume * 100)}%`, params.volume !== 1],
-                ['fade_in', 'Fade in', 0, 15, 0.1, `${params.fade_in.toFixed(1)}s`, params.fade_in > 0],
-                ['fade_out', 'Fade out', 0, 15, 0.1, `${params.fade_out.toFixed(1)}s`, params.fade_out > 0],
-              ] as [keyof EditParams, string, number, number, number, string, boolean][]).map(([key, label, min, max, step, display, active]) => (
+                ['volume', 'Volume', 0, 2, 0.05, `${Math.round(params.volume * 100)}%`, params.volume !== 1, 1],
+                ['fade_in', 'Fade in', 0, 15, 0.1, `${params.fade_in.toFixed(1)}s`, params.fade_in > 0, 0],
+                ['fade_out', 'Fade out', 0, 15, 0.1, `${params.fade_out.toFixed(1)}s`, params.fade_out > 0, 0],
+              ] as [keyof EditParams, string, number, number, number, string, boolean, number][]).map(([key, label, min, max, step, display, active, defaultVal]) => (
                 <div key={key} className="flex flex-col gap-2">
-                  <span className="text-sm flex justify-between">
+                  <span className="text-sm flex justify-between items-center">
                     <span className={active ? 'text-sky-500' : 'text-gray-400'}>{label}</span>
-                    <span className={`tabular-nums ${active ? 'text-sky-500' : 'text-gray-400 dark:text-gray-600'}`}>{display}</span>
+                    <span className="flex items-center gap-2">
+                      {active && <button onClick={() => handleSliderReset(key, defaultVal)} className="text-xs text-gray-400 hover:text-sky-500 transition-colors">reset</button>}
+                      <span className={`tabular-nums ${active ? 'text-sky-500' : 'text-gray-400 dark:text-gray-600'}`}>{display}</span>
+                    </span>
                   </span>
                   <Slider
                     value={params[key] as number} min={min} max={max} step={step}
@@ -918,9 +1172,12 @@ export default function EditorModal({
             {/* speed + normalize */}
             <div className="flex items-center gap-4 flex-wrap">
               <div className="flex flex-col gap-2 flex-1 min-w-40">
-                <span className="text-sm flex justify-between">
+                <span className="text-sm flex justify-between items-center">
                   <span className={params.speed !== 1 ? 'text-sky-500' : 'text-gray-400'}>Speed</span>
-                  <span className={`tabular-nums ${params.speed !== 1 ? 'text-sky-500' : 'text-gray-400 dark:text-gray-600'}`}>{params.speed.toFixed(2)}×</span>
+                  <span className="flex items-center gap-2">
+                    {params.speed !== 1 && <button onClick={() => handleSliderReset('speed', 1)} className="text-xs text-gray-400 hover:text-sky-500 transition-colors">reset</button>}
+                    <span className={`tabular-nums ${params.speed !== 1 ? 'text-sky-500' : 'text-gray-400 dark:text-gray-600'}`}>{params.speed.toFixed(2)}×</span>
+                  </span>
                 </span>
                 <Slider
                   value={params.speed} min={0.25} max={4} step={0.05}
@@ -931,7 +1188,7 @@ export default function EditorModal({
                   label="speed"
                 />
               </div>
-              <label className="flex items-center gap-2 text-sm select-none shrink-0">
+              <label className="flex items-center gap-2 text-sm select-none shrink-0" title="Boost/lower gain so the loudest peak reaches 0 dBFS — maximises loudness without clipping">
                 <input
                   type="checkbox"
                   checked={params.normalize}
@@ -955,35 +1212,24 @@ export default function EditorModal({
               </div>
               {params.cuts.length > 0 && (
                 <div className="flex flex-col gap-2">
-                  {params.cuts.map(cut => (
+                  {params.cuts.map(cut => {
+                    const sorted = [...params.cuts].sort((a, b) => a.start - b.start)
+                    const idx = sorted.findIndex(c => c.id === cut.id)
+                    const trimFadeInEnd = params.trim_start + params.fade_in
+                    const trimFadeOutStart = (params.trim_end ?? duration) - params.fade_out
+                    const prev = idx > 0 ? sorted[idx - 1] : null
+                    const next = idx < sorted.length - 1 ? sorted[idx + 1] : null
+                    const maxFadeOut = Math.min(5, Math.max(0, cut.start - Math.max(trimFadeInEnd, prev ? prev.end + prev.fade_in : trimFadeInEnd)))
+                    const maxFadeIn = Math.min(5, Math.max(0, Math.min(trimFadeOutStart, next ? next.start - next.fade_out : trimFadeOutStart) - cut.end))
+                    return (
                     <div key={cut.id} className="flex flex-col gap-2 bg-red-50 dark:bg-red-950/30 rounded px-2 py-2">
-                      {/* header row: icon + time inputs + duration + remove */}
+                      {/* header row: icon + time display + duration + remove */}
                       <div className="flex items-center gap-2 text-sm">
                         <FaCut size={10} className="text-red-400 shrink-0" />
                         <div className="flex items-center gap-1 flex-1 min-w-0">
-                          <input
-                            type="number"
-                            value={cut.start.toFixed(2)}
-                            step="0.1"
-                            min="0"
-                            max={duration}
-                            onBlur={e => updateCutTime(cut.id!, 'start', e.target.value)}
-                            onChange={e => updateCutTime(cut.id!, 'start', e.target.value)}
-                            title="cut start (seconds)"
-                            className="w-16 bg-white dark:bg-gray-900 border border-red-200 dark:border-red-900 rounded px-1.5 py-0.5 text-xs tabular-nums text-gray-600 dark:text-gray-300 outline-none focus:border-red-400"
-                          />
+                          <span className="tabular-nums text-xs text-gray-500 dark:text-gray-400">{fmt(cut.start)}</span>
                           <span className="text-gray-400 text-xs">–</span>
-                          <input
-                            type="number"
-                            value={cut.end.toFixed(2)}
-                            step="0.1"
-                            min="0"
-                            max={duration}
-                            onBlur={e => updateCutTime(cut.id!, 'end', e.target.value)}
-                            onChange={e => updateCutTime(cut.id!, 'end', e.target.value)}
-                            title="cut end (seconds)"
-                            className="w-16 bg-white dark:bg-gray-900 border border-red-200 dark:border-red-900 rounded px-1.5 py-0.5 text-xs tabular-nums text-gray-600 dark:text-gray-300 outline-none focus:border-red-400"
-                          />
+                          <span className="tabular-nums text-xs text-gray-500 dark:text-gray-400">{fmt(cut.end)}</span>
                           <span className="text-gray-400 dark:text-gray-600 text-xs tabular-nums">({fmt(cut.end - cut.start)})</span>
                         </div>
                         <button onClick={() => removeCut(cut.id!)} title="remove cut" className="text-gray-400 hover:text-red-400 transition-colors shrink-0">
@@ -992,22 +1238,36 @@ export default function EditorModal({
                       </div>
                       {/* per-cut fades */}
                       <div className="grid grid-cols-2 gap-2">
-                        {(['fade_out', 'fade_in'] as const).map(key => (
-                          <div key={key} className="flex flex-col gap-1">
-                            <span className="text-xs flex justify-between">
-                              <span className={cut[key] > 0 ? 'text-red-400' : 'text-gray-400'}>{key === 'fade_out' ? 'fade before' : 'fade after'}</span>
-                              <span className={`tabular-nums ${cut[key] > 0 ? 'text-red-400' : 'text-gray-400 dark:text-gray-600'}`}>{cut[key].toFixed(1)}s</span>
-                            </span>
-                            <Slider
-                              value={cut[key]} min={0} max={5} step={0.1}
-                              onChange={v => updateCutFade(cut.id!, key, v)}
-                              label={key === 'fade_out' ? 'fade before cut' : 'fade after cut'}
-                            />
-                          </div>
-                        ))}
+                        <div className="flex flex-col gap-1">
+                          <span className="text-xs flex justify-between">
+                            <span className={cut.fade_out > 0 ? 'text-red-400' : 'text-gray-400'}>fade before</span>
+                            <span className={`tabular-nums ${cut.fade_out > 0 ? 'text-red-400' : 'text-gray-400 dark:text-gray-600'}`}>{cut.fade_out.toFixed(1)}s</span>
+                          </span>
+                          <Slider
+                            value={Math.min(cut.fade_out, maxFadeOut)} min={0} max={maxFadeOut} step={0.1}
+                            onChange={v => updateCutFade(cut.id!, 'fade_out', v)}
+                            disabled={maxFadeOut === 0}
+                            label="fade before cut"
+                          />
+                          {maxFadeOut === 0 && <span className="text-[10px] text-gray-400">no room — move cut</span>}
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <span className="text-xs flex justify-between">
+                            <span className={cut.fade_in > 0 ? 'text-red-400' : 'text-gray-400'}>fade after</span>
+                            <span className={`tabular-nums ${cut.fade_in > 0 ? 'text-red-400' : 'text-gray-400 dark:text-gray-600'}`}>{cut.fade_in.toFixed(1)}s</span>
+                          </span>
+                          <Slider
+                            value={Math.min(cut.fade_in, maxFadeIn)} min={0} max={maxFadeIn} step={0.1}
+                            onChange={v => updateCutFade(cut.id!, 'fade_in', v)}
+                            disabled={maxFadeIn === 0}
+                            label="fade after cut"
+                          />
+                          {maxFadeIn === 0 && <span className="text-[10px] text-gray-400">no room — move cut</span>}
+                        </div>
                       </div>
                     </div>
-                  ))}
+                    )
+                  })}
                 </div>
               )}
             </div>
@@ -1021,9 +1281,6 @@ export default function EditorModal({
 
             {/* actions */}
             <div className="flex items-center gap-2 flex-wrap pt-1">
-              <button onClick={handlePreview} disabled={!wsReady} className={`px-3 py-1 rounded-full text-sm font-medium transition-colors disabled:opacity-40 border border-sky-500 text-sky-500 hover:bg-sky-500 hover:text-white`}>
-                {previewing ? 'Stop preview' : 'Preview'}
-              </button>
               <button
                 onClick={handleSave}
                 disabled={!wsReady || jobStatus === 'submitting' || jobStatus === 'polling' || jobStatus === 'done'}
@@ -1035,40 +1292,19 @@ export default function EditorModal({
               {jobStatus === 'done' && !overwrite && <span className="text-gray-400 text-sm">added to library</span>}
             </div>
 
+            </div>{/* end edit-controls wrapper */}
+
             {/* footer */}
             <div className="flex items-center justify-between pt-1 border-t border-gray-100 dark:border-gray-800">
-              <p className="text-xs text-gray-400 dark:text-gray-500">
-                drag handles to trim · space to play · h/l to seek · Ctrl+Z undo · Ctrl+Shift+Z redo
+              <p className="text-xs text-gray-400 dark:text-gray-500 flex items-center gap-1 flex-wrap">
+                drag handles to trim ·
+                <Kbd>Space</Kbd> play ·
+                <Kbd>H</Kbd><Kbd>L</Kbd> seek ·
+                <Kbd>J</Kbd><Kbd>K</Kbd> switch waveform ·
+                <Kbd>Ctrl</Kbd><Kbd>Z</Kbd> undo ·
+                <Kbd>Ctrl</Kbd><Kbd>⇧Z</Kbd> redo
               </p>
               <div className="flex items-center gap-3">
-                {restoreConfirm ? (
-                  <span className="flex items-center gap-2 text-sm">
-                    <span className="text-gray-400">{restoreConfirm === 'original' ? 'restore original?' : 'revert to last save?'}</span>
-                    <button
-                      onClick={restoreConfirm === 'original' ? handleRestoreOriginal : handleRevertLastSave}
-                      disabled={restoring}
-                      className="text-red-400 hover:text-red-300 transition-colors disabled:opacity-40"
-                    >
-                      {restoring ? 'restoring…' : 'yes'}
-                    </button>
-                    <button onClick={() => setRestoreConfirm(null)} className="text-gray-400 hover:text-gray-300 transition-colors">
-                      cancel
-                    </button>
-                  </span>
-                ) : (
-                  <>
-                    {rootSongId && rootSongId !== songId && (
-                      <button onClick={() => setRestoreConfirm('original')} className="text-sm text-gray-400 hover:text-sky-500 transition-colors">
-                        restore original
-                      </button>
-                    )}
-                    {parentSongId && parentSongId !== rootSongId && (
-                      <button onClick={() => setRestoreConfirm('last')} className="text-sm text-gray-400 hover:text-sky-500 transition-colors">
-                        revert to last save
-                      </button>
-                    )}
-                  </>
-                )}
                 <button onClick={handleDiscard} className="flex items-center gap-1 text-sm text-gray-400 hover:text-red-400 transition-colors">
                   <FaTrash size={11} />
                   discard
@@ -1111,6 +1347,39 @@ export default function EditorModal({
               {artworkPreviewSrc && (
                 <Image src={artworkPreviewSrc} alt="" width={64} height={64} className="rounded-lg mt-1 object-cover" onError={() => setArtworkPreviewError(true)} />
               )}
+              <div className="flex items-center gap-2 mt-1">
+                <button
+                  type="button"
+                  onClick={() => artworkInputRef.current?.click()}
+                  disabled={artworkUploadStatus === 'uploading'}
+                  className="text-xs px-2 py-1 rounded bg-gray-100 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 hover:border-sky-500 text-gray-400 hover:text-sky-500 transition-colors disabled:opacity-40"
+                >
+                  {artworkUploadStatus === 'uploading' ? 'Uploading…' : artworkUploadStatus === 'done' ? 'Uploaded ✓' : 'Upload image'}
+                </button>
+                {artworkUploadStatus === 'error' && <span className="text-red-400 text-xs">upload failed</span>}
+                <input
+                  ref={artworkInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={async e => {
+                    const file = e.target.files?.[0]
+                    e.target.value = ''
+                    if (!file || !songId) return
+                    setArtworkUploadStatus('uploading')
+                    const ok = await uploadSongArtwork(songId, file)
+                    if (ok) {
+                      setArtworkUploadStatus('done')
+                      setProps(p => ({ ...p, artworkUrl100: `${API_V1}/songs/${songId}/artwork` }))
+                      setArtworkPreviewError(false)
+                      setTimeout(() => setArtworkUploadStatus('idle'), 3000)
+                    } else {
+                      setArtworkUploadStatus('error')
+                      setTimeout(() => setArtworkUploadStatus('idle'), 3000)
+                    }
+                  }}
+                />
+              </div>
             </label>
 
             <div className="grid grid-cols-2 gap-3">
@@ -1143,6 +1412,45 @@ export default function EditorModal({
           </div>
         )}
       </div>
+
+      {/* restore confirm overlay */}
+      {restoreConfirm && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setRestoreConfirm(null)}
+        >
+          <div
+            className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl max-w-sm w-full p-6 flex flex-col gap-4"
+            onClick={e => e.stopPropagation()}
+          >
+            <div>
+              <p className="font-semibold text-base">
+                {restoreConfirm === 'original' ? 'Restore original?' : 'Revert to last save?'}
+              </p>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                {restoreConfirm === 'original'
+                  ? 'This removes your edited version from the library and restores the original. Your edits will be lost.'
+                  : 'This reverts to your previous saved edit. The current version will be removed from the library.'}
+              </p>
+            </div>
+            <div className="flex items-center gap-3 justify-end">
+              <button
+                onClick={() => setRestoreConfirm(null)}
+                className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-400 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={restoreConfirm === 'original' ? handleRestoreOriginal : handleRevertLastSave}
+                disabled={restoring}
+                className="px-4 py-1.5 bg-red-500 hover:bg-red-400 text-white rounded-full text-sm font-medium transition-colors disabled:opacity-40"
+              >
+                {restoring ? 'Restoring…' : restoreConfirm === 'original' ? 'Yes, restore' : 'Yes, revert'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

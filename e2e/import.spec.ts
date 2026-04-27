@@ -1,19 +1,9 @@
 import { test, expect, Page } from '@playwright/test'
+import { USERNAME, PASSWORD, login, ignoreError } from './helpers'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
 
-const USERNAME = process.env.TEST_USERNAME!
-const PASSWORD = process.env.TEST_PASSWORD!
-
-async function login(page: Page) {
-    await page.context().clearCookies()
-    await page.goto('/')
-    await page.getByPlaceholder('username').fill(USERNAME)
-    await page.getByPlaceholder('password').fill(PASSWORD)
-    await page.getByTestId('login-submit').click()
-    await expect(page).toHaveURL(/\/download/)
-}
 
 // Create a minimal valid-ish mp3 file for upload testing (ID3 header + empty frames)
 function makeFakeAudioFile(name: string): string {
@@ -81,7 +71,7 @@ test.describe('import page', () => {
             await expect(row).toBeVisible({ timeout: 3000 })
             await expect(row).toContainText('test-song.mp3')
             // Wait for done or error — fake mp3 may fail processing but job still completes
-            await expect(row.locator('.text-emerald-500, .text-red-500')).toBeVisible({ timeout: 15000 })
+            await expect(row.locator('p.text-emerald-500, p.text-red-500').first()).toBeVisible({ timeout: 15000 })
         } finally {
             fs.unlinkSync(filePath)
         }

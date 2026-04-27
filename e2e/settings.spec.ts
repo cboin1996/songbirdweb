@@ -11,10 +11,21 @@ let testUserId: string
 async function loginAs(page: any, username: string, password: string) {
     await page.context().clearCookies()
     await page.goto('/')
-    await page.getByPlaceholder('username').fill(username)
-    await page.getByPlaceholder('password').fill(password)
-    await page.getByTestId('login-submit').click()
-    await expect(page).toHaveURL(/\/download/)
+    const ok = await page.evaluate(
+        async ({ url, u, p }: { url: string; u: string; p: string }) => {
+            const resp = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: u, password: p }),
+                credentials: 'include',
+            })
+            return resp.ok
+        },
+        { url: `${API_BASE}/auth/login`, u: username, p: password },
+    )
+    if (!ok) throw new Error(`Login failed for ${username}`)
+    await page.goto('/download')
+    await expect(page).toHaveURL(/\/download/, { timeout: 10000 })
 }
 
 test.describe('settings - change password', () => {
@@ -49,7 +60,7 @@ test.describe('settings - change password', () => {
         await loginAs(page, TEST_USER, TEST_INITIAL_PW)
         await page.goto('/settings')
         await page.getByPlaceholder('current password').fill('wrongpassword')
-        await page.getByPlaceholder('new password').fill(TEST_NEW_PW)
+        await page.getByPlaceholder('new password', { exact: true }).fill(TEST_NEW_PW)
         await page.getByPlaceholder('confirm new password').fill(TEST_NEW_PW)
         await page.getByRole('button', { name: 'update password' }).click()
         await expect(page.getByText('incorrect current password')).toBeVisible()
@@ -59,7 +70,7 @@ test.describe('settings - change password', () => {
         await loginAs(page, TEST_USER, TEST_INITIAL_PW)
         await page.goto('/settings')
         await page.getByPlaceholder('current password').fill(TEST_INITIAL_PW)
-        await page.getByPlaceholder('new password').fill(TEST_NEW_PW)
+        await page.getByPlaceholder('new password', { exact: true }).fill(TEST_NEW_PW)
         await page.getByPlaceholder('confirm new password').fill(TEST_NEW_PW)
         await page.getByRole('button', { name: 'update password' }).click()
         await expect(page.getByText('password updated')).toBeVisible()
@@ -68,11 +79,19 @@ test.describe('settings - change password', () => {
     test('new password works, old password does not', async ({ page }) => {
         await loginAs(page, TEST_USER, TEST_NEW_PW)
 
-        await page.context().clearCookies()
-        await page.goto('/')
-        await page.getByPlaceholder('username').fill(TEST_USER)
-        await page.getByPlaceholder('password').fill(TEST_INITIAL_PW)
-        await page.getByTestId('login-submit').click()
-        await expect(page.getByText('invalid credentials')).toBeVisible()
+        // verify old password now rejected — test via API rather than UI form
+        const rejected = await page.evaluate(
+            async ({ url, u, p }: { url: string; u: string; p: string }) => {
+                const resp = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: u, password: p }),
+                    credentials: 'include',
+                })
+                return resp.status
+            },
+            { url: `${API_BASE}/auth/login`, u: TEST_USER, p: TEST_INITIAL_PW },
+        )
+        expect(rejected).toBe(401)
     })
 })

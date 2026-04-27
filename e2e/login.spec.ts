@@ -1,15 +1,5 @@
 import { test, expect } from '@playwright/test'
-
-const USERNAME = process.env.TEST_USERNAME!
-const PASSWORD = process.env.TEST_PASSWORD!
-
-async function login(page: any) {
-  await page.goto('/')
-  await page.getByPlaceholder('username').fill(USERNAME)
-  await page.getByPlaceholder('password').fill(PASSWORD)
-  await page.getByTestId('login-submit').click()
-  await expect(page).toHaveURL(/\/download/)
-}
+import { login } from './helpers'
 
 test.beforeEach(async ({ page }) => {
   await page.context().clearCookies()
@@ -25,8 +15,9 @@ test('invalid credentials shows error', async ({ page }) => {
   await page.goto('/')
   await page.getByPlaceholder('username').fill('nobody')
   await page.getByPlaceholder('password').fill('wrongpass')
+  await expect(page.getByTestId('login-submit')).toBeEnabled({ timeout: 5000 })
   await page.getByTestId('login-submit').click()
-  await expect(page.getByText('invalid credentials')).toBeVisible()
+  await expect(page.getByText('invalid credentials')).toBeVisible({ timeout: 5000 })
   await expect(page).toHaveURL('/')
 })
 

@@ -1,16 +1,6 @@
 import { test, expect, Page } from '@playwright/test'
+import { USERNAME, PASSWORD, login, ignoreError } from './helpers'
 
-const USERNAME = process.env.TEST_USERNAME!
-const PASSWORD = process.env.TEST_PASSWORD!
-
-async function login(page: Page) {
-    await page.context().clearCookies()
-    await page.goto('/')
-    await page.getByPlaceholder('username').fill(USERNAME)
-    await page.getByPlaceholder('password').fill(PASSWORD)
-    await page.getByTestId('login-submit').click()
-    await expect(page).toHaveURL(/\/download/)
-}
 
 async function startPlayback(page: Page) {
     await page.goto('/library')
@@ -18,10 +8,6 @@ async function startPlayback(page: Page) {
     await expect(card).toBeVisible({ timeout: 10000 })
     await card.click()
     await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
-}
-
-function ignoreError(msg: string) {
-    return /AbortError|favicon|401/i.test(msg)
 }
 
 test.describe('player bar', () => {
@@ -41,15 +27,13 @@ test.describe('player bar', () => {
 
     test('player shows track name of clicked song', async ({ page }) => {
         await page.goto('/library')
-        const card = page.getByTestId('song-card').first()
+        // pick the first card that has a non-empty track name displayed
+        const card = page.getByTestId('song-card').filter({ hasText: /\w/ }).first()
         await expect(card).toBeVisible({ timeout: 10000 })
-        // get the track name text from the card before clicking
-        const cardText = (await card.textContent()) ?? ''
         await card.click()
-        await expect(page.getByTestId('player-track-name')).toBeVisible({ timeout: 5000 })
-        // track name in player should match something from the card
-        const playerName = await page.getByTestId('player-track-name').textContent()
-        expect(playerName?.length).toBeGreaterThan(0)
+        await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
+        // wait for track name to populate (may be async)
+        await expect(page.getByTestId('player-track-name').first()).not.toBeEmpty({ timeout: 5000 })
     })
 
     test('play/pause button toggles playback', async ({ page }) => {
@@ -101,7 +85,7 @@ test.describe('player bar', () => {
 
         // one → off
         await btn.click()
-        await expect(btn).not.toHaveClass(/text-sky-500/, { timeout: 2000 })
+        await expect(btn).toHaveClass(/text-gray-400/, { timeout: 2000 })
     })
 
     test('queue toggle shows and hides queue panel', async ({ page }) => {
@@ -117,7 +101,7 @@ test.describe('player bar', () => {
 
         // close queue
         await btn.click()
-        await expect(btn).not.toHaveClass(/text-sky-500/, { timeout: 2000 })
+        await expect(btn).toHaveClass(/text-gray-400/, { timeout: 2000 })
     })
 
     test('progress bar click seeks without error', async ({ page }) => {

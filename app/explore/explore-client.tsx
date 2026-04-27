@@ -35,10 +35,11 @@ function matchesSearch(item: AnyItem, query: string): boolean {
 function itemStat(item: AnyItem, sortBy: SortBy): string | null {
     if ('count' in item && typeof item.count === 'number') {
         if (sortBy === 'saves') return `saved ${item.count}×`
+        if (sortBy === 'downloads') return `downloaded ${item.count}×`
         return `played ${item.count}×`
     }
-    if ('added_at' in item && typeof (item as RecentlySavedSong).added_at === 'string') {
-        return `added ${new Date((item as RecentlySavedSong).added_at).toLocaleDateString()}`
+    if ('added_at' in item && typeof (item as { added_at: string }).added_at === 'string') {
+        return `added ${new Date((item as { added_at: string }).added_at).toLocaleDateString()}`
     }
     if ('last_played_at' in item && typeof (item as RecentlyPlayedSong).last_played_at === 'string') {
         return `played ${new Date((item as RecentlyPlayedSong).last_played_at).toLocaleDateString()}`

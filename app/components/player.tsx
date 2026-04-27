@@ -1,13 +1,14 @@
 'use client'
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react"
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import Image from "next/image"
 import Link from "next/link"
-import { FaPause, FaPlay, FaStepBackward, FaStepForward, FaRandom, FaRedo, FaList, FaTimes } from "react-icons/fa"
-import { BASE_URL, PlayableSong, artworkUrl, fetchLibrarySongs, fetchPlayerState, recordPlay, savePlayerState, updatePosition } from "../lib/data"
+import { FaPause, FaPlay, FaStepBackward, FaStepForward, FaRandom, FaRedo, FaList, FaTimes, FaVolumeUp, FaVolumeMute } from "react-icons/fa"
+import { DOWNLOAD_URL, PlayableSong, artworkUrl, fetchLibrarySongs, fetchPlayerState, recordPlay, savePlayerState, updatePosition } from "../lib/data"
 import { getSongFile } from "../lib/offline"
+import Slider from "./slider"
 
 export type RepeatMode = 'off' | 'one' | 'all'
-export type PlayContext = { label: string; href: string }
+export type PlayContext = { label: string; href: string; id?: string }
 
 interface PlayerContextValue {
     current: PlayableSong | null
@@ -134,6 +135,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     const [playContext, setPlayContext] = useState<PlayContext | null>(null)
     const [showQueue, setShowQueue] = useState(false)
+    const [volume, setVolume] = useState(1)
     const pendingPosition = useRef<number>(0)
     const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const blobUrlRef = useRef<string | null>(null)
@@ -161,7 +163,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             blobUrlRef.current = URL.createObjectURL(cachedFile)
             audio.src = blobUrlRef.current
         } else {
-            audio.src = `${BASE_URL}/download/${song.uuid}`
+            audio.src = `${DOWNLOAD_URL}/${song.uuid}`
         }
         audio.load()
         setCurrent(song)
@@ -427,7 +429,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                         blobUrlRef.current = URL.createObjectURL(cached)
                         audio.src = blobUrlRef.current
                     } else {
-                        audio.src = `${BASE_URL}/download/${song.uuid}`
+                        audio.src = `${DOWNLOAD_URL}/${song.uuid}`
                     }
                 }
             } else {
@@ -449,7 +451,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                             blobUrlRef.current = URL.createObjectURL(cached)
                             audio.src = blobUrlRef.current
                         } else {
-                            audio.src = `${BASE_URL}/download/${last.uuid}`
+                            audio.src = `${DOWNLOAD_URL}/${last.uuid}`
                         }
                     }
                 }
@@ -457,13 +459,23 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         })
     }, [])
 
+    useEffect(() => {
+        if (audioRef.current) audioRef.current.volume = volume
+    }, [volume])
+
     const p = current?.properties
     const hasQueue = queue.length > 1
     const activeClass = 'text-sky-500'
     const idleClass = 'text-gray-400 hover:text-sky-500 transition-colors'
 
+    const contextValue = useMemo(() => ({
+        current, isPlaying, queue, shuffle, repeat, playContext,
+        play, pause, resume, skipNext, skipPrev, toggleShuffle, toggleRepeat, insertNext, removeFromQueue,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }), [current, isPlaying, queue, shuffle, repeat, playContext])
+
     return (
-        <PlayerContext.Provider value={{ current, isPlaying, queue, shuffle, repeat, playContext, play, pause, resume, skipNext, skipPrev, toggleShuffle, toggleRepeat, insertNext, removeFromQueue }}>
+        <PlayerContext.Provider value={contextValue}>
             <audio ref={audioRef} />
             {children}
             {current && p && (
@@ -490,8 +502,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                                 <Image src={artworkUrl(sp.artworkUrl100, 200)} alt="" width={28} height={28} className="rounded shrink-0" />
                                             )}
                                             <div className="flex flex-col min-w-0 flex-1">
-                                                <span className={`text-xs font-medium truncate ${isActive ? 'text-sky-500' : ''}`}>{sp?.trackName}</span>
-                                                <span className="text-xs text-gray-400 truncate">{sp?.artistName}</span>
+                                                <span className={`text-xs font-medium truncate ${isActive ? 'text-sky-500' : ''}`}>{sp?.trackName || 'Unknown title'}</span>
+                                                <span className="text-xs text-gray-400 truncate">{sp?.artistName || 'Unknown artist'}</span>
                                             </div>
                                             {isActive && <FaPlay size={8} className="text-sky-500 shrink-0" />}
                                         </button>
@@ -511,14 +523,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                             )}
                             {playContext ? (
                                 <Link href={playContext.href} className="flex flex-col min-w-0 flex-1 group">
-                                    <span data-testid="player-track-name" className="text-xs font-medium truncate group-hover:text-sky-500 transition-colors">{p.trackName}</span>
-                                    <span className="text-xs text-sky-500 truncate">{p.artistName}</span>
+                                    <span data-testid="player-track-name" className="text-xs font-medium truncate group-hover:text-sky-500 transition-colors">{p.trackName || 'Unknown title'}</span>
+                                    <span className="text-xs text-sky-500 truncate">{p.artistName || 'Unknown artist'}</span>
                                     <span className="text-xs text-gray-400 truncate">from {playContext.label}</span>
                                 </Link>
                             ) : (
                                 <div className="flex flex-col min-w-0 flex-1">
-                                    <span data-testid="player-track-name" className="text-xs font-medium truncate">{p.trackName}</span>
-                                    <span className="text-xs text-sky-500 truncate">{p.artistName}</span>
+                                    <span data-testid="player-track-name" className="text-xs font-medium truncate">{p.trackName || 'Unknown title'}</span>
+                                    <span className="text-xs text-sky-500 truncate">{p.artistName || 'Unknown artist'}</span>
                                 </div>
                             )}
                             <div className="flex items-center gap-3 shrink-0">
@@ -543,6 +555,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                 <button data-testid="player-queue-toggle" onClick={() => setShowQueue(v => !v)} className={`shrink-0 ${showQueue ? activeClass : idleClass}`}>
                                     <FaList size={12} />
                                 </button>
+                                <div className="hidden sm:flex items-center gap-1.5 shrink-0">
+                                    <button onClick={() => setVolume(v => v > 0 ? 0 : 1)} className={idleClass}>
+                                        {volume === 0 ? <FaVolumeMute size={12} /> : <FaVolumeUp size={12} />}
+                                    </button>
+                                    <div className="w-16">
+                                        <Slider value={volume} min={0} max={1} step={0.02} onChange={setVolume} label="volume" />
+                                    </div>
+                                </div>
                             </div>
                         </div>
                         <div data-testid="player-progress" className="flex px-4 pb-3">

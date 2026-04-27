@@ -2,15 +2,15 @@
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { createPortal } from "react-dom";
-import { addToLibrary, removeFromLibrary, downloadSongToFile, createShareToken, DownloadedSong, songArtworkUrl } from "../lib/data";
+import { addToLibrary, removeFromLibrary, downloadSongToFile, createShareToken, DownloadedSong, songArtworkUrl, addSongToPlaylist } from "../lib/data";
 import { cacheSong, uncacheSong } from "../lib/offline";
-import { FaBookmark, FaRegBookmark, FaPlay, FaPause, FaEllipsisV } from "react-icons/fa";
+import { FaBookmark, FaRegBookmark, FaPlay, FaPause, FaEllipsisV, FaLock } from "react-icons/fa";
 import Image from "next/image";
 import { usePlayer } from "./player";
 import EditorModal from "./editor-modal";
 import { useUser } from "../lib/user-context";
 
-export default function Song({ song, selected, onClick, inLibrary: initialInLibrary, cachedOffline: initialCachedOffline, onRemove, onCacheChange, compact, rank, editContext, onEditComplete }: {
+export default function Song({ song, selected, onClick, inLibrary: initialInLibrary, cachedOffline: initialCachedOffline, onRemove, onCacheChange, compact, rank, editContext, onEditComplete, isPrivate, playlists, onPlaylistAdd }: {
     song: DownloadedSong,
     selected: boolean,
     onClick: () => void,
@@ -22,6 +22,9 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
     rank?: number,
     editContext?: { label: string; href: string },
     onEditComplete?: () => void,
+    isPrivate?: boolean,
+    playlists?: { id: string; name: string }[],
+    onPlaylistAdd?: () => void,
 }) {
     const { isAdmin } = useUser()
     const router = useRouter()
@@ -43,6 +46,8 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
     }, [])
     const [kebabOpen, setKebabOpen] = useState(false)
     const [kebabPos, setKebabPos] = useState({ top: 0, right: 0 })
+    const [playlistPickerOpen, setPlaylistPickerOpen] = useState(false)
+    const [addedToPlaylist, setAddedToPlaylist] = useState<string | null>(null)
     const kebabRef = useRef<HTMLButtonElement>(null)
     const { play, pause, resume, current, isPlaying, insertNext } = usePlayer()
     const isCurrentSong = current?.uuid === song.songId
@@ -167,6 +172,37 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                         ? `Saving… ${offlineProgress > 0 ? Math.round(offlineProgress * 100) + '%' : ''}`
                         : offlineCached ? 'Remove offline copy' : 'Save offline'}
                 </button>
+                {playlists && playlists.length > 0 && (
+                    <>
+                        <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
+                        <button
+                            onClick={() => setPlaylistPickerOpen(o => !o)}
+                            className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-between"
+                        >
+                            Add to playlist
+                            <span className="text-gray-400 text-xs">{playlistPickerOpen ? '▲' : '▼'}</span>
+                        </button>
+                        {playlistPickerOpen && (
+                            <div className="border-t border-gray-100 dark:border-gray-700">
+                                {playlists.map(pl => (
+                                    <button
+                                        key={pl.id}
+                                        onClick={async () => {
+                                            if (!song.songId) return
+                                            const ok = await addSongToPlaylist(pl.id, song.songId)
+                                            if (ok) { setAddedToPlaylist(pl.name); setTimeout(() => setAddedToPlaylist(null), 2000); onPlaylistAdd?.() }
+                                            setPlaylistPickerOpen(false)
+                                            setKebabOpen(false)
+                                        }}
+                                        className="w-full text-left pl-5 pr-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 truncate text-gray-500 dark:text-gray-400"
+                                    >
+                                        {pl.name}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </>
+                )}
                 <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
                 <button onClick={() => { setKebabOpen(false); openEditor() }}
                     className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700">
@@ -242,14 +278,17 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                     {rank !== undefined && (
                         <span className="text-gray-400 tabular-nums w-5 text-right shrink-0 text-sm">{rank}</span>
                     )}
-                    {song.properties.artworkUrl100 && (
-                        <Image src={songArtworkUrl(song.songId, song.artworkCached, song.properties.artworkUrl100, 200) ?? ''} alt="" width={36} height={36} className="rounded shrink-0" />
+                    {songArtworkUrl(song.songId, song.artworkCached, song.properties.artworkUrl100, 200) ? (
+                        <Image src={songArtworkUrl(song.songId, song.artworkCached, song.properties.artworkUrl100, 200)!} alt="" width={36} height={36} className="rounded shrink-0" />
+                    ) : (
+                        <div className="w-9 h-9 rounded shrink-0 bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-base">🎵</div>
                     )}
                     <div className="flex flex-col min-w-0 flex-1">
-                        <span className={`text-sm font-medium truncate ${isCurrentSong ? 'text-sky-500' : ''}`}>
-                            {song.properties.trackName}
+                        <span className={`text-sm font-medium truncate flex items-center gap-1 ${isCurrentSong ? 'text-sky-500' : ''}`}>
+                            {isPrivate && <FaLock size={9} className="text-gray-400 shrink-0" />}
+                            {song.properties.trackName || 'Unknown title'}
                         </span>
-                        <span className="text-xs text-sky-500 truncate">{song.properties.artistName} · {song.properties.collectionName}</span>
+                        <span className="text-xs text-sky-500 truncate">{song.properties.artistName || 'Unknown artist'} · {song.properties.collectionName || 'Unknown album'}</span>
                     </div>
                     <div onClick={e => e.stopPropagation()}>
                         {actions}
@@ -273,15 +312,22 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                 <div className="flex flex-row justify-between">
                     <div className="flex flex-row rounded-lg min-w-0">
                         <div className="shrink-0">
-                            <Image className="rounded-md object-contain w-16 h-16 md:w-24 md:h-24" alt="" src={songArtworkUrl(song.songId, song.artworkCached, song.properties.artworkUrl100, 400) ?? ''} width={96} height={96} />
+                            {songArtworkUrl(song.songId, song.artworkCached, song.properties.artworkUrl100, 400) ? (
+                                <Image className="rounded-md object-contain w-16 h-16 md:w-24 md:h-24" alt="" src={songArtworkUrl(song.songId, song.artworkCached, song.properties.artworkUrl100, 400)!} width={96} height={96} />
+                            ) : (
+                                <div className="rounded-md w-16 h-16 md:w-24 md:h-24 bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-2xl">🎵</div>
+                            )}
                         </div>
                         <div className="flex flex-col px-3 min-w-0">
-                            <span className="text-lg md:text-2xl font-medium text-left truncate">{song.properties.trackName}</span>
-                            <span className="font-medium text-sky-500 text-left truncate">{`${song.properties.artistName} · ${song.properties.collectionName}`}</span>
+                            <span className="text-lg md:text-2xl font-medium text-left truncate flex items-center gap-1.5">
+                                {isPrivate && <FaLock size={12} className="text-gray-400 shrink-0" />}
+                                {song.properties.trackName || 'Unknown title'}
+                            </span>
+                            <span className="font-medium text-sky-500 text-left truncate">{`${song.properties.artistName || 'Unknown artist'} · ${song.properties.collectionName || 'Unknown album'}`}</span>
                             <span className="flex gap-2 font-medium text-gray-500">
-                                <span>{`${song.properties.trackNumber} of ${song.properties.trackCount}`}</span>
+                                <span>{song.properties.trackNumber && song.properties.trackCount ? `${song.properties.trackNumber} of ${song.properties.trackCount}` : '—'}</span>
                                 <span>·</span>
-                                <span>{song.properties.releaseDate}</span>
+                                <span>{song.properties.releaseDate || '—'}</span>
                             </span>
                             {libraryError && <span className="text-red-500 text-sm">library error, try again</span>}
                             {downloadError && <span className="text-red-500 text-sm">download failed, try again</span>}

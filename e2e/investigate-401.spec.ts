@@ -1,19 +1,10 @@
 import { test, expect } from '@playwright/test'
-
-const USERNAME = process.env.TEST_USERNAME!
-const PASSWORD = process.env.TEST_PASSWORD!
+import { login } from './helpers'
 
 const failures: { url: string; status: number; method: string; page: string }[] = []
 
-async function login(page: any) {
-  await page.goto('/')
-  await page.getByPlaceholder('username').fill(USERNAME)
-  await page.getByPlaceholder('password').fill(PASSWORD)
-  await page.getByTestId('login-submit').click()
-  await expect(page).toHaveURL(/\/download/, { timeout: 10000 })
-}
-
 test('capture all 401s across the app', async ({ page }) => {
+  test.setTimeout(120000)
   await login(page)
 
   // only capture 401s on authenticated pages

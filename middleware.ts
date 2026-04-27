@@ -16,7 +16,7 @@ function isExpired(token: string): boolean {
 
 async function refreshAccessToken(refreshToken: string): Promise<string | null> {
   try {
-    const res = await fetch(`${API_BASE}/auth/refresh`, {
+    const res = await fetch(`${API_BASE}/v1/auth/refresh`, {
       method: 'POST',
       headers: { Cookie: `refresh_token=${refreshToken}` },
     })

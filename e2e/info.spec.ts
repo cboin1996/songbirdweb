@@ -1,16 +1,6 @@
 import { test, expect, Page } from '@playwright/test'
+import { USERNAME, PASSWORD, login, ignoreError } from './helpers'
 
-const USERNAME = process.env.TEST_USERNAME!
-const PASSWORD = process.env.TEST_PASSWORD!
-
-async function login(page: Page) {
-    await page.context().clearCookies()
-    await page.goto('/')
-    await page.getByPlaceholder('username').fill(USERNAME)
-    await page.getByPlaceholder('password').fill(PASSWORD)
-    await page.getByTestId('login-submit').click()
-    await expect(page).toHaveURL(/\/download/)
-}
 
 test.describe('info page', () => {
     test.describe.configure({ mode: 'serial' })

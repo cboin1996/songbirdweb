@@ -2,14 +2,15 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import Image from "next/image"
 import { useRouter, useSearchParams } from "next/navigation"
-import { LibrarySong, artworkUrl, fetchLibrarySongs } from "../lib/data"
+import { LibrarySong, Playlist, artworkUrl, fetchLibrarySongs, fetchPlaylists, publishEligibleSongs } from "../lib/data"
 import { cacheSong, getCachedSongIds } from "../lib/offline"
 import Song from "../components/song"
 import { usePlayer } from "../components/player"
 import { routes } from "../lib/routes"
 import { FaPlay, FaCloudDownloadAlt } from "react-icons/fa"
+import PlaylistsView from "./playlists-view"
 
-type ViewMode = 'songs' | 'artists' | 'albums' | 'genres'
+type ViewMode = 'songs' | 'artists' | 'albums' | 'genres' | 'playlists'
 
 const ALPHABET = '#ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')
 
@@ -94,9 +95,16 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     const [cachedIds, setCachedIds] = useState<Set<string>>(new Set())
     const [savingAll, setSavingAll] = useState(false)
     const [saveAllProgress, setSaveAllProgress] = useState({ done: 0, total: 0 })
+    const [playlists, setPlaylists] = useState<Playlist[]>([])
+    const [publishing, setPublishing] = useState(false)
+    const [publishResult, setPublishResult] = useState<number | null>(null)
+
+    const privateSongCount = useMemo(() => songs.filter(s => s.owner_id !== null).length, [songs])
+    const playlistStubs = useMemo(() => playlists.map(p => ({ id: p.id, name: p.name })), [playlists])
 
     useEffect(() => {
         getCachedSongIds().then(setCachedIds)
+        fetchPlaylists().then(setPlaylists)
     }, [])
 
     function changeViewMode(v: ViewMode) {
@@ -107,6 +115,19 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     async function refreshSongs() {
         const fresh = await fetchLibrarySongs()
         setSongs(fresh)
+    }
+
+    async function refreshPlaylists() {
+        fetchPlaylists().then(setPlaylists)
+    }
+
+    async function handlePublish() {
+        setPublishing(true)
+        const count = await publishEligibleSongs()
+        setPublishResult(count)
+        setPublishing(false)
+        await refreshSongs()
+        setTimeout(() => setPublishResult(null), 3000)
     }
 
     async function saveAllOffline() {
@@ -226,6 +247,32 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
+    // update URL letter as user scrolls through sections
+    useEffect(() => {
+        if (viewMode === 'playlists') return
+        const entries = Object.entries(sectionRefs.current).filter(([, el]) => el != null)
+        if (entries.length === 0) return
+        let rafId: number | null = null
+        const obs = new IntersectionObserver(changes => {
+            for (const c of changes) {
+                if (c.isIntersecting) {
+                    const key = (c.target as HTMLElement).dataset.letter
+                    if (!key) continue
+                    if (rafId) cancelAnimationFrame(rafId)
+                    rafId = requestAnimationFrame(() => {
+                        const p = new URLSearchParams(window.location.search)
+                        if (p.get('letter') === key) return
+                        p.set('letter', key)
+                        window.history.replaceState(null, '', `?${p.toString()}`)
+                    })
+                }
+            }
+        }, { rootMargin: '-20% 0px -70% 0px' })
+        entries.forEach(([, el]) => el && obs.observe(el))
+        return () => { obs.disconnect(); if (rafId) cancelAnimationFrame(rafId) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [viewMode, songGrouped, albumGrouped, genreGrouped])
+
     function playAll() {
         if (viewMode === 'albums') {
             const allAlbumSongs = [...albumGrouped.values()].flat().flatMap(a => a.songs)
@@ -256,23 +303,36 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         <div className="relative pr-7">
             {/* Sticky toolbar */}
             <div className="sticky top-11 z-40 bg-white/90 dark:bg-gray-950/90 backdrop-blur-md py-3 flex flex-wrap gap-3 items-center border-b border-gray-100 dark:border-gray-800 mb-2">
-                <button
-                    onClick={playAll}
-                    className="flex items-center gap-1.5 px-3 py-1 bg-sky-500 hover:bg-sky-400 text-white rounded-full text-sm font-medium transition-colors"
-                >
-                    <FaPlay size={9} />
-                    play all
-                </button>
-                <button
-                    onClick={saveAllOffline}
-                    disabled={savingAll}
-                    className="flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors disabled:opacity-50 text-gray-400 hover:text-sky-500 border border-gray-200 dark:border-gray-800 hover:border-sky-500 transition-colors"
-                >
-                    <FaCloudDownloadAlt size={12} />
-                    {savingAll ? `${saveAllProgress.done}/${saveAllProgress.total}` : 'save all offline'}
-                </button>
+                {viewMode !== 'playlists' && (
+                    <button
+                        onClick={playAll}
+                        className="flex items-center gap-1.5 px-3 py-1 bg-sky-500 hover:bg-sky-400 text-white rounded-full text-sm font-medium transition-colors"
+                    >
+                        <FaPlay size={9} />
+                        play all
+                    </button>
+                )}
+                {viewMode !== 'playlists' && (
+                    <button
+                        onClick={saveAllOffline}
+                        disabled={savingAll}
+                        className="flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors disabled:opacity-50 text-gray-400 hover:text-sky-500 border border-gray-200 dark:border-gray-800 hover:border-sky-500 transition-colors"
+                    >
+                        <FaCloudDownloadAlt size={12} />
+                        {savingAll ? `${saveAllProgress.done}/${saveAllProgress.total}` : 'save all offline'}
+                    </button>
+                )}
+                {privateSongCount > 0 && viewMode !== 'playlists' && (
+                    <button
+                        onClick={handlePublish}
+                        disabled={publishing}
+                        className="flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors disabled:opacity-50 text-gray-400 hover:text-sky-500 border border-gray-200 dark:border-gray-800 hover:border-sky-500 transition-colors"
+                    >
+                        {publishing ? 'publishing…' : publishResult !== null ? `published ${publishResult}` : `publish eligible (${privateSongCount})`}
+                    </button>
+                )}
                 <div className="flex gap-1">
-                    {(['songs', 'artists', 'albums', 'genres'] as ViewMode[]).map(v => (
+                    {(['songs', 'artists', 'albums', 'genres', 'playlists'] as ViewMode[]).map(v => (
                         <button
                             key={v}
                             onClick={() => changeViewMode(v)}
@@ -284,11 +344,16 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                 </div>
             </div>
 
+            {/* Playlists view */}
+            {viewMode === 'playlists' && (
+                <PlaylistsView playlists={playlists} onRefresh={refreshPlaylists} />
+            )}
+
             {/* Sections */}
             {viewMode === 'albums'
                 ? [...albumGrouped.entries()].map(([letter, albums]) => (
-                    <div key={letter} ref={el => { sectionRefs.current[letter] = el }} className="scroll-mt-24">
-                        <div className="sticky top-24 z-30 bg-white/80 dark:bg-gray-950/80 backdrop-blur-sm px-1 py-0.5 mb-1">
+                    <div key={letter} ref={el => { sectionRefs.current[letter] = el }} data-letter={letter} className="scroll-mt-24">
+                        <div className="sticky top-24 z-30 bg-background px-1 py-0.5 mb-1">
                             <span className="text-xs font-bold text-sky-500 tracking-widest">{letter}</span>
                         </div>
                         <div className={isDesktop
@@ -308,8 +373,8 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                 ))
                 : viewMode === 'genres'
                 ? [...genreGrouped.entries()].map(([genre, group]) => (
-                    <div key={genre} ref={el => { sectionRefs.current[genre] = el }} className="scroll-mt-24">
-                        <div className="sticky top-24 z-30 bg-white/80 dark:bg-gray-950/80 backdrop-blur-sm px-1 py-0.5 mb-1">
+                    <div key={genre} ref={el => { sectionRefs.current[genre] = el }} data-letter={letterKey(genre)} className="scroll-mt-24">
+                        <div className="sticky top-24 z-30 bg-background px-1 py-0.5 mb-1">
                             <span className="text-sm font-bold text-sky-500">{genre}</span>
                             <span className="ml-2 text-xs text-gray-400">{group.length}</span>
                         </div>
@@ -344,14 +409,17 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                     compact={!isDesktop}
                                     editContext={{ label: 'Library', href: routes.library }}
                                     onEditComplete={refreshSongs}
+                                    isPrivate={!!song.owner_id}
+                                    playlists={playlistStubs}
+                                    onPlaylistAdd={refreshPlaylists}
                                 />
                             ))}
                         </div>
                     </div>
                 ))
                 : [...songGrouped.entries()].map(([letter, group]) => (
-                    <div key={letter} ref={el => { sectionRefs.current[letter] = el }} className="scroll-mt-24">
-                        <div className="sticky top-24 z-30 bg-white/80 dark:bg-gray-950/80 backdrop-blur-sm px-1 py-0.5 mb-1">
+                    <div key={letter} ref={el => { sectionRefs.current[letter] = el }} data-letter={letter} className="scroll-mt-24">
+                        <div className="sticky top-24 z-30 bg-background px-1 py-0.5 mb-1">
                             <span className="text-xs font-bold text-sky-500 tracking-widest">{letter}</span>
                         </div>
                         <div className={isDesktop
@@ -385,6 +453,9 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                     compact={!isDesktop}
                                     editContext={{ label: 'Library', href: routes.library }}
                                     onEditComplete={refreshSongs}
+                                    isPrivate={!!song.owner_id}
+                                    playlists={playlistStubs}
+                                    onPlaylistAdd={refreshPlaylists}
                                 />
                             ))}
                         </div>
@@ -393,7 +464,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
             }
 
             {/* A-Z index */}
-            <div className="fixed right-0 top-1/2 -translate-y-1/2 z-50 flex flex-col items-center py-2">
+            {viewMode !== 'playlists' && <div className="fixed right-0 top-1/2 -translate-y-1/2 z-50 flex flex-col items-center py-2">
                 {ALPHABET.map(letter => (
                     <button
                         key={letter}
@@ -408,7 +479,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                         {letter}
                     </button>
                 ))}
-            </div>
+            </div>}
         </div>
     )
 }

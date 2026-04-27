@@ -1,20 +1,6 @@
 import { test, expect, Page } from '@playwright/test'
+import { USERNAME, PASSWORD, login, ignoreError } from './helpers'
 
-const USERNAME = process.env.TEST_USERNAME!
-const PASSWORD = process.env.TEST_PASSWORD!
-
-async function login(page: Page) {
-    await page.context().clearCookies()
-    await page.goto('/')
-    await page.getByPlaceholder('username').fill(USERNAME)
-    await page.getByPlaceholder('password').fill(PASSWORD)
-    await page.getByTestId('login-submit').click()
-    await expect(page).toHaveURL(/\/download/)
-}
-
-function ignoreError(msg: string) {
-    return /AbortError|favicon|401/i.test(msg)
-}
 
 test.describe('admin page', () => {
     test.describe.configure({ mode: 'serial' })
@@ -50,7 +36,7 @@ test.describe('admin page', () => {
     test('users section shows current admin username', async ({ page }) => {
         await page.goto('/admin')
         await expect(page.getByText('users').first()).toBeVisible({ timeout: 10000 })
-        await expect(page.getByText(USERNAME)).toBeVisible({ timeout: 5000 })
+        await expect(page.getByText(USERNAME).first()).toBeVisible({ timeout: 5000 })
     })
 
     test('user table shows role badge (admin)', async ({ page }) => {

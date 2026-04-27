@@ -19,12 +19,17 @@ enum ResponseTypes {
   blob,
 }
 
-const SKIP_REFRESH_URLS = ['/auth/login', '/auth/refresh', '/auth/me']
+const SKIP_REFRESH_URLS = new Set([
+  `${API_V1}/auth/login`,
+  `${API_V1}/auth/refresh`,
+  `${API_V1}/auth/me`,
+])
 
 let refreshPromise: Promise<boolean> | null = null
 
 function redirectToLogin() {
-  window.location.href = '/login?next=' + encodeURIComponent(window.location.pathname + window.location.search)
+  if (window.location.pathname === '/') return
+  window.location.href = '/?next=' + encodeURIComponent(window.location.pathname + window.location.search)
 }
 
 async function tryRefresh(): Promise<boolean> {
@@ -66,7 +71,7 @@ async function fetchData<T>(args: {
     const response = await fetch(args.url, options);
     if (!response.ok) {
       const silent = args.silentStatuses ?? []
-      if (response.status === 401 && typeof window !== 'undefined' && !SKIP_REFRESH_URLS.some(u => args.url.includes(u))) {
+      if (response.status === 401 && typeof window !== 'undefined' && !SKIP_REFRESH_URLS.has(args.url)) {
         const refreshed = await tryRefresh()
         if (refreshed) {
           const retryOptions = await buildFetchOptions(args.method, args.body)
@@ -154,6 +159,7 @@ export interface LibrarySong {
   artwork_cached: boolean
   parent_song_id: string | null
   root_song_id: string | null
+  owner_id: string | null
   added_at: string
   last_position: number
   last_played_at: string | null
@@ -192,7 +198,7 @@ export interface ExploreData {
   most_played: SongWithCount[]
   most_downloaded: SongWithCount[]
   most_libraryed: SongWithCount[]
-  recently_added: { uuid: string; url: string; properties: Properties | null }[]
+  recently_added: { uuid: string; url: string; properties: Properties | null; added_at?: string }[]
   your_most_played: SongWithCount[]
   your_most_downloaded: SongWithCount[]
   your_recently_saved: RecentlySavedSong[]
@@ -421,6 +427,9 @@ export interface AdminStats {
   disk_free: number
   failed_job_count: number
   active_share_tokens: number
+  import_count: number
+  import_failed_count: number
+  import_duplicate_count: number
   recent_jobs: EditJobSummary[]
   plays_by_day: DayActivity[]
   top_songs: TopSong[]
@@ -429,6 +438,15 @@ export interface AdminStats {
 
 export async function fetchAdminStats(): Promise<AdminStats | undefined> {
   return fetchData<AdminStats>({ url: `${API_V1}/admin/stats`, method: 'GET' })
+}
+
+export interface EditJobsPage {
+  total: number
+  jobs: EditJobSummary[]
+}
+
+export async function fetchAdminEditJobs(limit = 20, offset = 0): Promise<EditJobsPage> {
+  return await fetchData<EditJobsPage>({ url: `${API_V1}/admin/edit-jobs?limit=${limit}&offset=${offset}`, method: 'GET' }) ?? { total: 0, jobs: [] }
 }
 
 export interface ErrorLogEntry {
@@ -443,8 +461,13 @@ export interface ErrorLogEntry {
   user_id: string | null
 }
 
-export async function fetchAdminErrors(): Promise<ErrorLogEntry[]> {
-  return await fetchData<ErrorLogEntry[]>({ url: `${API_V1}/admin/errors`, method: 'GET' }) ?? []
+export interface ErrorsPage {
+  total: number
+  errors: ErrorLogEntry[]
+}
+
+export async function fetchAdminErrors(limit = 50, offset = 0): Promise<ErrorsPage> {
+  return await fetchData<ErrorsPage>({ url: `${API_V1}/admin/errors?limit=${limit}&offset=${offset}`, method: 'GET' }) ?? { total: 0, errors: [] }
 }
 
 export interface PlayerState {
@@ -520,6 +543,9 @@ export interface ImportJobResult {
   song_id?: string
   track_name?: string
   error?: string
+  duplicate_of?: string
+  filename?: string
+  created_at?: string
 }
 
 export async function startImport(file: File): Promise<ImportJobResult | undefined> {
@@ -532,6 +558,15 @@ export async function startImport(file: File): Promise<ImportJobResult | undefin
   } catch {
     return undefined
   }
+}
+
+export interface ImportJobsPage {
+  total: number
+  jobs: ImportJobResult[]
+}
+
+export async function listImportJobs(limit = 20, offset = 0): Promise<ImportJobsPage> {
+  return await fetchData<ImportJobsPage>({ url: `${API_V1}/import?limit=${limit}&offset=${offset}`, method: 'GET' }) ?? { total: 0, jobs: [] }
 }
 
 export async function pollImportJob(jobId: string): Promise<ImportJobResult | undefined> {
@@ -623,4 +658,78 @@ export async function deleteEditDraft(songId: string): Promise<void> {
     const options = await buildFetchOptions('DELETE')
     await fetch(`${API_V1}/edit/songs/${songId}/draft`, options)
   } catch {}
+}
+
+export interface Playlist {
+  id: string
+  name: string
+  created_at: string
+  updated_at: string
+  song_count: number
+}
+
+export interface PlaylistSong {
+  uuid: string
+  url: string
+  properties: Properties | null
+  artwork_cached: boolean
+  owner_id: string | null
+}
+
+export async function fetchPlaylists(): Promise<Playlist[]> {
+  return await fetchData<Playlist[]>({ url: `${API_V1}/playlists`, method: 'GET' }) ?? []
+}
+
+export async function createPlaylist(name: string): Promise<Playlist | undefined> {
+  return fetchData<Playlist>({ url: `${API_V1}/playlists`, method: 'POST', body: { name } })
+}
+
+export async function renamePlaylist(id: string, name: string): Promise<Playlist | undefined> {
+  return fetchData<Playlist>({ url: `${API_V1}/playlists/${id}`, method: 'PATCH', body: { name } })
+}
+
+export async function deletePlaylist(id: string): Promise<boolean> {
+  try {
+    const options = await buildFetchOptions('DELETE')
+    const response = await fetch(`${API_V1}/playlists/${id}`, options)
+    return response.ok
+  } catch { return false }
+}
+
+export async function fetchPlaylistSongs(id: string): Promise<PlaylistSong[]> {
+  return await fetchData<PlaylistSong[]>({ url: `${API_V1}/playlists/${id}/songs`, method: 'GET' }) ?? []
+}
+
+export async function addSongToPlaylist(playlistId: string, songUuid: string): Promise<boolean> {
+  try {
+    const options = await buildFetchOptions('POST', { song_uuid: songUuid })
+    const response = await fetch(`${API_V1}/playlists/${playlistId}/songs`, options)
+    return response.ok
+  } catch { return false }
+}
+
+export async function removeSongFromPlaylist(playlistId: string, songUuid: string): Promise<boolean> {
+  try {
+    const options = await buildFetchOptions('DELETE')
+    const response = await fetch(`${API_V1}/playlists/${playlistId}/songs/${songUuid}`, options)
+    return response.ok
+  } catch { return false }
+}
+
+export async function publishEligibleSongs(): Promise<number> {
+  const result = await fetchData<{ published: number }>({ url: `${API_V1}/library/publish`, method: 'POST' })
+  return result?.published ?? 0
+}
+
+export async function uploadSongArtwork(songId: string, file: File): Promise<boolean> {
+  try {
+    const formData = new FormData()
+    formData.append('file', file)
+    const response = await fetch(`${API_V1}/songs/${songId}/artwork`, {
+      method: 'POST',
+      body: formData,
+      credentials: 'include',
+    })
+    return response.ok
+  } catch { return false }
 }

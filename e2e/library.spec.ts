@@ -1,20 +1,6 @@
 import { test, expect, Page } from '@playwright/test'
+import { USERNAME, PASSWORD, login, ignoreError } from './helpers'
 
-const USERNAME = process.env.TEST_USERNAME!
-const PASSWORD = process.env.TEST_PASSWORD!
-
-async function login(page: Page) {
-    await page.context().clearCookies()
-    await page.goto('/')
-    await page.getByPlaceholder('username').fill(USERNAME)
-    await page.getByPlaceholder('password').fill(PASSWORD)
-    await page.getByTestId('login-submit').click()
-    await expect(page).toHaveURL(/\/download/)
-}
-
-function ignoreError(msg: string) {
-    return /AbortError|favicon|401/i.test(msg)
-}
 
 test.describe('library page', () => {
     test.describe.configure({ mode: 'serial' })
@@ -127,7 +113,7 @@ test.describe('library page', () => {
         await expect(card).toBeVisible({ timeout: 10000 })
         await card.click()
         await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
-        await expect(page.getByTestId('player-track-name')).toBeVisible()
+        await expect(page.getByTestId('player-track-name').first()).toBeVisible({ timeout: 5000 })
 
         expect(errors).toHaveLength(0)
     })

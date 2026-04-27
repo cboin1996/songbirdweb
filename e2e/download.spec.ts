@@ -1,20 +1,6 @@
 import { test, expect, Page } from '@playwright/test'
+import { USERNAME, PASSWORD, login, ignoreError } from './helpers'
 
-const USERNAME = process.env.TEST_USERNAME!
-const PASSWORD = process.env.TEST_PASSWORD!
-
-async function login(page: Page) {
-    await page.context().clearCookies()
-    await page.goto('/')
-    await page.getByPlaceholder('username').fill(USERNAME)
-    await page.getByPlaceholder('password').fill(PASSWORD)
-    await page.getByTestId('login-submit').click()
-    await expect(page).toHaveURL(/\/download/)
-}
-
-function ignoreError(msg: string) {
-    return /AbortError|favicon|401/i.test(msg)
-}
 
 test.describe('download page', () => {
     test.describe.configure({ mode: 'serial' })
@@ -31,26 +17,26 @@ test.describe('download page', () => {
 
     test('download page shows song, album, URL options', async ({ page }) => {
         await page.goto('/download')
-        await expect(page.getByRole('link', { name: 'Song' })).toBeVisible({ timeout: 5000 })
-        await expect(page.getByRole('link', { name: 'Album' })).toBeVisible()
-        await expect(page.getByRole('link', { name: 'URL' })).toBeVisible()
+        await expect(page.locator('a[href="/download/song"]')).toBeVisible({ timeout: 5000 })
+        await expect(page.locator('a[href="/download/album"]')).toBeVisible()
+        await expect(page.locator('a[href="/download/url"]')).toBeVisible()
     })
 
     test('Song link navigates to /download/song', async ({ page }) => {
         await page.goto('/download')
-        await page.getByRole('link', { name: 'Song' }).click()
+        await page.locator('a[href="/download/song"]').click()
         await expect(page).toHaveURL(/\/download\/song/)
     })
 
     test('Album link navigates to /download/album', async ({ page }) => {
         await page.goto('/download')
-        await page.getByRole('link', { name: 'Album' }).click()
+        await page.locator('a[href="/download/album"]').click()
         await expect(page).toHaveURL(/\/download\/album/)
     })
 
     test('URL link navigates to /download/url', async ({ page }) => {
         await page.goto('/download')
-        await page.getByRole('link', { name: 'URL' }).click()
+        await page.locator('a[href="/download/url"]').click()
         await expect(page).toHaveURL(/\/download\/url/)
     })
 
@@ -107,9 +93,9 @@ test.describe('download page', () => {
 
     // --- URL download sub-page ---
 
-    test('URL sub-page: input field is present', async ({ page }) => {
+    test('URL sub-page: status message is present', async ({ page }) => {
         await page.goto('/download/url')
-        await expect(page.locator('input[type="url"], input[type="text"]').first()).toBeVisible({ timeout: 5000 })
+        await expect(page.getByText('enter a url')).toBeVisible({ timeout: 5000 })
     })
 
     test('no console errors on download page', async ({ page }) => {

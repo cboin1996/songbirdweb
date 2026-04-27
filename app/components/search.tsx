@@ -4,7 +4,6 @@ import React, { HTMLInputTypeAttribute, useEffect, useState } from "react"
 import Button from "./button"
 import Input from "./input"
 import { FaX } from "react-icons/fa6"
-import { useDebouncedCallback } from "use-debounce"
 
 export default function Search() {
     const SONG_MODE = "song"

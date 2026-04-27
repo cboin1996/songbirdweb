@@ -1,94 +1,57 @@
 'use client'
-import { useCallback, useRef, useState } from 'react'
-import { startImport, pollImportJob } from '../lib/data'
-import { FaCheckCircle, FaTimesCircle, FaUpload } from 'react-icons/fa'
-
-type FileStatus = 'pending' | 'uploading' | 'processing' | 'done' | 'error'
-
-interface FileEntry {
-  id: string
-  file: File
-  status: FileStatus
-  trackName?: string
-  errorMsg?: string
-}
-
-const POLL_INTERVAL_MS = 1500
-const MAX_POLLS = 60
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { startImport, listImportJobs, ImportJobResult } from '../lib/data'
+import { FaUpload } from 'react-icons/fa'
+import ImportJobsTable, { ImportJobsTableHandle } from '../components/import-jobs-table'
 
 export default function ImportPage() {
-  const [entries, setEntries] = useState<FileEntry[]>([])
   const [dragging, setDragging] = useState(false)
+  const [initialJobs, setInitialJobs] = useState<ImportJobResult[]>([])
+  const [initialTotal, setInitialTotal] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
+  const tableRef = useRef<ImportJobsTableHandle | null>(null)
 
-  function addFiles(files: FileList | File[]) {
-    const arr = Array.from(files).filter(f => /\.(mp3|m4a)$/i.test(f.name))
+  useEffect(() => {
+    listImportJobs().then(data => { setInitialJobs(data.jobs); setInitialTotal(data.total) })
+  }, [])
+
+  const uploadFiles = useCallback(async (files: File[]) => {
+    const arr = files.filter(f => /\.(mp3|m4a)$/i.test(f.name))
     if (arr.length === 0) return
-    const newEntries: FileEntry[] = arr.map(file => ({
-      id: crypto.randomUUID(),
-      file,
-      status: 'pending',
-    }))
-    setEntries(prev => [...prev, ...newEntries])
-    newEntries.forEach(entry => uploadEntry(entry))
-  }
-
-  const uploadEntry = useCallback(async (entry: FileEntry) => {
-    setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: 'uploading' } : e))
-    const job = await startImport(entry.file)
-    if (!job) {
-      setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: 'error', errorMsg: 'upload failed' } : e))
-      return
+    const CONCURRENCY = 5
+    for (let i = 0; i < arr.length; i += CONCURRENCY) {
+      await Promise.all(arr.slice(i, i + CONCURRENCY).map(async file => {
+        const tempId = crypto.randomUUID()
+        const optimistic: ImportJobResult = {
+          job_id: tempId,
+          status: 'pending',
+          filename: file.name,
+          created_at: new Date().toISOString(),
+        }
+        tableRef.current?.addJob(optimistic)
+        const job = await startImport(file)
+        if (job) {
+          tableRef.current?.addJob(job, tempId)
+        }
+      }))
     }
-    setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: 'processing' } : e))
-    let polls = 0
-    const interval = setInterval(async () => {
-      polls++
-      const result = await pollImportJob(job.job_id)
-      if (!result || polls > MAX_POLLS) {
-        clearInterval(interval)
-        setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: 'error', errorMsg: 'timed out' } : e))
-        return
-      }
-      if (result.status === 'done') {
-        clearInterval(interval)
-        setEntries(prev => prev.map(e => e.id === entry.id ? {
-          ...e, status: 'done', trackName: result.track_name ?? entry.file.name,
-        } : e))
-      }
-      if (result.status === 'failed') {
-        clearInterval(interval)
-        setEntries(prev => prev.map(e => e.id === entry.id ? {
-          ...e, status: 'error', errorMsg: result.error ?? 'processing failed',
-        } : e))
-      }
-    }, POLL_INTERVAL_MS)
   }, [])
 
   function onDrop(e: React.DragEvent) {
     e.preventDefault()
     setDragging(false)
-    addFiles(e.dataTransfer.files)
+    uploadFiles(Array.from(e.dataTransfer.files))
   }
 
   function onInputChange(e: React.ChangeEvent<HTMLInputElement>) {
-    if (e.target.files) addFiles(e.target.files)
+    if (e.target.files) uploadFiles(Array.from(e.target.files))
     e.target.value = ''
   }
-
-  function clearDone() {
-    setEntries(prev => prev.filter(e => e.status !== 'done'))
-  }
-
-  const doneCount = entries.filter(e => e.status === 'done').length
-  const errorCount = entries.filter(e => e.status === 'error').length
-  const activeCount = entries.filter(e => e.status === 'uploading' || e.status === 'processing' || e.status === 'pending').length
 
   return (
     <main className="flex flex-col items-center gap-6 p-6 max-w-2xl mx-auto">
       <h1 className="text-lg font-semibold self-start">Import files</h1>
 
-      {/* drop zone */}
       <div
         data-testid="import-dropzone"
         className={`w-full flex flex-col items-center justify-center gap-3 border-2 border-dashed rounded-xl p-10 cursor-pointer transition-colors ${dragging ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30' : 'border-gray-300 dark:border-gray-700 hover:border-sky-500'}`}
@@ -111,56 +74,7 @@ export default function ImportPage() {
         />
       </div>
 
-      {/* file list */}
-      {entries.length > 0 && (
-        <div className="w-full flex flex-col gap-2">
-          <div className="flex items-center justify-between text-sm text-gray-400">
-            <span>
-              {activeCount > 0 && <span className="text-sky-500">{activeCount} in progress</span>}
-              {activeCount > 0 && (doneCount > 0 || errorCount > 0) && <span className="mx-1">·</span>}
-              {doneCount > 0 && <span className="text-emerald-500">{doneCount} done</span>}
-              {doneCount > 0 && errorCount > 0 && <span className="mx-1">·</span>}
-              {errorCount > 0 && <span className="text-red-500">{errorCount} failed</span>}
-            </span>
-            {doneCount > 0 && (
-              <button onClick={clearDone} className="text-xs text-gray-400 hover:text-sky-500 transition-colors">
-                clear done
-              </button>
-            )}
-          </div>
-
-          {entries.map(entry => (
-            <div
-              key={entry.id}
-              data-testid="import-file-row"
-              className="flex items-center gap-3 px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-800"
-            >
-              <div className="shrink-0">
-                {entry.status === 'done' && <FaCheckCircle className="text-emerald-500" size={14} />}
-                {entry.status === 'error' && <FaTimesCircle className="text-red-500" size={14} />}
-                {(entry.status === 'uploading' || entry.status === 'processing' || entry.status === 'pending') && (
-                  <div className="w-3.5 h-3.5 rounded-full border-2 border-gray-200 dark:border-gray-700 border-t-sky-500 animate-spin" />
-                )}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm truncate">{entry.trackName ?? entry.file.name}</p>
-                {entry.status === 'uploading' && <p className="text-xs text-sky-500">uploading…</p>}
-                {entry.status === 'processing' && <p className="text-xs text-sky-400">processing…</p>}
-                {entry.status === 'pending' && <p className="text-xs text-gray-400">queued…</p>}
-                {entry.status === 'done' && <p className="text-xs text-emerald-500">added to library</p>}
-                {entry.status === 'error' && <p className="text-xs text-red-500">{entry.errorMsg}</p>}
-              </div>
-              <button
-                onClick={() => setEntries(prev => prev.filter(e => e.id !== entry.id))}
-                className="text-gray-300 hover:text-gray-500 dark:text-gray-700 dark:hover:text-gray-400 transition-colors shrink-0 text-xs"
-                title="remove"
-              >
-                ✕
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
+      <ImportJobsTable initialJobs={initialJobs} total={initialTotal} tableRef={tableRef} />
     </main>
   )
 }

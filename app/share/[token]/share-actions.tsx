@@ -28,13 +28,8 @@ export default function ShareActions({
     }
 
     function handlePlay() {
-        if (playing) {
-            pause()
-        } else if (isCurrentSong) {
-            play({ uuid: songId, properties })
-        } else {
-            play({ uuid: songId, properties })
-        }
+        if (playing) pause()
+        else play({ uuid: songId, properties })
     }
 
     return (
