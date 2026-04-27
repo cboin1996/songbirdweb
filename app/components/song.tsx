@@ -256,7 +256,6 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
             artworkCached={song.artworkCached}
             parentSongId={song.parentSongId}
             rootSongId={song.rootSongId}
-            songCreatedAt={song.songCreatedAt}
             isAdmin={isAdmin ?? false}
             editContext={editContext}
             onClose={closeEditor}

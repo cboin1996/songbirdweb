@@ -152,8 +152,6 @@ export interface PlayableSong {
   last_played_at?: string | null
 }
 
-export const EDIT_EXPIRY_DAYS = 30
-
 export interface LibrarySong {
   uuid: string
   url: string
@@ -163,9 +161,24 @@ export interface LibrarySong {
   root_song_id: string | null
   owner_id: string | null
   added_at: string
-  song_created_at: string | null
   last_position: number
   last_played_at: string | null
+}
+
+export interface DraftSummary {
+  song_id: string
+  properties: Properties | null
+  artwork_cached: boolean
+  updated_at: string
+}
+
+export interface DraftWithMeta {
+  params: EditParams
+  updated_at: string
+}
+
+export async function fetchDrafts(): Promise<DraftSummary[]> {
+  return await fetchData<DraftSummary[]>({ url: `${API_V1}/edit/drafts`, method: 'GET' }) ?? []
 }
 
 
@@ -240,7 +253,6 @@ export interface DownloadedSong {
   artworkCached?: boolean;
   parentSongId?: string | null;
   rootSongId?: string | null;
-  songCreatedAt?: string | null;
 }
 
 export function artworkUrl(url: string, size: number): string {
@@ -652,8 +664,8 @@ export async function pollEditJob(jobId: string): Promise<EditJobResponse | unde
   return fetchData<EditJobResponse>({ url: `${API_V1}/edit/jobs/${jobId}`, method: 'GET' })
 }
 
-export async function fetchEditDraft(songId: string): Promise<EditParams | undefined> {
-  return fetchData<EditParams>({ url: `${API_V1}/edit/songs/${songId}/draft`, method: 'GET', silentStatuses: [404] })
+export async function fetchEditDraft(songId: string): Promise<DraftWithMeta | undefined> {
+  return fetchData<DraftWithMeta>({ url: `${API_V1}/edit/songs/${songId}/draft`, method: 'GET', silentStatuses: [404] })
 }
 
 export async function saveEditDraft(songId: string, params: EditParams): Promise<void> {

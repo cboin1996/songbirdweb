@@ -317,7 +317,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
 
     return (
         <div className="relative pr-7">
-            <EditsBanner songs={songs} />
+            <EditsBanner />
             {/* Sticky toolbar */}
             <div className="sticky top-11 z-40 bg-white/90 dark:bg-gray-950/90 backdrop-blur-md py-3 flex flex-wrap gap-3 items-center border-b border-gray-100 dark:border-gray-800 mb-2">
                 {viewMode !== 'playlists' && (
@@ -402,7 +402,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                             {group.map(song => song.properties && (
                                 <div key={song.uuid} data-song-id={song.uuid}>
                                 <Song
-                                    song={{ songId: song.uuid, properties: song.properties, artworkCached: song.artwork_cached, parentSongId: song.parent_song_id, rootSongId: song.root_song_id, songCreatedAt: song.song_created_at }}
+                                    song={{ songId: song.uuid, properties: song.properties, artworkCached: song.artwork_cached, parentSongId: song.parent_song_id, rootSongId: song.root_song_id }}
                                     selected={current?.uuid === song.uuid}
                                     onClick={() => {
                                         if (!song.properties) return
@@ -447,7 +447,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                             {group.map(song => song.properties && (
                                 <div key={song.uuid} data-song-id={song.uuid}>
                                 <Song
-                                    song={{ songId: song.uuid, properties: song.properties, artworkCached: song.artwork_cached, parentSongId: song.parent_song_id, rootSongId: song.root_song_id, songCreatedAt: song.song_created_at }}
+                                    song={{ songId: song.uuid, properties: song.properties, artworkCached: song.artwork_cached, parentSongId: song.parent_song_id, rootSongId: song.root_song_id }}
                                     selected={current?.uuid === song.uuid}
                                     onClick={() => {
                                         if (!song.properties) return

@@ -62,13 +62,7 @@ function stripClientIds(params: EditParams): EditParams {
   }
 }
 
-const EDIT_EXPIRY_DAYS = 30
-
-function editExpiryDate(songCreatedAt: string): Date {
-  const d = new Date(songCreatedAt)
-  d.setDate(d.getDate() + EDIT_EXPIRY_DAYS)
-  return d
-}
+const DRAFT_EXPIRY_DAYS = 30
 
 interface Props {
   songId: string
@@ -76,7 +70,6 @@ interface Props {
   artworkCached?: boolean
   parentSongId?: string | null
   rootSongId?: string | null
-  songCreatedAt?: string | null
   isAdmin: boolean
   editContext?: { label: string; href: string }
   onClose: () => void
@@ -84,7 +77,7 @@ interface Props {
 }
 
 export default function EditorModal({
-  songId, properties: initialProperties, artworkCached, parentSongId, rootSongId, songCreatedAt, isAdmin, editContext, onClose, onEditComplete,
+  songId, properties: initialProperties, artworkCached, parentSongId, rootSongId, isAdmin, editContext, onClose, onEditComplete,
 }: Props) {
   const modalRef = useRef<HTMLDivElement>(null)
   const [tab, setTab] = useState<Tab>('audio')
@@ -92,6 +85,7 @@ export default function EditorModal({
   // --- audio params ---
   const [params, setParams] = useState<EditParams>(DEFAULT_PARAMS)
   const [duration, setDuration] = useState(0)
+  const [draftUpdatedAt, setDraftUpdatedAt] = useState<string | null>(null)
 
   // --- undo/redo ---
   const historyRef = useRef<EditParams[]>([])
@@ -184,8 +178,10 @@ export default function EditorModal({
 
   // load draft on open
   useEffect(() => {
-    fetchEditDraft(songId).then(draft => {
-      if (draft) {
+    fetchEditDraft(songId).then(draftWithMeta => {
+      if (draftWithMeta) {
+        const draft = draftWithMeta.params
+        setDraftUpdatedAt(draftWithMeta.updated_at)
         const cuts: Cut[] = (draft.cuts ?? []).map(c => ({ ...c, fade_in: c.fade_in ?? 0, fade_out: c.fade_out ?? 0, id: crypto.randomUUID() }))
         const fades: FadeEdit[] = (draft.fades ?? []).map(f => ({ ...f, id: crypto.randomUUID() }))
         const p = { ...draft, cuts, fades }
@@ -1147,13 +1143,14 @@ export default function EditorModal({
           <div className="flex-1 min-w-0">
             <p className="font-medium truncate text-base">{initialProperties.trackName}</p>
             <p className="text-sm text-sky-500 truncate">{initialProperties.artistName}</p>
-            {parentSongId && songCreatedAt && (() => {
-              const exp = editExpiryDate(songCreatedAt)
+            {draftUpdatedAt && (() => {
+              const exp = new Date(draftUpdatedAt)
+              exp.setDate(exp.getDate() + DRAFT_EXPIRY_DAYS)
               const daysLeft = Math.ceil((exp.getTime() - Date.now()) / 86400000)
               const urgent = daysLeft <= 7
               return (
                 <p className={`text-xs mt-0.5 ${urgent ? 'text-orange-400' : 'text-gray-400'}`}>
-                  edit expires {exp.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ({daysLeft > 0 ? `${daysLeft}d left` : 'today'})
+                  draft expires {exp.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ({daysLeft > 0 ? `${daysLeft}d left` : 'today'})
                 </p>
               )
             })()}
