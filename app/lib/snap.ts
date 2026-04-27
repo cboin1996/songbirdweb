@@ -32,9 +32,12 @@ export function snap(
     trimStart: number,
     trimEnd: number,
     preserveSize = false,
+    origSize?: number,
 ): { start: number; end: number } {
     const others = obstacles.filter(o => o.id !== id)
-    const size = rawEnd - rawStart
+    // When preserving size and the caller knows the pre-drag size (avoids using
+    // the wall-clipped size that WaveSurfer may have already applied)
+    const size = (preserveSize && origSize !== undefined) ? origSize : rawEnd - rawStart
     const rawCenter = (rawStart + rawEnd) / 2
 
     if (!preserveSize) {

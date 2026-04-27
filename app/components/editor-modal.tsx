@@ -157,9 +157,21 @@ export default function EditorModal({
   const origTimelineCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const timelineContainerRef = useRef<HTMLDivElement>(null)
   const playheadRef = useRef<HTMLDivElement>(null)
+  const hoverPlayheadRef = useRef<HTMLDivElement>(null)
 
   // --- hover overlay tracking (for cleanup on delete-while-hovered) ---
   const overlayElemsRef = useRef<Map<string, HTMLElement>>(new Map())
+
+  // --- edit clipboard (cut/copy/paste) ---
+  type ClipboardEntry = { kind: 'cut'; data: Cut } | { kind: 'fade'; data: FadeEdit }
+  const clipboardRef = useRef<ClipboardEntry | null>(null)
+
+  // --- fade handle drag (capture listener, always reads latest handler via ref) ---
+  const fadeHandleDragRef = useRef<(e: PointerEvent) => void>(() => {})
+  const fadeHandleHoverRef = useRef<(e: MouseEvent) => void>(() => {})
+
+  // --- region drag vs resize detection (true = body drag, false = handle resize) ---
+  const isRegionDragRef = useRef(false)
 
   // --- job submit ---
   const [jobStatus, setJobStatus] = useState<'idle' | 'submitting' | 'polling' | 'done' | 'error'>('idle')
@@ -177,6 +189,7 @@ export default function EditorModal({
 
   // --- close guard ---
   const [closeConfirm, setCloseConfirm] = useState(false)
+  const [showShortcuts, setShowShortcuts] = useState(false)
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // --- restore ---
@@ -193,7 +206,10 @@ export default function EditorModal({
   const mainWaveCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const renderWave = useCallback((peaks: Array<Float32Array | number[]>, ctx: CanvasRenderingContext2D) => {
     if (!mainWaveCanvasRef.current) mainWaveCanvasRef.current = ctx.canvas
-    if (ctx.canvas !== mainWaveCanvasRef.current) return
+    if (ctx.canvas !== mainWaveCanvasRef.current) {
+      ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height)
+      return
+    }
     peaksRef.current = peaks
     waveCtxRef.current = ctx
     const p = paramsRef.current
@@ -254,6 +270,40 @@ export default function EditorModal({
       else ctx.rect(x, centerY - barH, BAR_W, barH * 2)
       ctx.fill()
     }
+    // Fade handle bar + triangle — triangle sits at fade extent, bar connects to cut edge
+    const HS = 7
+    for (const cut of p.cuts) {
+      if (cut.start > trimEnd || cut.end < trimStart) continue
+      const fadeOut = cut.fade_out ?? 0
+      const fadeIn = cut.fade_in ?? 0
+      const xL = (cut.start / dur) * width
+      const xR = (cut.end / dur) * width
+      const xFO = ((cut.start - fadeOut) / dur) * width
+      const xFI = ((cut.end + fadeIn) / dur) * width
+      const midY = 2 + HS / 2
+      ctx.fillStyle = '#dc2626'
+      // Fade-out: bar from triangle to cut edge, then left-pointing triangle at fade extent
+      if (fadeOut > 0) ctx.fillRect(xFO, midY - 0.5, xL - xFO, 1)
+      ctx.beginPath(); ctx.moveTo(xFO, 2); ctx.lineTo(xFO, 2 + HS); ctx.lineTo(xFO - HS, midY); ctx.closePath(); ctx.fill()
+      // Fade-in: bar from cut edge to triangle, then right-pointing triangle at fade extent
+      if (fadeIn > 0) ctx.fillRect(xR, midY - 0.5, xFI - xR, 1)
+      ctx.beginPath(); ctx.moveTo(xFI, 2); ctx.lineTo(xFI, 2 + HS); ctx.lineTo(xFI + HS, midY); ctx.closePath(); ctx.fill()
+    }
+    // Selected cut: outline the full fade+cut zone
+    const selId = selectedRegionIdRef.current
+    if (selId) {
+      const selCut = p.cuts.find(c => c.id === selId)
+      if (selCut) {
+        const x1 = Math.max(0, ((selCut.start - (selCut.fade_out ?? 0)) / dur) * width)
+        const x2 = Math.min(width, ((selCut.end + (selCut.fade_in ?? 0)) / dur) * width)
+        ctx.strokeStyle = '#38bdf8'
+        ctx.lineWidth = 1.5
+        ctx.beginPath()
+        if (ctx.roundRect) ctx.roundRect(x1, 1, x2 - x1, height - 2, 2)
+        else ctx.rect(x1, 1, x2 - x1, height - 2)
+        ctx.stroke()
+      }
+    }
   }, []) // stable — reads paramsRef / wsRef at call time
 
   // focus modal on mount so Space key is captured
@@ -291,7 +341,9 @@ export default function EditorModal({
   useEffect(() => {
     selectedRegionIdRef.current = selectedRegionId
     regionElemsRef.current.forEach((el, id) => {
-      el.style.outline = id === selectedRegionId ? '2px solid #38bdf8' : ''
+      const isCut = !id.startsWith('fade-') && id !== 'trim'
+      // cuts: selection shown via canvas rect (full fade extent); fades/trim use WS outline
+      el.style.outline = id === selectedRegionId && !isCut ? '2px solid #38bdf8' : ''
       el.style.outlineOffset = '1px'
     })
     if (waveRafRef.current) cancelAnimationFrame(waveRafRef.current)
@@ -466,12 +518,18 @@ export default function EditorModal({
         setRegionContextMenu(null)
       })
 
+      el.addEventListener('pointerdown', e => {
+        const target = e.target as Element
+        isRegionDragRef.current = !target.matches('[part*="region-handle"], [part*="region-handle"] *')
+      })
+
       el.addEventListener('contextmenu', e => {
         e.preventDefault()
+        if (isTrim) return  // let it bubble to handleWaveformContextMenu
         e.stopPropagation()
-        if (!isTrim) setSelectedRegionId(region.id)
+        setSelectedRegionId(region.id)
         setContextMenu(null)
-        if (!isTrim) setRegionContextMenu({ x: e.clientX, y: e.clientY, regionId: region.id })
+        setRegionContextMenu({ x: e.clientX, y: e.clientY, regionId: region.id })
       })
 
       // long press → region context menu (mobile)
@@ -542,7 +600,7 @@ export default function EditorModal({
           if (!regionPreDragRef.current) regionPreDragRef.current = prev
           const preDrag = regionPreDragRef.current ?? prev
           const origTrimSize = (preDrag.trim_end ?? dur) - preDrag.trim_start
-          const isDragTrim = Math.abs((r.end - r.start) - origTrimSize) < 0.1
+          const isDragTrim = isRegionDragRef.current
           const contentStarts = [...prev.cuts.map(c => c.start - (c.fade_out ?? 0)), ...prev.fades.map(f => f.start)]
           const contentEnds = [...prev.cuts.map(c => c.end + (c.fade_in ?? 0)), ...prev.fades.map(f => f.end)]
           const hasContent = contentStarts.length > 0
@@ -587,15 +645,15 @@ export default function EditorModal({
           if (!regionPreDragRef.current) regionPreDragRef.current = prev
           const trimStart = prev.trim_start
           const trimEnd = prev.trim_end ?? dur
-          const refFade = (regionPreDragRef.current ?? prev).fades.find(f => f.id === fadeId)
-          const origSize = refFade ? (refFade.end - refFade.start) : 0
-          const isDrag = refFade ? Math.abs((r.end - r.start) - origSize) < 0.1 : false
+          const isDrag = isRegionDragRef.current
+          const preDragFade = regionPreDragRef.current?.fades.find(f => f.id === fadeId)
+          const origSize = preDragFade ? preDragFade.end - preDragFade.start : undefined
           const fade = prev.fades.find(f => f.id === fadeId)
           const obstacles = [
             ...prev.fades,
             ...prev.cuts.map(c => ({ id: c.id, start: c.start - (c.fade_out ?? 0), end: c.end + (c.fade_in ?? 0) })),
           ]
-          let { start, end } = _snap(r.start, r.end, obstacles, fadeId, trimStart, trimEnd, isDrag)
+          let { start, end } = _snap(r.start, r.end, obstacles, fadeId, trimStart, trimEnd, isDrag, origSize)
           if (fade && end - start > MAX_FADE_DUR + 0.01) {
             if (fade.type === 'in') end = start + MAX_FADE_DUR
             else start = end - MAX_FADE_DUR
@@ -612,19 +670,21 @@ export default function EditorModal({
           if (!regionPreDragRef.current) regionPreDragRef.current = prev
           const trimStart = prev.trim_start
           const trimEnd = prev.trim_end ?? dur
-          const refCut = (regionPreDragRef.current ?? prev).cuts.find(c => c.id === r.id)
-          const origSize = refCut ? (refCut.end - refCut.start) : 0
-          const isDrag = refCut ? Math.abs((r.end - r.start) - origSize) < 0.1 : false
+          const isDrag = isRegionDragRef.current
           const cut = prev.cuts.find(c => c.id === r.id)
           const fadeOut = cut?.fade_out ?? 0
           const fadeIn = cut?.fade_in ?? 0
+          const preDragCut = regionPreDragRef.current?.cuts.find(c => c.id === r.id)
+          const origExtSize = preDragCut
+            ? (preDragCut.end + (preDragCut.fade_in ?? 0)) - (preDragCut.start - (preDragCut.fade_out ?? 0))
+            : undefined
           const obstacles = [
             ...prev.cuts.map(c => ({ id: c.id, start: c.start - (c.fade_out ?? 0), end: c.end + (c.fade_in ?? 0) })),
             ...prev.fades,
           ]
           let start: number, end: number
           if (isDrag) {
-            const ext = _snap(r.start - fadeOut, r.end + fadeIn, obstacles, r.id, trimStart, trimEnd, true)
+            const ext = _snap(r.start - fadeOut, r.end + fadeIn, obstacles, r.id, trimStart, trimEnd, true, origExtSize)
             start = ext.start + fadeOut
             end = ext.end - fadeIn
           } else {
@@ -643,34 +703,10 @@ export default function EditorModal({
       if (programmaticRegionRef.current) return
       if (r.id === 'trim') {
         setParams(prev => {
-          const preDrag = regionPreDragRef.current ?? prev
-          const origTrimSize = (preDrag.trim_end ?? duration) - preDrag.trim_start
-          const isDragTrim = Math.abs((r.end - r.start) - origTrimSize) < 0.1
-          const contentStarts = [...prev.cuts.map(c => c.start - (c.fade_out ?? 0)), ...prev.fades.map(f => f.start)]
-          const contentEnds = [...prev.cuts.map(c => c.end + (c.fade_in ?? 0)), ...prev.fades.map(f => f.end)]
-          const hasContent = contentStarts.length > 0
-          let trimStart: number
-          let trimEnd: number
+          // region-update ran correct constrained math throughout the drag — trust those values
           const dur = wsRef.current?.getDuration() ?? duration
-          if (isDragTrim) {
-            trimStart = Math.max(0, Math.min(dur - origTrimSize, r.start))
-            trimEnd = trimStart + origTrimSize
-            if (hasContent) {
-              const minC = Math.min(...contentStarts)
-              const maxC = Math.max(...contentEnds)
-              if (trimStart > minC) { trimStart = minC; trimEnd = trimStart + origTrimSize }
-              if (trimEnd < maxC) { trimEnd = maxC; trimStart = trimEnd - origTrimSize }
-              trimStart = Math.max(0, trimStart)
-              trimEnd = Math.min(dur, trimEnd)
-            }
-          } else {
-            trimStart = Math.max(0, r.start)
-            trimEnd = Math.min(dur, r.end)
-            if (hasContent) {
-              trimStart = Math.min(trimStart, Math.min(...contentStarts))
-              trimEnd = Math.max(trimEnd, Math.max(...contentEnds))
-            }
-          }
+          const trimStart = prev.trim_start
+          const trimEnd = prev.trim_end ?? dur
           if (trimStart !== r.start || trimEnd !== r.end) {
             programmaticRegionRef.current = true
             r.setOptions({ start: trimStart, end: trimEnd })
@@ -687,15 +723,15 @@ export default function EditorModal({
           const trimStart = prev.trim_start
           const dur = wsRef.current?.getDuration() ?? duration
           const trimEnd = prev.trim_end ?? dur
-          const refFade = (regionPreDragRef.current ?? prev).fades.find(f => f.id === fadeId)
-          const origSize = refFade ? (refFade.end - refFade.start) : 0
-          const isDrag = refFade ? Math.abs((r.end - r.start) - origSize) < 0.1 : false
+          const isDrag = isRegionDragRef.current
+          const preDragFade = regionPreDragRef.current?.fades.find(f => f.id === fadeId)
+          const origSize = preDragFade ? preDragFade.end - preDragFade.start : undefined
           const fade = prev.fades.find(f => f.id === fadeId)
           const obstacles = [
             ...prev.fades,
             ...prev.cuts.map(c => ({ id: c.id, start: c.start - (c.fade_out ?? 0), end: c.end + (c.fade_in ?? 0) })),
           ]
-          let { start, end } = _snap(r.start, r.end, obstacles, fadeId, trimStart, trimEnd, isDrag)
+          let { start, end } = _snap(r.start, r.end, obstacles, fadeId, trimStart, trimEnd, isDrag, origSize)
           if (fade && end - start > MAX_FADE_DUR + 0.01) {
             if (fade.type === 'in') end = start + MAX_FADE_DUR
             else start = end - MAX_FADE_DUR
@@ -713,20 +749,23 @@ export default function EditorModal({
         setParams(prev => {
           if (!regionPreDragRef.current) regionPreDragRef.current = prev
           const trimStart = prev.trim_start
-          const trimEnd = prev.trim_end ?? duration
-          const refCut = (regionPreDragRef.current ?? prev).cuts.find(c => c.id === r.id)
-          const origSize = refCut ? (refCut.end - refCut.start) : 0
-          const isDrag = refCut ? Math.abs((r.end - r.start) - origSize) < 0.1 : false
+          const dur = wsRef.current?.getDuration() ?? duration
+          const trimEnd = prev.trim_end ?? dur
+          const isDrag = isRegionDragRef.current
           const cut = prev.cuts.find(c => c.id === r.id)
           const fadeOut = cut?.fade_out ?? 0
           const fadeIn = cut?.fade_in ?? 0
+          const preDragCut = regionPreDragRef.current?.cuts.find(c => c.id === r.id)
+          const origExtSize = preDragCut
+            ? (preDragCut.end + (preDragCut.fade_in ?? 0)) - (preDragCut.start - (preDragCut.fade_out ?? 0))
+            : undefined
           const obstacles = [
             ...prev.cuts.map(c => ({ id: c.id, start: c.start - (c.fade_out ?? 0), end: c.end + (c.fade_in ?? 0) })),
             ...prev.fades,
           ]
           let start: number, end: number
           if (isDrag) {
-            const ext = _snap(r.start - fadeOut, r.end + fadeIn, obstacles, r.id, trimStart, trimEnd, true)
+            const ext = _snap(r.start - fadeOut, r.end + fadeIn, obstacles, r.id, trimStart, trimEnd, true, origExtSize)
             start = ext.start + fadeOut
             end = ext.end - fadeIn
           } else {
@@ -745,6 +784,7 @@ export default function EditorModal({
     })
 
     function handleRegionDragEnd() {
+      isRegionDragRef.current = false
       const snapshot = regionPreDragRef.current
       if (!snapshot) return
       regionPreDragRef.current = null
@@ -752,10 +792,12 @@ export default function EditorModal({
     }
     window.addEventListener('mouseup', handleRegionDragEnd)
     window.addEventListener('touchend', handleRegionDragEnd)
+    window.addEventListener('pointerup', handleRegionDragEnd)
 
     return () => {
       window.removeEventListener('mouseup', handleRegionDragEnd)
       window.removeEventListener('touchend', handleRegionDragEnd)
+      window.removeEventListener('pointerup', handleRegionDragEnd)
       if (pollIntervalRef.current) { clearInterval(pollIntervalRef.current); pollIntervalRef.current = null }
       if (waveRafRef.current) { cancelAnimationFrame(waveRafRef.current); waveRafRef.current = null }
       peaksRef.current = null
@@ -766,6 +808,20 @@ export default function EditorModal({
       ws.destroy()
     }
   }, [songId, scheduleSave, renderWave])
+
+  // Attach capturing pointerdown + mousemove listeners for fade handle interaction
+  useEffect(() => {
+    const container = waveRef.current
+    if (!container) return
+    const downHandler = (e: PointerEvent) => fadeHandleDragRef.current(e)
+    const moveHandler = (e: MouseEvent) => fadeHandleHoverRef.current(e)
+    container.addEventListener('pointerdown', downHandler, { capture: true })
+    container.addEventListener('mousemove', moveHandler)
+    return () => {
+      container.removeEventListener('pointerdown', downHandler, { capture: true })
+      container.removeEventListener('mousemove', moveHandler)
+    }
+  }, [])
 
   // original waveform — read-only, no regions
   useEffect(() => {
@@ -1552,6 +1608,56 @@ export default function EditorModal({
       e.preventDefault()
       redo()
     }
+    // copy / cut / paste / select-all for regions
+    if (!inInput && (e.metaKey || e.ctrlKey) && e.key === 'a') {
+      e.preventDefault()
+      const allIds = [
+        ...paramsRef.current.cuts.map(c => c.id!).filter(Boolean),
+        ...paramsRef.current.fades.map(f => `fade-${f.id!}`).filter(Boolean),
+      ]
+      if (allIds.length === 0) return
+      const cur = selectedRegionIdRef.current
+      const next = cur ? allIds[(allIds.indexOf(cur) + 1) % allIds.length] : allIds[0]
+      setSelectedRegionId(next)
+      return
+    }
+    if (!inInput && (e.metaKey || e.ctrlKey) && (e.key === 'c' || e.key === 'x')) {
+      const id = selectedRegionIdRef.current
+      if (!id || id === 'trim') return
+      e.preventDefault()
+      if (id.startsWith('fade-')) {
+        const fade = paramsRef.current.fades.find(f => f.id === id.slice(5))
+        if (fade) clipboardRef.current = { kind: 'fade', data: { ...fade } }
+      } else {
+        const cut = paramsRef.current.cuts.find(c => c.id === id)
+        if (cut) clipboardRef.current = { kind: 'cut', data: { ...cut } }
+      }
+      if (e.key === 'x') removeSelected()
+      return
+    }
+    if (!inInput && (e.metaKey || e.ctrlKey) && e.key === 'v') {
+      const entry = clipboardRef.current
+      if (!entry) return
+      e.preventDefault()
+      const cursor = wsRef.current?.getCurrentTime() ?? paramsRef.current.trim_start
+      pushHistory(paramsRef.current)
+      if (entry.kind === 'cut') {
+        const size = entry.data.end - entry.data.start
+        const id = crypto.randomUUID()
+        const newCut: Cut = { ...entry.data, id, start: cursor, end: cursor + size }
+        setParams(prev => ({ ...prev, cuts: [...prev.cuts, newCut] }))
+        syncCutRegions([...paramsRef.current.cuts, newCut])
+        setSelectedRegionId(id)
+      } else {
+        const size = entry.data.end - entry.data.start
+        const id = crypto.randomUUID()
+        const newFade: FadeEdit = { ...entry.data, id, start: cursor, end: cursor + size }
+        setParams(prev => ({ ...prev, fades: [...prev.fades, newFade] }))
+        syncFadeRegions([...paramsRef.current.fades, newFade])
+        setSelectedRegionId(`fade-${id}`)
+      }
+      return
+    }
     if (!inInput && (e.key === 'j' || e.key === 'k')) {
       e.preventDefault()
       switchToWaveform(e.key === 'k' ? 'orig' : 'edit')
@@ -1579,6 +1685,78 @@ export default function EditorModal({
         }
       }
     }
+  }
+
+  // Refresh the fade-handle drag handler every render so the closure is always fresh
+  fadeHandleDragRef.current = (e: PointerEvent) => {
+    const container = waveRef.current
+    if (!container || !wsReadyRef.current) return
+    const dur = wsRef.current?.getDuration() ?? 0
+    if (!dur) return
+    const rect = container.getBoundingClientRect()
+    const clickTime = ((e.clientX - rect.left) / rect.width) * dur
+    const HIT_SEC = (12 / rect.width) * dur
+    for (const cut of paramsRef.current.cuts) {
+      if (!cut.id) continue
+      const fadeOut = cut.fade_out ?? 0
+      const fadeIn = cut.fade_in ?? 0
+      const foTime = cut.start - fadeOut  // where left triangle is
+      const fiTime = cut.end + fadeIn     // where right triangle is
+      // Left triangle (fade-out): entire fade zone + small buffer past triangle
+      if (clickTime >= foTime - HIT_SEC && clickTime <= cut.start) {
+        e.stopPropagation()
+        pushHistory(paramsRef.current)
+        const cutStart = cut.start
+        const cutId = cut.id
+        const onMove = (me: PointerEvent) => {
+          const t = Math.max(0, Math.min(1, (me.clientX - rect.left) / rect.width)) * dur
+          updateCutFade(cutId, 'fade_out', Math.max(0, cutStart - t))
+        }
+        const onUp = () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp) }
+        window.addEventListener('pointermove', onMove)
+        window.addEventListener('pointerup', onUp)
+        return
+      }
+      // Right triangle (fade-in): entire fade zone + small buffer past triangle
+      if (clickTime >= cut.end && clickTime <= fiTime + HIT_SEC) {
+        e.stopPropagation()
+        pushHistory(paramsRef.current)
+        const cutEnd = cut.end
+        const cutId = cut.id
+        const onMove = (me: PointerEvent) => {
+          const t = Math.max(0, Math.min(1, (me.clientX - rect.left) / rect.width)) * dur
+          updateCutFade(cutId, 'fade_in', Math.max(0, t - cutEnd))
+        }
+        const onUp = () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp) }
+        window.addEventListener('pointermove', onMove)
+        window.addEventListener('pointerup', onUp)
+        return
+      }
+    }
+  }
+
+  fadeHandleHoverRef.current = (e: MouseEvent) => {
+    const container = waveRef.current
+    if (!container || !wsReadyRef.current) return
+    const dur = wsRef.current?.getDuration() ?? 0
+    if (!dur) return
+    const rect = container.getBoundingClientRect()
+    const hoverTime = ((e.clientX - rect.left) / rect.width) * dur
+    const HIT_SEC = (12 / rect.width) * dur
+    let overHandle = false
+    for (const cut of paramsRef.current.cuts) {
+      if (!cut.id) continue
+      const foTime = cut.start - (cut.fade_out ?? 0)
+      const fiTime = cut.end + (cut.fade_in ?? 0)
+      if ((hoverTime >= foTime - HIT_SEC && hoverTime <= cut.start) ||
+          (hoverTime >= cut.end && hoverTime <= fiTime + HIT_SEC)) {
+        overHandle = true
+        break
+      }
+    }
+    const trimEl = regionElemsRef.current.get('trim') as HTMLElement | undefined
+    container.style.cursor = overHandle ? 'ew-resize' : ''
+    if (trimEl) trimEl.style.cursor = overHandle ? 'ew-resize' : ''
   }
 
   const trimEnd = params.trim_end ?? duration
@@ -1699,7 +1877,20 @@ export default function EditorModal({
                   )}
                 </div>
               </div>
-              <div className="relative px-2 pb-2">
+              <div
+                className="relative px-2 pb-2"
+                onMouseMove={e => {
+                  const el = e.currentTarget
+                  const rect = el.getBoundingClientRect()
+                  const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+                  const h = el.querySelector<HTMLElement>('[data-orig-hover]')
+                  if (h) { h.style.left = `${pct * 100}%`; h.style.display = 'block' }
+                }}
+                onMouseLeave={e => {
+                  const h = e.currentTarget.querySelector<HTMLElement>('[data-orig-hover]')
+                  if (h) h.style.display = 'none'
+                }}
+              >
                 <canvas
                   ref={origTimelineCanvasRef}
                   className="w-full h-5 block cursor-pointer select-none"
@@ -1707,6 +1898,11 @@ export default function EditorModal({
                   onTouchStart={handleOrigTimelineTouchStart}
                 />
                 <div ref={origWaveRef} className="w-full min-h-[80px]" />
+                <div
+                  data-orig-hover=""
+                  className="absolute top-0 bottom-0 pointer-events-none"
+                  style={{ display: 'none', left: '0%', width: '1px', background: '#94a3b8', opacity: 0.5 }}
+                />
                 {!origReady && (
                   <div className="absolute inset-0 flex items-end justify-center gap-px px-2 pb-2 pointer-events-none overflow-hidden">
                     {WAVEFORM_SKELETON.slice(0, 80).map((h, i) => (
@@ -1758,7 +1954,20 @@ export default function EditorModal({
               </div>
               <div className="relative px-2 pb-2">
                 {/* DAW-style seek strip + waveform share a relative container so the playhead spans both */}
-                <div ref={timelineContainerRef} className="relative">
+                <div
+                  ref={timelineContainerRef}
+                  className="relative"
+                  onMouseMove={e => {
+                    const el = timelineContainerRef.current
+                    const h = hoverPlayheadRef.current
+                    if (!el || !h) return
+                    const rect = el.getBoundingClientRect()
+                    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+                    h.style.left = `${pct * 100}%`
+                    h.style.display = 'block'
+                  }}
+                  onMouseLeave={() => { if (hoverPlayheadRef.current) hoverPlayheadRef.current.style.display = 'none' }}
+                >
                   {/* Timeline ruler — tap/drag to seek */}
                   <canvas
                     ref={timelineCanvasRef}
@@ -1772,6 +1981,12 @@ export default function EditorModal({
                     ref={playheadRef}
                     className="absolute top-0 bottom-0 pointer-events-none z-20"
                     style={{ left: '0%', width: '1px', background: '#38bdf8', opacity: 0.85 }}
+                  />
+                  {/* Ghost playhead — follows mouse hover */}
+                  <div
+                    ref={hoverPlayheadRef}
+                    className="absolute top-0 bottom-0 pointer-events-none z-19"
+                    style={{ display: 'none', left: '0%', width: '1px', background: '#94a3b8', opacity: 0.5 }}
                   />
                 </div>
                 {!wsReady && (
@@ -1869,18 +2084,8 @@ export default function EditorModal({
               </div>
               {params.cuts.length > 0 && (
                 <div className="flex flex-col gap-2">
-                  {params.cuts.map(cut => {
-                    const sorted = [...params.cuts].sort((a, b) => a.start - b.start)
-                    const idx = sorted.findIndex(c => c.id === cut.id)
-                    const trimStart = params.trim_start
-                    const trimEnd = params.trim_end ?? duration
-                    const prev = idx > 0 ? sorted[idx - 1] : null
-                    const next = idx < sorted.length - 1 ? sorted[idx + 1] : null
-                    const maxFadeOut = Math.min(10, Math.max(0, cut.start - Math.max(trimStart, prev ? prev.end + prev.fade_in : trimStart)))
-                    const maxFadeIn = Math.min(10, Math.max(0, Math.min(trimEnd, next ? next.start - next.fade_out : trimEnd) - cut.end))
-                    return (
+                  {params.cuts.map(cut => (
                     <div key={cut.id} className="flex flex-col gap-2 bg-red-50 dark:bg-red-950/30 rounded px-2 py-2">
-                      {/* header row: icon + time display + duration + remove */}
                       <div className="flex items-center gap-2 text-sm">
                         <FaCut size={10} className="text-red-400 shrink-0" />
                         <div className="flex items-center gap-1 flex-1 min-w-0">
@@ -1889,42 +2094,17 @@ export default function EditorModal({
                           <span className="tabular-nums text-xs text-gray-500 dark:text-gray-400">{fmt(cut.end)}</span>
                           <span className="text-gray-400 dark:text-gray-600 text-xs tabular-nums">({fmt(cut.end - cut.start)})</span>
                         </div>
+                        {(cut.fade_out > 0 || cut.fade_in > 0) && (
+                          <span className="text-[10px] text-red-400 tabular-nums">
+                            {cut.fade_out > 0 && `◀${cut.fade_out.toFixed(1)}s`}{cut.fade_out > 0 && cut.fade_in > 0 && ' '}{cut.fade_in > 0 && `${cut.fade_in.toFixed(1)}s▶`}
+                          </span>
+                        )}
                         <button onClick={() => removeCut(cut.id!)} title="remove cut" className="text-gray-400 hover:text-red-400 transition-colors shrink-0">
                           <FaTimes size={10} />
                         </button>
                       </div>
-                      {/* per-cut fades */}
-                      <div className="grid grid-cols-2 gap-2">
-                        <div className="flex flex-col gap-1">
-                          <span className="text-xs flex justify-between">
-                            <span className={cut.fade_out > 0 ? 'text-red-400' : 'text-gray-400'}>fade before</span>
-                            <span className={`tabular-nums ${cut.fade_out > 0 ? 'text-red-400' : 'text-gray-400 dark:text-gray-600'}`}>{cut.fade_out.toFixed(1)}s</span>
-                          </span>
-                          <Slider
-                            value={Math.min(cut.fade_out, maxFadeOut)} min={0} max={maxFadeOut} step={0.1}
-                            onChange={v => updateCutFade(cut.id!, 'fade_out', v)}
-                            disabled={maxFadeOut === 0}
-                            label="fade before cut"
-                          />
-                          {maxFadeOut === 0 && <span className="text-[10px] text-gray-400">no room — move cut</span>}
-                        </div>
-                        <div className="flex flex-col gap-1">
-                          <span className="text-xs flex justify-between">
-                            <span className={cut.fade_in > 0 ? 'text-red-400' : 'text-gray-400'}>fade after</span>
-                            <span className={`tabular-nums ${cut.fade_in > 0 ? 'text-red-400' : 'text-gray-400 dark:text-gray-600'}`}>{cut.fade_in.toFixed(1)}s</span>
-                          </span>
-                          <Slider
-                            value={Math.min(cut.fade_in, maxFadeIn)} min={0} max={maxFadeIn} step={0.1}
-                            onChange={v => updateCutFade(cut.id!, 'fade_in', v)}
-                            disabled={maxFadeIn === 0}
-                            label="fade after cut"
-                          />
-                          {maxFadeIn === 0 && <span className="text-[10px] text-gray-400">no room — move cut</span>}
-                        </div>
-                      </div>
                     </div>
-                    )
-                  })}
+                  ))}
                 </div>
               )}
             </div>
@@ -1973,16 +2153,35 @@ export default function EditorModal({
 
             </div>{/* end edit-controls wrapper */}
 
+            {/* keyboard shortcuts panel — inline, above footer */}
+            {showShortcuts && (
+              <div className="bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-3 text-xs text-gray-400 dark:text-gray-500 flex flex-col gap-1.5">
+                <div className="flex flex-wrap gap-x-4 gap-y-1">
+                  <span className="flex items-center gap-1"><Kbd>Space</Kbd> play/pause</span>
+                  <span className="flex items-center gap-1"><Kbd>H</Kbd><Kbd>L</Kbd> seek ±5s</span>
+                  <span className="flex items-center gap-1"><Kbd>J</Kbd><Kbd>K</Kbd> switch waveform</span>
+                  <span className="flex items-center gap-1"><Kbd>Del</Kbd> delete selected</span>
+                </div>
+                <div className="flex flex-wrap gap-x-4 gap-y-1">
+                  <span className="flex items-center gap-1"><Kbd>Ctrl</Kbd><Kbd>Z</Kbd> undo</span>
+                  <span className="flex items-center gap-1"><Kbd>Ctrl</Kbd><Kbd>⇧Z</Kbd> redo</span>
+                  <span className="flex items-center gap-1"><Kbd>Ctrl</Kbd><Kbd>C</Kbd> copy region</span>
+                  <span className="flex items-center gap-1"><Kbd>Ctrl</Kbd><Kbd>X</Kbd> cut region</span>
+                  <span className="flex items-center gap-1"><Kbd>Ctrl</Kbd><Kbd>V</Kbd> paste at cursor</span>
+                  <span className="flex items-center gap-1"><Kbd>Ctrl</Kbd><Kbd>A</Kbd> cycle regions</span>
+                </div>
+                <div className="text-gray-500 dark:text-gray-600">drag trim handles · drag cut fades on waveform</div>
+              </div>
+            )}
+
             {/* footer */}
             <div className="flex items-center justify-between pt-1 border-t border-gray-100 dark:border-gray-800">
-              <p className="text-xs text-gray-400 dark:text-gray-500 flex items-center gap-1 flex-wrap">
-                drag handles to trim ·
-                <Kbd>Space</Kbd> play ·
-                <Kbd>H</Kbd><Kbd>L</Kbd> seek ·
-                <Kbd>J</Kbd><Kbd>K</Kbd> switch waveform ·
-                <Kbd>Ctrl</Kbd><Kbd>Z</Kbd> undo ·
-                <Kbd>Ctrl</Kbd><Kbd>⇧Z</Kbd> redo
-              </p>
+              <button
+                onClick={() => setShowShortcuts(s => !s)}
+                className="text-xs text-gray-400 hover:text-gray-300 transition-colors"
+              >
+                {showShortcuts ? 'hide shortcuts' : 'keyboard shortcuts'}
+              </button>
               <div className="flex items-center gap-3">
                 <button onClick={handleDiscard} className="flex items-center gap-1 text-sm text-gray-400 hover:text-red-400 transition-colors">
                   <FaTrash size={11} />
