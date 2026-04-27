@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
-import { usePathname, useRouter } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import { DraftSummary, deleteEditDraft, fetchDrafts } from '../lib/data'
 import { FaChevronDown, FaTimes } from 'react-icons/fa'
 
@@ -21,7 +21,6 @@ export default function EditsBanner() {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const router = useRouter()
-  const pathname = usePathname()
 
   useEffect(() => {
     fetchDrafts().then(setDrafts)
@@ -50,7 +49,7 @@ export default function EditsBanner() {
 
   function handleOpen(songId: string) {
     setOpen(false)
-    router.push(`${pathname}?view=songs&edit=${songId}`)
+    router.push(`/songs/${songId}/edit`)
   }
 
   return (

@@ -89,6 +89,7 @@ export default function EditorModal({
   const [params, setParams] = useState<EditParams>(DEFAULT_PARAMS)
   const [duration, setDuration] = useState(0)
   const [draftUpdatedAt, setDraftUpdatedAt] = useState<string | null>(null)
+  const [draftSaveStatus, setDraftSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
 
   // --- undo/redo ---
   const historyRef = useRef<EditParams[]>([])
@@ -131,6 +132,7 @@ export default function EditorModal({
   const [activeRootSongId, setActiveRootSongId] = useState<string | null | undefined>(rootSongId)
 
   // --- preview (Web Audio) ---
+  const fullQualityBufferRef = useRef<AudioBuffer | null>(null)
   const previewSrcRef = useRef<AudioBufferSourceNode | null>(null)
   const previewCtxRef = useRef<AudioContext | null>(null)
   const [previewing, setPreviewing] = useState(false)
@@ -151,6 +153,10 @@ export default function EditorModal({
   const peaksRef = useRef<Array<Float32Array | number[]> | null>(null)
   const waveCtxRef = useRef<CanvasRenderingContext2D | null>(null)
   const waveRafRef = useRef<number | null>(null)
+  const playPositionRef = useRef<number>(-1)
+  const wsPlayRafRef = useRef<number | null>(null)
+  const currentTimeLabelRef = useRef<HTMLSpanElement | null>(null)
+  const origCurrentTimeLabelRef = useRef<HTMLSpanElement | null>(null)
 
   // --- timeline ruler ---
   const timelineCanvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -343,6 +349,7 @@ export default function EditorModal({
     }
   }, []) // stable — reads paramsRef / wsRef at call time
 
+
   // focus modal on mount so Space key is captured
   useEffect(() => { modalRef.current?.focus() }, [])
 
@@ -495,6 +502,10 @@ export default function EditorModal({
       renderFunction: renderWave,
     })
     wsRef.current = ws
+    // No official API to disable the progress overlay. Patch the internal renderer method.
+    // If a WaveSurfer upgrade breaks this, the overlay returns (benign visual regression).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(ws as any).renderer.renderProgress = () => {}
     ws.load(`${DOWNLOAD_URL}/${songId}`).catch((err: Error) => {
       if (err?.name !== 'AbortError') console.error('WaveSurfer load:', err)
     })
@@ -502,6 +513,11 @@ export default function EditorModal({
       const dur = ws.getDuration()
       setDuration(dur)
       setWsReady(true)
+      const saved = sessionStorage.getItem(`sb-cursor-${songId}`)
+      if (saved) {
+        const t = parseFloat(saved)
+        if (!isNaN(t) && t > 0 && t < dur) ws.seekTo(t / dur)
+      }
       // Read current params via ref — avoids calling addRegion inside a state setter
       // (React StrictMode calls state updaters twice, which would create duplicate regions)
       const p = paramsRef.current
@@ -531,14 +547,30 @@ export default function EditorModal({
       const dur = ws.getDuration()
       if (!dur || !playheadRef.current || !timelineContainerRef.current) return
       playheadRef.current.style.left = `${(time / dur) * 100}%`
+      if (currentTimeLabelRef.current) currentTimeLabelRef.current.textContent = fmt(time)
+      sessionStorage.setItem(`sb-cursor-${songId}`, String(time))
     })
-    ws.on('play', () => setWfPlaying(true))
+    const stopWsPlayRaf = () => {
+      if (wsPlayRafRef.current !== null) { cancelAnimationFrame(wsPlayRafRef.current); wsPlayRafRef.current = null }
+    }
+    ws.on('play', () => {
+      setWfPlaying(true)
+      const tick = () => {
+        const t = ws.getCurrentTime()
+        if (currentTimeLabelRef.current) currentTimeLabelRef.current.textContent = fmt(t)
+        sessionStorage.setItem(`sb-cursor-${songId}`, String(t))
+        wsPlayRafRef.current = requestAnimationFrame(tick)
+      }
+      wsPlayRafRef.current = requestAnimationFrame(tick)
+    })
     ws.on('pause', () => {
       setWfPlaying(false)
+      stopWsPlayRaf()
       if (wsPreviewRef.current) { wsPreviewRef.current = false; setPreviewing(false) }
     })
     ws.on('finish', () => {
       setWfPlaying(false)
+      stopWsPlayRaf()
       if (wsPreviewRef.current) { wsPreviewRef.current = false; setPreviewing(false); return }
       if (loopingRef.current) {
         const { trim_start, trim_end } = trimParamsRef.current
@@ -753,22 +785,19 @@ export default function EditorModal({
             const snapped = _snap(r.start, r.end, obstacles, fadeId, trimStart, trimEnd, true, origSize)
             start = snapped.start; end = snapped.end
           } else if (fade) {
-            if (fade.type === 'in') {
-              end = fade.end
-              start = Math.max(trimStart, r.start)
-              for (const obs of obstacles.filter(o => o.id !== fadeId)) {
-                if (start < obs.end && end > obs.start) start = obs.end
+            const leftMoved = r.start !== fade.start
+            start = Math.max(trimStart, r.start)
+            end = Math.min(trimEnd, r.end)
+            for (const obs of obstacles.filter(o => o.id !== fadeId)) {
+              if (start < obs.end && end > obs.start) {
+                if (leftMoved) start = obs.end; else end = obs.start
               }
-              if (end - start < MIN_REGION_DUR) start = end - MIN_REGION_DUR
-              if (end - start > MAX_FADE_DUR) start = end - MAX_FADE_DUR
-            } else {
-              start = fade.start
-              end = Math.min(trimEnd, r.end)
-              for (const obs of obstacles.filter(o => o.id !== fadeId)) {
-                if (start < obs.end && end > obs.start) end = obs.start
-              }
-              if (end - start < MIN_REGION_DUR) end = start + MIN_REGION_DUR
-              if (end - start > MAX_FADE_DUR) end = start + MAX_FADE_DUR
+            }
+            if (end - start < MIN_REGION_DUR) {
+              if (leftMoved) start = end - MIN_REGION_DUR; else end = start + MIN_REGION_DUR
+            }
+            if (end - start > MAX_FADE_DUR) {
+              if (leftMoved) start = end - MAX_FADE_DUR; else end = start + MAX_FADE_DUR
             }
           } else {
             start = r.start; end = r.end
@@ -867,22 +896,19 @@ export default function EditorModal({
             const snapped = _snap(r.start, r.end, obstacles, fadeId, trimStart, trimEnd, true, origSize)
             start = snapped.start; end = snapped.end
           } else if (fade) {
-            if (fade.type === 'in') {
-              end = fade.end
-              start = Math.max(trimStart, r.start)
-              for (const obs of obstacles.filter(o => o.id !== fadeId)) {
-                if (start < obs.end && end > obs.start) start = obs.end
+            const leftMoved = r.start !== fade.start
+            start = Math.max(trimStart, r.start)
+            end = Math.min(trimEnd, r.end)
+            for (const obs of obstacles.filter(o => o.id !== fadeId)) {
+              if (start < obs.end && end > obs.start) {
+                if (leftMoved) start = obs.end; else end = obs.start
               }
-              if (end - start < MIN_REGION_DUR) start = end - MIN_REGION_DUR
-              if (end - start > MAX_FADE_DUR) start = end - MAX_FADE_DUR
-            } else {
-              start = fade.start
-              end = Math.min(trimEnd, r.end)
-              for (const obs of obstacles.filter(o => o.id !== fadeId)) {
-                if (start < obs.end && end > obs.start) end = obs.start
-              }
-              if (end - start < MIN_REGION_DUR) end = start + MIN_REGION_DUR
-              if (end - start > MAX_FADE_DUR) end = start + MAX_FADE_DUR
+            }
+            if (end - start < MIN_REGION_DUR) {
+              if (leftMoved) start = end - MIN_REGION_DUR; else end = start + MIN_REGION_DUR
+            }
+            if (end - start > MAX_FADE_DUR) {
+              if (leftMoved) start = end - MAX_FADE_DUR; else end = start + MAX_FADE_DUR
             }
           } else {
             start = r.start; end = r.end
@@ -982,6 +1008,7 @@ export default function EditorModal({
       window.removeEventListener('pointerup', handleRegionDragEnd)
       if (pollIntervalRef.current) { clearInterval(pollIntervalRef.current); pollIntervalRef.current = null }
       if (waveRafRef.current) { cancelAnimationFrame(waveRafRef.current); waveRafRef.current = null }
+      if (wsPlayRafRef.current !== null) { cancelAnimationFrame(wsPlayRafRef.current); wsPlayRafRef.current = null }
       peaksRef.current = null
       waveCtxRef.current = null
       mainWaveCanvasRef.current = null
@@ -1033,13 +1060,44 @@ export default function EditorModal({
     ws.load(`${DOWNLOAD_URL}/${songId}`).catch((err: Error) => {
       if (err?.name !== 'AbortError') console.error('WaveSurfer orig:', err)
     })
-    ws.on('ready', () => setOrigReady(true))
+    ws.on('ready', () => {
+      setOrigReady(true)
+      const saved = sessionStorage.getItem(`sb-cursor-orig-${songId}`)
+      if (saved) {
+        const t = parseFloat(saved)
+        const dur = ws.getDuration()
+        if (!isNaN(t) && t > 0 && t < dur) ws.seekTo(t / dur)
+      }
+    })
+    ws.on('timeupdate', (time: number) => {
+      if (origCurrentTimeLabelRef.current) origCurrentTimeLabelRef.current.textContent = fmt(time)
+      sessionStorage.setItem(`sb-cursor-orig-${songId}`, String(time))
+    })
     ws.on('play', () => setOrigPlaying(true))
     ws.on('pause', () => setOrigPlaying(false))
     ws.on('finish', () => setOrigPlaying(false))
     ws.on('error', (err: Error) => { if (err?.name !== 'AbortError') console.error('WaveSurfer orig:', err) })
     return () => { wsOrigRef.current = null; ws.destroy() }
   }, [songId])
+
+  // decode full-quality audio buffer for preview (WaveSurfer decodes at 8 kHz for waveform only)
+  useEffect(() => {
+    let cancelled = false
+    fullQualityBufferRef.current = null
+    fetch(`${DOWNLOAD_URL}/${activeSongId}`, { credentials: 'include' })
+      .then(r => r.arrayBuffer())
+      .then(ab => {
+        if (cancelled) return
+        const ctx = new AudioContext()
+        return ctx.decodeAudioData(ab).then(buf => {
+          ctx.close()
+          return buf
+        })
+      })
+      .then(buf => { if (!cancelled && buf) fullQualityBufferRef.current = buf })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [activeSongId])
 
   // sync volume — clamp to [0,1] since HTMLMediaElement.volume only accepts that range
   useEffect(() => { wsRef.current?.setVolume(Math.min(1, params.volume)) }, [params.volume])
@@ -1387,7 +1445,7 @@ export default function EditorModal({
         }
       } else {
         if (startBufOff >= be) {
-          initGain = 0
+          // fade-out fully passed — gain restored to full
         } else if (startBufOff >= bs) {
           initGain = Math.min(initGain, p.volume * (be - startBufOff) / dur)
         }
@@ -1430,9 +1488,11 @@ export default function EditorModal({
           // fade-out starts in the future
           gain.gain.setValueAtTime(p.volume, realOf(bs))
           gain.gain.linearRampToValueAtTime(0, realOf(be))
+          gain.gain.setValueAtTime(p.volume, realOf(be) + 1e-4)
         } else if (startBufOff < be) {
           // started inside fade-out
           gain.gain.linearRampToValueAtTime(0, realOf(be))
+          gain.gain.setValueAtTime(p.volume, realOf(be) + 1e-4)
         }
       }
     }
@@ -1505,9 +1565,9 @@ export default function EditorModal({
       return
     }
 
-    const raw = wsRef.current?.getDecodedData()
+    const raw = fullQualityBufferRef.current ?? wsRef.current?.getDecodedData()
     if (!raw) return
-    const ctx = new AudioContext()
+    const ctx = new AudioContext({ sampleRate: raw.sampleRate })
     if (ctx.state === 'suspended') await ctx.resume()
 
     const sr = raw.sampleRate
@@ -1572,6 +1632,8 @@ export default function EditorModal({
       const bufElapsed = realElapsed * paramsRef.current.speed
       const t = _bufTimeToOrig(startBufOff + Math.min(bufElapsed, previewTrimDurRef.current), previewSegmentsRef.current)
       wsRef.current?.setTime(t)
+      if (currentTimeLabelRef.current) currentTimeLabelRef.current.textContent = fmt(t)
+      sessionStorage.setItem(`sb-cursor-${activeSongIdRef.current}`, String(t))
       previewRafRef.current = requestAnimationFrame(tickCursor)
     }
     previewRafRef.current = requestAnimationFrame(tickCursor)
@@ -1619,6 +1681,8 @@ export default function EditorModal({
       const bufElapsed = realElapsed * paramsRef.current.speed
       const t = _bufTimeToOrig(seekBufOff + Math.min(bufElapsed, remaining), previewSegmentsRef.current)
       wsRef.current?.setTime(t)
+      if (currentTimeLabelRef.current) currentTimeLabelRef.current.textContent = fmt(t)
+      sessionStorage.setItem(`sb-cursor-${activeSongIdRef.current}`, String(t))
       previewRafRef.current = requestAnimationFrame(tickSeekCursor)
     }
     previewRafRef.current = requestAnimationFrame(tickSeekCursor)
@@ -1638,8 +1702,16 @@ export default function EditorModal({
     else { pausePlayer(); wsRef.current.play(params.trim_start, params.trim_end ?? undefined) }
   }
 
+  async function handleSaveDraft() {
+    setDraftSaveStatus('saving')
+    await saveEditDraft(activeSongIdRef.current, stripClientIds(paramsRef.current))
+    setDraftSaveStatus('saved')
+    setTimeout(() => setDraftSaveStatus('idle'), 2000)
+  }
+
   async function handleDiscard() {
-    await deleteEditDraft(songId)
+    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
+    await deleteEditDraft(activeSongIdRef.current)
     historyRef.current = []
     redoStackRef.current = []
     setCanUndo(false)
@@ -1675,8 +1747,7 @@ export default function EditorModal({
     await removeFromLibrary(activeSongId)
     await addToLibrary(restoredId)
     setRestoring(false)
-
-    resetToSong(restoredId, null)
+    router.replace(`/songs/${restoredId}/edit`)
   }
 
   async function handleRevertLastSave() {
@@ -1685,8 +1756,7 @@ export default function EditorModal({
     await removeFromLibrary(activeSongId)
     await addToLibrary(parentSongId)
     setRestoring(false)
-
-    resetToSong(parentSongId, null)
+    router.replace(`/songs/${parentSongId}/edit`)
   }
 
   async function handleSave() {
@@ -1712,24 +1782,8 @@ export default function EditorModal({
         pollIntervalRef.current = null
         setJobStatus('done')
         await deleteEditDraft(activeSongIdRef.current)
-    
-        setWsReady(false)
-        setParams(DEFAULT_PARAMS)
-        historyRef.current = []
-        redoStackRef.current = []
-        setCanUndo(false)
-        setCanRedo(false)
-        regionsRef.current?.getRegions().forEach(r => r.remove())
-        const newId = result.result_song_id
-        if (!overwrite && newId) {
-          activeSongIdRef.current = newId
-          setActiveSongId(newId)
-          setActiveRootSongId(rootSongId ?? songId)
-        }
-        const loadId = !overwrite && newId ? newId : activeSongIdRef.current
-        wsRef.current?.load(`${DOWNLOAD_URL}/${loadId}`).catch((err: Error) => {
-          if (err?.name !== 'AbortError') console.error('WaveSurfer reload:', err)
-        })
+        const landId = (!overwrite && result.result_song_id) ? result.result_song_id : activeSongIdRef.current
+        router.replace(`/songs/${landId}/edit`)
       }
       if (result.status === 'failed') {
         clearInterval(pollIntervalRef.current!)
@@ -1795,6 +1849,8 @@ export default function EditorModal({
     const rect = e.currentTarget.getBoundingClientRect()
     const seek = (clientX: number) => {
       const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+      const t = pct * duration
+      if (previewCtxRef.current) { seekWebAudioPreview(t); return }
       wsRef.current?.seekTo(pct)
       if (playheadRef.current) playheadRef.current.style.left = `${pct * 100}%`
     }
@@ -1810,6 +1866,8 @@ export default function EditorModal({
     const rect = e.currentTarget.getBoundingClientRect()
     const seek = (clientX: number) => {
       const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+      const t = pct * duration
+      if (previewCtxRef.current) { seekWebAudioPreview(t); return }
       wsRef.current?.seekTo(pct)
       if (playheadRef.current) playheadRef.current.style.left = `${pct * 100}%`
     }
@@ -2045,7 +2103,7 @@ export default function EditorModal({
       tabIndex={-1}
       onKeyDown={handleKeyDown}
       data-testid="editor-modal"
-      className="fixed inset-0 z-50 bg-white dark:bg-gray-950 flex flex-col overflow-y-auto outline-none"
+      className="fixed inset-0 z-[60] bg-white dark:bg-gray-950 flex flex-col overflow-y-auto outline-none"
       onClick={() => setRegionContextMenu(null)}
     >
         {/* header */}
@@ -2160,6 +2218,14 @@ export default function EditorModal({
                     ))}
                   </div>
                 )}
+                {(jobStatus === 'submitting' || jobStatus === 'polling' || restoring) && (
+                  <div className="absolute inset-0 flex items-end justify-center gap-px px-2 pb-2 pointer-events-none overflow-hidden rounded bg-gray-950/50">
+                    {WAVEFORM_SKELETON.slice(0, 80).map((h, i) => (
+                      <div key={i} className="flex-1 bg-gray-700/60 rounded-sm animate-pulse"
+                        style={{ height: `${h * 0.6}%`, animationDelay: `${(i % 8) * 60}ms` }} />
+                    ))}
+                  </div>
+                )}
               </div>
               <div className="flex items-center gap-2 px-2 pb-2 border-t border-gray-100 dark:border-gray-800 pt-1.5">
                 <button
@@ -2169,25 +2235,10 @@ export default function EditorModal({
                 >
                   {origPlaying ? <FaPause size={12} /> : <FaPlay size={12} />}
                 </button>
+                <span ref={origCurrentTimeLabelRef} className="text-xs text-gray-400 tabular-nums">0:00</span>
                 <span className="text-xs text-gray-400 flex-1">
-                  {activeRootSongId && activeRootSongId !== activeSongId ? 'prev. edit · space when focused' : 'original · space when focused'}
+                  {activeRootSongId && activeRootSongId !== activeSongId ? ' · prev. edit' : ' · original'}
                 </span>
-                {activeRootSongId && activeRootSongId !== activeSongId && (
-                  <button
-                    onClick={e => { e.stopPropagation(); setRestoreConfirm('original') }}
-                    className="text-xs text-amber-400 hover:text-amber-300 transition-colors shrink-0 border border-amber-400/40 hover:border-amber-300/60 rounded px-2 py-0.5"
-                  >
-                    restore original
-                  </button>
-                )}
-                {parentSongId && parentSongId !== rootSongId && (
-                  <button
-                    onClick={e => { e.stopPropagation(); setRestoreConfirm('last') }}
-                    className="text-xs text-gray-400 hover:text-gray-300 transition-colors shrink-0"
-                  >
-                    revert to last save
-                  </button>
-                )}
               </div>
             </div>
 
@@ -2280,7 +2331,7 @@ export default function EditorModal({
                   <FaSync size={11} />
                 </button>
               <span className="text-sm text-gray-400 tabular-nums">
-                {fmt(params.trim_start)}–{fmt(trimEnd)}
+                <span ref={currentTimeLabelRef}>{fmt(params.trim_start)}</span>
                 <span className="text-gray-300 dark:text-gray-600"> / {fmt(duration)}</span>
               </span>
               {duration > 0 && (
@@ -2300,7 +2351,7 @@ export default function EditorModal({
             <div className="flex flex-col gap-4" onClick={() => switchToWaveform('edit')}>
 
             {/* volume · speed · normalize · overwrite */}
-            <div className="flex items-center gap-4 flex-wrap text-xs">
+            <div className="flex items-center gap-4 flex-wrap text-sm">
               <span className="flex items-center gap-1.5">
                 <span className={params.volume !== 1 ? 'text-sky-500' : 'text-gray-400'}>Vol</span>
                 <ScrubInput
@@ -2339,44 +2390,38 @@ export default function EditorModal({
               </span>
               <span className="text-gray-200 dark:text-gray-700 select-none">·</span>
               <div className="flex items-center gap-3 shrink-0">
-                <label className="flex items-center gap-1.5 text-xs select-none" title="Boost/lower gain so the loudest peak reaches 0 dBFS — maximises loudness without clipping">
+                <label className="flex items-center gap-1.5 text-sm select-none" title="Boost/lower gain so the loudest peak reaches 0 dBFS — maximises loudness without clipping">
                   <input type="checkbox" checked={params.normalize} onChange={e => { pushHistory(paramsRef.current); setParams(prev => { const next = { ...prev, normalize: e.target.checked }; scheduleSave(next); return next }) }} className="accent-sky-500" />
                   <span className={params.normalize ? 'text-sky-500' : 'text-gray-400'}>Normalize</span>
                 </label>
-                {isAdmin && (
-                  <label className="flex items-center gap-1.5 text-xs select-none cursor-pointer">
-                    <input type="checkbox" checked={overwrite} onChange={e => setOverwrite(e.target.checked)} className="accent-red-500" />
-                    <span className={overwrite ? 'text-red-400 font-medium' : 'text-gray-400'}>overwrite original</span>
-                  </label>
-                )}
               </div>
             </div>
 
             {/* cuts */}
             <div className="flex flex-col gap-2">
               <div className="flex items-center gap-3">
-                <span className="text-sm text-gray-400">Cuts</span>
+                <span className="text-base text-gray-400">Cuts</span>
                 <button onClick={addCut} disabled={!wsReady} className="text-sm text-sky-500 hover:text-sky-400 transition-colors disabled:opacity-40">+ add cut</button>
               </div>
               {params.cuts.length > 0 && (
-                <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-2 max-w-sm">
                   {params.cuts.map(cut => (
                     <div key={cut.id} className="flex flex-col gap-2 bg-red-50 dark:bg-red-950/30 rounded px-2 py-2">
                       <div className="flex items-center gap-2 text-sm">
                         <FaCut size={10} className="text-red-400 shrink-0" />
-                        <div className="flex items-center gap-1 flex-1 min-w-0">
-                          <span className="tabular-nums text-xs text-gray-500 dark:text-gray-400">{fmt(cut.start)}</span>
-                          <span className="text-gray-400 text-xs">–</span>
-                          <span className="tabular-nums text-xs text-gray-500 dark:text-gray-400">{fmt(cut.end)}</span>
-                          <span className="text-gray-400 dark:text-gray-600 text-xs tabular-nums">({fmt(cut.end - cut.start)})</span>
+                        <div className="flex items-center gap-1 min-w-0 flex-1">
+                          <span className="tabular-nums text-sm text-gray-500 dark:text-gray-400">{fmt(cut.start)}</span>
+                          <span className="text-gray-400 text-sm">–</span>
+                          <span className="tabular-nums text-sm text-gray-500 dark:text-gray-400">{fmt(cut.end)}</span>
+                          <span className="text-gray-400 dark:text-gray-600 text-sm tabular-nums">({fmt(cut.end - cut.start)})</span>
                         </div>
                         {(cut.fade_out > 0 || cut.fade_in > 0) && (
-                          <span className="text-[10px] text-red-400 tabular-nums">
+                          <span className="text-xs text-red-400 tabular-nums">
                             {cut.fade_out > 0 && `◀${cut.fade_out.toFixed(1)}s`}{cut.fade_out > 0 && cut.fade_in > 0 && ' '}{cut.fade_in > 0 && `${cut.fade_in.toFixed(1)}s▶`}
                           </span>
                         )}
                         <button onClick={() => removeCut(cut.id!)} title="remove cut" className="text-gray-400 hover:text-red-400 transition-colors shrink-0">
-                          <FaTimes size={10} />
+                          <FaTimes size={12} />
                         </button>
                       </div>
                     </div>
@@ -2388,25 +2433,25 @@ export default function EditorModal({
             {/* fades */}
             <div className="flex flex-col gap-2">
               <div className="flex items-center gap-3">
-                <span className="text-sm text-gray-400">Fades</span>
+                <span className="text-base text-gray-400">Fades</span>
                 <button onClick={() => addFade('in')} disabled={!wsReady} className="text-sm text-sky-500 hover:text-sky-400 transition-colors disabled:opacity-40">+ fade in</button>
                 <button onClick={() => addFade('out')} disabled={!wsReady} className="text-sm text-amber-500 hover:text-amber-400 transition-colors disabled:opacity-40">+ fade out</button>
               </div>
               {params.fades.length > 0 && (
-                <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-2 max-w-sm">
                   {params.fades.map(fade => {
                     const dur = fade.end - fade.start
                     const isIn = fade.type === 'in'
                     return (
                       <div key={fade.id} className={`flex items-center gap-2 rounded px-2 py-1.5 ${isIn ? 'bg-sky-950/30' : 'bg-amber-950/30'}`}>
-                        <span className={`text-xs font-medium shrink-0 ${isIn ? 'text-sky-400' : 'text-amber-400'}`}>{isIn ? 'fade in' : 'fade out'}</span>
-                        <div className="flex items-center gap-1 flex-1 min-w-0 text-xs text-gray-500">
+                        <span className={`text-sm font-medium shrink-0 w-16 ${isIn ? 'text-sky-400' : 'text-amber-400'}`}>{isIn ? 'fade in' : 'fade out'}</span>
+                        <div className="flex items-center gap-1 min-w-0 flex-1 text-sm text-gray-500">
                           <span className="tabular-nums">{fmt(fade.start)}</span>
                           <span className="text-gray-400">–</span>
                           <span className="tabular-nums">{fmt(fade.end)}</span>
                           <span className="text-gray-400 dark:text-gray-600 tabular-nums">({dur.toFixed(1)}s)</span>
                         </div>
-                        <button onClick={() => removeFade(fade.id!)} className="text-gray-400 hover:text-red-400 transition-colors shrink-0"><FaTimes size={10} /></button>
+                        <button onClick={() => removeFade(fade.id!)} className="text-gray-400 hover:text-red-400 transition-colors shrink-0"><FaTimes size={12} /></button>
                       </div>
                     )
                   })}
@@ -2415,16 +2460,48 @@ export default function EditorModal({
             </div>
 
             {/* actions */}
-            <div className="flex items-center gap-2 flex-wrap pt-1">
-              <button
-                onClick={handleSave}
-                disabled={!wsReady || jobStatus === 'submitting' || jobStatus === 'polling' || jobStatus === 'done'}
-                className={btnPrimary}
-              >
-                {jobStatus === 'submitting' ? 'Starting…' : jobStatus === 'polling' ? 'Processing…' : jobStatus === 'done' ? 'Saved ✓' : 'Save'}
-              </button>
-              {jobStatus === 'error' && <span className="text-red-500 text-sm">{jobError}</span>}
-              {jobStatus === 'done' && !overwrite && <span className="text-gray-400 text-sm">added to library</span>}
+            <div className="flex flex-col gap-2 pt-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={handleSave}
+                  disabled={!wsReady || jobStatus === 'submitting' || jobStatus === 'polling' || jobStatus === 'done'}
+                  className={btnPrimary}
+                  title="Commits your edits to the library. You can always revert via restore original."
+                >
+                  {jobStatus === 'submitting' ? 'Starting…' : jobStatus === 'polling' ? 'Processing…' : jobStatus === 'done' ? 'Saved ✓' : 'Save to Library'}
+                </button>
+                <button
+                  onClick={handleSaveDraft}
+                  disabled={draftSaveStatus === 'saving'}
+                  className="text-sm text-gray-400 hover:text-sky-500 transition-colors disabled:opacity-40"
+                >
+                  {draftSaveStatus === 'saving' ? 'Saving…' : draftSaveStatus === 'saved' ? 'Draft saved ✓' : 'Save Draft'}
+                </button>
+                {activeRootSongId && activeRootSongId !== activeSongId && (
+                  <button
+                    onClick={() => setRestoreConfirm('original')}
+                    className="text-sm text-amber-400 hover:text-amber-300 transition-colors border border-amber-400/40 hover:border-amber-300/60 rounded-lg px-3 py-1.5"
+                  >
+                    Restore Original
+                  </button>
+                )}
+                {parentSongId && parentSongId !== rootSongId && (
+                  <button
+                    onClick={() => setRestoreConfirm('last')}
+                    className="text-sm text-gray-400 hover:text-gray-300 transition-colors"
+                  >
+                    Revert to Last Save
+                  </button>
+                )}
+                {jobStatus === 'error' && <span className="text-red-500 text-sm">{jobError}</span>}
+                {jobStatus === 'done' && <span className="text-gray-400 text-sm">added to library</span>}
+              </div>
+              {isAdmin && (
+                <label className="flex items-center gap-1.5 text-sm select-none cursor-pointer">
+                  <input type="checkbox" checked={overwrite} onChange={e => setOverwrite(e.target.checked)} className="accent-red-500" />
+                  <span className={overwrite ? 'text-red-400 font-medium' : 'text-gray-400'}>overwrite original</span>
+                </label>
+              )}
             </div>
 
             </div>{/* end edit-controls wrapper */}
