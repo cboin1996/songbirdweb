@@ -147,6 +147,20 @@ export default function EditorModal({
   // --- draft auto-save ---
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // --- waveform canvas rendering ---
+  const peaksRef = useRef<Array<Float32Array | number[]> | null>(null)
+  const waveCtxRef = useRef<CanvasRenderingContext2D | null>(null)
+  const waveRafRef = useRef<number | null>(null)
+
+  // --- timeline ruler ---
+  const timelineCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const origTimelineCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const timelineContainerRef = useRef<HTMLDivElement>(null)
+  const playheadRef = useRef<HTMLDivElement>(null)
+
+  // --- hover overlay tracking (for cleanup on delete-while-hovered) ---
+  const overlayElemsRef = useRef<Map<string, HTMLElement>>(new Map())
+
   // --- job submit ---
   const [jobStatus, setJobStatus] = useState<'idle' | 'submitting' | 'polling' | 'done' | 'error'>('idle')
   const [jobError, setJobError] = useState('')
@@ -154,6 +168,12 @@ export default function EditorModal({
 
   // --- waveform context menu ---
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; time: number } | null>(null)
+
+  // --- region selection ---
+  const [selectedRegionId, setSelectedRegionId] = useState<string | null>(null)
+  const selectedRegionIdRef = useRef<string | null>(null)
+  const regionElemsRef = useRef<Map<string, HTMLElement>>(new Map())
+  const [regionContextMenu, setRegionContextMenu] = useState<{ x: number; y: number; regionId: string } | null>(null)
 
   // --- close guard ---
   const [closeConfirm, setCloseConfirm] = useState(false)
@@ -169,6 +189,72 @@ export default function EditorModal({
   const [artworkPreviewError, setArtworkPreviewError] = useState(false)
   const [artworkUploadStatus, setArtworkUploadStatus] = useState<'idle' | 'uploading' | 'done' | 'error'>('idle')
   const artworkInputRef = useRef<HTMLInputElement>(null)
+
+  const mainWaveCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const renderWave = useCallback((peaks: Array<Float32Array | number[]>, ctx: CanvasRenderingContext2D) => {
+    if (!mainWaveCanvasRef.current) mainWaveCanvasRef.current = ctx.canvas
+    if (ctx.canvas !== mainWaveCanvasRef.current) return
+    peaksRef.current = peaks
+    waveCtxRef.current = ctx
+    const p = paramsRef.current
+    const dur = wsRef.current?.getDuration() ?? 0
+    if (!dur) return
+    const peakData = peaks[0]
+    if (!peakData) return
+    const { width, height } = ctx.canvas
+    const centerY = height / 2
+    const BAR_W = 2, BAR_GAP = 1, BAR_R = 2
+    const step = BAR_W + BAR_GAP
+    const numBars = Math.floor(width / step)
+    const numSamples = peakData.length
+    const trimStart = p.trim_start
+    const trimEnd = p.trim_end ?? dur
+    ctx.clearRect(0, 0, width, height)
+    for (let i = 0; i < numBars; i++) {
+      const x = i * step
+      const t = (x / width) * dur
+      let amp = 1.0
+      let color = '#475569'
+      if (t < trimStart || t > trimEnd) {
+        continue
+      } else {
+        let handled = false
+        for (const cut of p.cuts) {
+          if (t >= cut.start && t <= cut.end) {
+            amp = 0.05; color = '#dc2626'; handled = true; break
+          }
+          if (cut.fade_out > 0 && t >= cut.start - cut.fade_out && t < cut.start) {
+            amp = Math.min(amp, 1 - (t - (cut.start - cut.fade_out)) / cut.fade_out)
+            color = '#ef4444'; handled = true; break
+          }
+          if (cut.fade_in > 0 && t > cut.end && t <= cut.end + cut.fade_in) {
+            amp = Math.min(amp, (t - cut.end) / cut.fade_in)
+            color = '#ef4444'; handled = true; break
+          }
+        }
+        if (!handled) {
+          for (const fade of p.fades) {
+            if (t >= fade.start && t <= fade.end) {
+              const prog = (t - fade.start) / (fade.end - fade.start)
+              amp = Math.min(amp, fade.type === 'in' ? prog : 1 - prog)
+              color = fade.type === 'in' ? '#0ea5e9' : '#f59e0b'
+              break
+            }
+          }
+        }
+      }
+      const si = Math.floor((i / numBars) * numSamples)
+      const ei = Math.min(si + Math.ceil(numSamples / numBars), numSamples)
+      let peak = 0
+      for (let j = si; j < ei; j++) peak = Math.max(peak, Math.abs(peakData[j]))
+      const barH = Math.max(1, peak * amp * centerY)
+      ctx.fillStyle = color
+      ctx.beginPath()
+      if (ctx.roundRect) ctx.roundRect(x, centerY - barH, BAR_W, barH * 2, Math.min(BAR_R, barH))
+      else ctx.rect(x, centerY - barH, BAR_W, barH * 2)
+      ctx.fill()
+    }
+  }, []) // stable — reads paramsRef / wsRef at call time
 
   // focus modal on mount so Space key is captured
   useEffect(() => { modalRef.current?.focus() }, [])
@@ -203,9 +289,67 @@ export default function EditorModal({
   useEffect(() => { loopingRef.current = looping }, [looping])
   useEffect(() => { wsReadyRef.current = wsReady }, [wsReady])
   useEffect(() => {
+    selectedRegionIdRef.current = selectedRegionId
+    regionElemsRef.current.forEach((el, id) => {
+      el.style.outline = id === selectedRegionId ? '2px solid #38bdf8' : ''
+      el.style.outlineOffset = '1px'
+    })
+    if (waveRafRef.current) cancelAnimationFrame(waveRafRef.current)
+    waveRafRef.current = requestAnimationFrame(() => {
+      if (peaksRef.current && waveCtxRef.current) renderWave(peaksRef.current, waveCtxRef.current)
+    })
+  }, [selectedRegionId, renderWave])
+  useEffect(() => {
     paramsRef.current = params
     trimParamsRef.current = { trim_start: params.trim_start, trim_end: params.trim_end }
-  }, [params])
+    if (waveRafRef.current) cancelAnimationFrame(waveRafRef.current)
+    waveRafRef.current = requestAnimationFrame(() => {
+      if (peaksRef.current && waveCtxRef.current) renderWave(peaksRef.current, waveCtxRef.current)
+    })
+  }, [params, renderWave])
+
+  // draw timeline ruler ticks when duration is known
+  useEffect(() => {
+    function drawRuler(canvas: HTMLCanvasElement) {
+      const dpr = window.devicePixelRatio ?? 1
+      const w = canvas.clientWidth
+      const h = canvas.clientHeight
+      if (!w || !h) return
+      canvas.width = Math.round(w * dpr)
+      canvas.height = Math.round(h * dpr)
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return
+      ctx.scale(dpr, dpr)
+      const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+      const tickColor = isDark ? '#4b5563' : '#d1d5db'
+      const labelColor = isDark ? '#6b7280' : '#9ca3af'
+      ctx.clearRect(0, 0, w, h)
+      const candidates = [0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120]
+      const pxPerSec = w / duration
+      const majorInterval = candidates.find(c => c * pxPerSec >= 70) ?? 120
+      const minorInterval = majorInterval / 4
+      ctx.font = '9px system-ui, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'top'
+      for (let t = 0; t <= duration + 1e-6; t += minorInterval) {
+        const x = Math.round((t / duration) * w)
+        const isMajor = Math.round(t / minorInterval) % 4 === 0
+        const tickH = isMajor ? 7 : 3
+        ctx.fillStyle = tickColor
+        ctx.fillRect(x, h - tickH, 1, tickH)
+        if (isMajor && t > 0) {
+          const m = Math.floor(t / 60)
+          const s = Math.floor(t % 60)
+          const label = m > 0 ? `${m}:${s.toString().padStart(2, '0')}` : `${s}s`
+          ctx.fillStyle = labelColor
+          ctx.fillText(label, x, 0)
+        }
+      }
+    }
+    if (!duration) return
+    if (timelineCanvasRef.current) drawRuler(timelineCanvasRef.current)
+    if (origTimelineCanvasRef.current) drawRuler(origTimelineCanvasRef.current)
+  }, [duration])
 
   // debounced auto-save
   const scheduleSave = useCallback((p: EditParams) => {
@@ -220,15 +364,11 @@ export default function EditorModal({
     regionsRef.current = regions
     const ws = WaveSurfer.create({
       container: waveRef.current,
-      waveColor: '#475569',
-      progressColor: '#38bdf8',
       cursorColor: '#38bdf8',
       height: 80,
-      barWidth: 2,
-      barGap: 1,
-      barRadius: 2,
       plugins: [regions],
       fetchParams: { credentials: 'include' },
+      renderFunction: renderWave,
     })
     wsRef.current = ws
     ws.load(`${DOWNLOAD_URL}/${songId}`).catch((err: Error) => {
@@ -244,24 +384,29 @@ export default function EditorModal({
       programmaticRegionRef.current = true
       regions.addRegion({
         id: 'trim', start: p.trim_start, end: p.trim_end ?? dur,
-        color: 'rgba(56,189,248,0.12)', drag: true, resize: true,
+        color: 'rgba(56,189,248,0.1)', drag: true, resize: true,
       })
       p.cuts.forEach(cut => {
         regions.addRegion({
           id: cut.id ?? crypto.randomUUID(),
           start: cut.start, end: cut.end,
-          color: 'rgba(239,68,68,0.15)', drag: true, resize: true,
+          color: 'transparent', drag: true, resize: true,
         })
       })
       p.fades.forEach(fade => {
         regions.addRegion({
           id: `fade-${fade.id ?? crypto.randomUUID()}`,
           start: fade.start, end: fade.end,
-          color: fade.type === 'in' ? 'rgba(56,189,248,0.18)' : 'rgba(251,191,36,0.18)',
+          color: 'transparent',
           drag: true, resize: true,
         })
       })
       programmaticRegionRef.current = false
+    })
+    ws.on('timeupdate', (time: number) => {
+      const dur = ws.getDuration()
+      if (!dur || !playheadRef.current || !timelineContainerRef.current) return
+      playheadRef.current.style.left = `${(time / dur) * 100}%`
     })
     ws.on('play', () => setWfPlaying(true))
     ws.on('pause', () => {
@@ -277,6 +422,118 @@ export default function EditorModal({
       }
     })
     ws.on('error', (err: Error) => { if (err?.name !== 'AbortError') console.error('WaveSurfer:', err) })
+    regions.on('region-created', region => {
+      const el = region.element as HTMLElement
+      const isTrim = region.id === 'trim'
+      const isCut = !isTrim && !region.id.startsWith('fade-')
+      el.style.boxSizing = 'border-box'
+      const handleColor = isTrim ? '#0369a1'
+        : isCut ? '#b91c1c'
+        : (paramsRef.current.fades.find(f => f.id === region.id.slice(5))?.type === 'in' ? '#0369a1' : '#92400e')
+      el.querySelectorAll<HTMLElement>('[part*="region-handle"]').forEach(h => {
+        const isLeft = h.getAttribute('part')?.includes('left') ?? false
+        Object.assign(h.style, {
+          width: '10px',
+          backgroundColor: 'transparent',
+          borderLeft: isLeft ? `2px solid ${handleColor}` : 'none',
+          borderRight: !isLeft ? `2px solid ${handleColor}` : 'none',
+          cursor: 'ew-resize',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: '10',
+        })
+        // Grip bar
+        const grip = document.createElement('div')
+        Object.assign(grip.style, {
+          width: '2px',
+          height: '20px',
+          borderRadius: '1px',
+          backgroundColor: handleColor,
+          opacity: '0.8',
+          pointerEvents: 'none',
+        })
+        h.appendChild(grip)
+      })
+
+      regionElemsRef.current.set(region.id, el)
+
+      // click → select (stop propagation so waveform click doesn't also fire)
+      el.addEventListener('click', e => {
+        e.stopPropagation()
+        setSelectedRegionId(prev => prev === region.id ? null : region.id)
+        setContextMenu(null)
+        setRegionContextMenu(null)
+      })
+
+      el.addEventListener('contextmenu', e => {
+        e.preventDefault()
+        e.stopPropagation()
+        if (!isTrim) setSelectedRegionId(region.id)
+        setContextMenu(null)
+        if (!isTrim) setRegionContextMenu({ x: e.clientX, y: e.clientY, regionId: region.id })
+      })
+
+      // long press → region context menu (mobile)
+      let longPressTimer: ReturnType<typeof setTimeout> | null = null
+      el.addEventListener('touchstart', e => {
+        if (isTrim) return
+        longPressTimer = setTimeout(() => {
+          const touch = e.touches[0]
+          setSelectedRegionId(region.id)
+          setContextMenu(null)
+          setRegionContextMenu({ x: touch.clientX, y: touch.clientY, regionId: region.id })
+        }, 500)
+      }, { passive: true })
+      el.addEventListener('touchend', () => { if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null } })
+      el.addEventListener('touchmove', () => { if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null } })
+
+      // hover overlay for cuts (shows extended fade zone)
+      let overlay: HTMLElement | null = null
+      let rafId: number | null = null
+      const syncOverlay = () => {
+        if (!overlay) return
+        const cut = paramsRef.current.cuts.find(c => c.id === region.id)
+        const dur = wsRef.current?.getDuration() ?? 1
+        const container = el.parentElement
+        if (!container) return
+        const pxPerSec = container.clientWidth / dur
+        const fadeOutPx = (cut?.fade_out ?? 0) * pxPerSec
+        const fadeInPx = (cut?.fade_in ?? 0) * pxPerSec
+        overlay.style.left = `${el.offsetLeft - fadeOutPx}px`
+        overlay.style.width = `${el.clientWidth + fadeOutPx + fadeInPx}px`
+        rafId = requestAnimationFrame(syncOverlay)
+      }
+      el.addEventListener('mouseenter', () => {
+        if (isCut) {
+          const container = el.parentElement
+          if (container) {
+            overlay = document.createElement('div')
+            Object.assign(overlay.style, {
+              position: 'absolute', top: '0', height: '100%',
+              pointerEvents: 'none', boxSizing: 'border-box',
+              border: '2px solid rgb(14,165,233)',
+            })
+            container.appendChild(overlay)
+            overlayElemsRef.current.set(region.id, overlay)
+            syncOverlay()
+          }
+        } else {
+          el.style.boxShadow = '0 0 0 2px rgb(14,165,233)'
+        }
+      })
+      el.addEventListener('mouseleave', () => {
+        if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null }
+        if (overlay) { overlay.remove(); overlay = null; overlayElemsRef.current.delete(region.id) }
+        el.style.boxShadow = ''
+      })
+    })
+    regions.on('region-removed', region => {
+      regionElemsRef.current.delete(region.id)
+      const staleOverlay = overlayElemsRef.current.get(region.id)
+      if (staleOverlay) { staleOverlay.remove(); overlayElemsRef.current.delete(region.id) }
+      if (selectedRegionIdRef.current === region.id) setSelectedRegionId(null)
+    })
     regions.on('region-update', r => {
       if (programmaticRegionRef.current) return
       const dur = wsRef.current?.getDuration() ?? duration
@@ -291,10 +548,17 @@ export default function EditorModal({
           const hasContent = contentStarts.length > 0
           let newStart: number
           let newEnd: number
-          if (isDragTrim && !hasContent) {
-            // No content — slide as rigid unit
+          if (isDragTrim) {
             newStart = Math.max(0, Math.min(dur - origTrimSize, r.start))
             newEnd = newStart + origTrimSize
+            if (hasContent) {
+              const minC = Math.min(...contentStarts)
+              const maxC = Math.max(...contentEnds)
+              if (newStart > minC) { newStart = minC; newEnd = newStart + origTrimSize }
+              if (newEnd < maxC) { newEnd = maxC; newStart = newEnd - origTrimSize }
+              newStart = Math.max(0, newStart)
+              newEnd = Math.min(dur, newEnd)
+            }
           } else {
             newStart = Math.max(0, r.start)
             newEnd = Math.min(dur, r.end)
@@ -351,11 +615,21 @@ export default function EditorModal({
           const refCut = (regionPreDragRef.current ?? prev).cuts.find(c => c.id === r.id)
           const origSize = refCut ? (refCut.end - refCut.start) : 0
           const isDrag = refCut ? Math.abs((r.end - r.start) - origSize) < 0.1 : false
+          const cut = prev.cuts.find(c => c.id === r.id)
+          const fadeOut = cut?.fade_out ?? 0
+          const fadeIn = cut?.fade_in ?? 0
           const obstacles = [
             ...prev.cuts.map(c => ({ id: c.id, start: c.start - (c.fade_out ?? 0), end: c.end + (c.fade_in ?? 0) })),
             ...prev.fades,
           ]
-          const { start, end } = _snap(r.start, r.end, obstacles, r.id, trimStart, trimEnd, isDrag)
+          let start: number, end: number
+          if (isDrag) {
+            const ext = _snap(r.start - fadeOut, r.end + fadeIn, obstacles, r.id, trimStart, trimEnd, true)
+            start = ext.start + fadeOut
+            end = ext.end - fadeIn
+          } else {
+            ;({ start, end } = _snap(r.start, r.end, obstacles, r.id, trimStart, trimEnd, false))
+          }
           if (start !== r.start || end !== r.end) {
             programmaticRegionRef.current = true
             r.setOptions({ start, end })
@@ -378,9 +652,17 @@ export default function EditorModal({
           let trimStart: number
           let trimEnd: number
           const dur = wsRef.current?.getDuration() ?? duration
-          if (isDragTrim && !hasContent) {
+          if (isDragTrim) {
             trimStart = Math.max(0, Math.min(dur - origTrimSize, r.start))
             trimEnd = trimStart + origTrimSize
+            if (hasContent) {
+              const minC = Math.min(...contentStarts)
+              const maxC = Math.max(...contentEnds)
+              if (trimStart > minC) { trimStart = minC; trimEnd = trimStart + origTrimSize }
+              if (trimEnd < maxC) { trimEnd = maxC; trimStart = trimEnd - origTrimSize }
+              trimStart = Math.max(0, trimStart)
+              trimEnd = Math.min(dur, trimEnd)
+            }
           } else {
             trimStart = Math.max(0, r.start)
             trimEnd = Math.min(dur, r.end)
@@ -435,11 +717,21 @@ export default function EditorModal({
           const refCut = (regionPreDragRef.current ?? prev).cuts.find(c => c.id === r.id)
           const origSize = refCut ? (refCut.end - refCut.start) : 0
           const isDrag = refCut ? Math.abs((r.end - r.start) - origSize) < 0.1 : false
+          const cut = prev.cuts.find(c => c.id === r.id)
+          const fadeOut = cut?.fade_out ?? 0
+          const fadeIn = cut?.fade_in ?? 0
           const obstacles = [
             ...prev.cuts.map(c => ({ id: c.id, start: c.start - (c.fade_out ?? 0), end: c.end + (c.fade_in ?? 0) })),
             ...prev.fades,
           ]
-          const { start, end } = _snap(r.start, r.end, obstacles, r.id, trimStart, trimEnd, isDrag)
+          let start: number, end: number
+          if (isDrag) {
+            const ext = _snap(r.start - fadeOut, r.end + fadeIn, obstacles, r.id, trimStart, trimEnd, true)
+            start = ext.start + fadeOut
+            end = ext.end - fadeIn
+          } else {
+            ;({ start, end } = _snap(r.start, r.end, obstacles, r.id, trimStart, trimEnd, false))
+          }
           if (start !== r.start || end !== r.end) {
             programmaticRegionRef.current = true
             r.setOptions({ start, end })
@@ -465,11 +757,15 @@ export default function EditorModal({
       window.removeEventListener('mouseup', handleRegionDragEnd)
       window.removeEventListener('touchend', handleRegionDragEnd)
       if (pollIntervalRef.current) { clearInterval(pollIntervalRef.current); pollIntervalRef.current = null }
+      if (waveRafRef.current) { cancelAnimationFrame(waveRafRef.current); waveRafRef.current = null }
+      peaksRef.current = null
+      waveCtxRef.current = null
+      mainWaveCanvasRef.current = null
       wsRef.current = null
       regionsRef.current = null
       ws.destroy()
     }
-  }, [songId, scheduleSave])
+  }, [songId, scheduleSave, renderWave])
 
   // original waveform — read-only, no regions
   useEffect(() => {
@@ -553,7 +849,7 @@ export default function EditorModal({
       regionsRef.current!.addRegion({
         id: `fade-${fade.id ?? crypto.randomUUID()}`,
         start: fade.start, end: fade.end,
-        color: fade.type === 'in' ? 'rgba(56,189,248,0.18)' : 'rgba(251,191,36,0.18)',
+        color: 'transparent',
         drag: true, resize: true,
       })
     })
@@ -589,7 +885,7 @@ export default function EditorModal({
     if (end - start < 0.5) return
     const id = crypto.randomUUID()
     pushHistory(p)
-    regionsRef.current?.addRegion({ id, start, end, color: 'rgba(239,68,68,0.15)', drag: true, resize: true })
+    regionsRef.current?.addRegion({ id, start, end, color: 'transparent', drag: true, resize: true })
     setParams(prev => ({ ...prev, cuts: [...prev.cuts, { id, start, end, fade_in: 0, fade_out: 0 }] }))
   }
 
@@ -601,7 +897,27 @@ export default function EditorModal({
 
   function updateCutFade(id: string, key: 'fade_in' | 'fade_out', value: number) {
     setParams(prev => {
-      const next = { ...prev, cuts: prev.cuts.map(c => c.id === id ? { ...c, [key]: value } : c) }
+      const cut = prev.cuts.find(c => c.id === id)
+      if (!cut) return prev
+      const trimStart = prev.trim_start
+      const trimEnd = prev.trim_end ?? duration
+      let clamped = value
+      if (key === 'fade_out') {
+        const leftEdges = [
+          trimStart,
+          ...prev.fades.filter(f => f.end <= cut.start).map(f => f.end),
+          ...prev.cuts.filter(c => c.id !== id && c.end <= cut.start).map(c => c.end + (c.fade_in ?? 0)),
+        ]
+        clamped = Math.min(value, cut.start - Math.max(...leftEdges))
+      } else {
+        const rightEdges = [
+          trimEnd,
+          ...prev.fades.filter(f => f.start >= cut.end).map(f => f.start),
+          ...prev.cuts.filter(c => c.id !== id && c.start >= cut.end).map(c => c.start - (c.fade_out ?? 0)),
+        ]
+        clamped = Math.min(value, Math.min(...rightEdges) - cut.end)
+      }
+      const next = { ...prev, cuts: prev.cuts.map(c => c.id === id ? { ...c, [key]: Math.max(0, clamped) } : c) }
       scheduleSave(next)
       return next
     })
@@ -631,8 +947,7 @@ export default function EditorModal({
     if (end - start < 0.5) return
     const id = crypto.randomUUID()
     pushHistory(paramsRef.current)
-    const color = type === 'in' ? 'rgba(56,189,248,0.18)' : 'rgba(251,191,36,0.18)'
-    regionsRef.current?.addRegion({ id: `fade-${id}`, start, end, color, drag: true, resize: true })
+    regionsRef.current?.addRegion({ id: `fade-${id}`, start, end, color: 'transparent', drag: true, resize: true })
     setParams(prev => ({ ...prev, fades: [...prev.fades, { id, start, end, type }] }))
   }
 
@@ -647,7 +962,7 @@ export default function EditorModal({
     if (end - start < 0.5) return
     const id = crypto.randomUUID()
     pushHistory(p)
-    regionsRef.current?.addRegion({ id, start, end, color: 'rgba(239,68,68,0.15)', drag: true, resize: true })
+    regionsRef.current?.addRegion({ id, start, end, color: 'transparent', drag: true, resize: true })
     setParams(prev => ({ ...prev, cuts: [...prev.cuts, { id, start, end, fade_in: 0, fade_out: 0 }] }))
   }
 
@@ -668,8 +983,7 @@ export default function EditorModal({
     if (end - start < 0.5) return
     const id = crypto.randomUUID()
     pushHistory(p)
-    const color = type === 'in' ? 'rgba(56,189,248,0.18)' : 'rgba(251,191,36,0.18)'
-    regionsRef.current?.addRegion({ id: `fade-${id}`, start, end, color, drag: true, resize: true })
+    regionsRef.current?.addRegion({ id: `fade-${id}`, start, end, color: 'transparent', drag: true, resize: true })
     setParams(prev => ({ ...prev, fades: [...prev.fades, { id, start, end, type }] }))
   }
 
@@ -681,6 +995,14 @@ export default function EditorModal({
       scheduleSave(next)
       return next
     })
+  }
+
+  function removeSelected() {
+    const id = selectedRegionIdRef.current
+    if (!id || id === 'trim') return
+    if (id.startsWith('fade-')) removeFade(id.slice(5))
+    else removeCut(id)
+    setSelectedRegionId(null)
   }
 
   // (fade timing and cut timing are GUI-only via waveform drag)
@@ -1122,6 +1444,58 @@ export default function EditorModal({
     return `${m}:${Math.floor(s % 60).toString().padStart(2, '0')}`
   }
 
+  function handleOrigTimelineMouseDown(e: React.MouseEvent<HTMLCanvasElement>) {
+    if (!wsOrigRef.current) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const seek = (clientX: number) => wsOrigRef.current?.seekTo(Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)))
+    seek(e.clientX)
+    const onMove = (me: MouseEvent) => seek(me.clientX)
+    const onUp = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp) }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+
+  function handleOrigTimelineTouchStart(e: React.TouchEvent<HTMLCanvasElement>) {
+    if (!wsOrigRef.current) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const seek = (clientX: number) => wsOrigRef.current?.seekTo(Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)))
+    seek(e.touches[0].clientX)
+    const onMove = (te: TouchEvent) => seek(te.touches[0].clientX)
+    const onEnd = () => { window.removeEventListener('touchmove', onMove); window.removeEventListener('touchend', onEnd) }
+    window.addEventListener('touchmove', onMove, { passive: true })
+    window.addEventListener('touchend', onEnd)
+  }
+
+  function handleTimelineMouseDown(e: React.MouseEvent<HTMLCanvasElement>) {
+    if (!wsRef.current || !duration) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const seek = (clientX: number) => {
+      const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+      wsRef.current?.seekTo(pct)
+      if (playheadRef.current) playheadRef.current.style.left = `${pct * 100}%`
+    }
+    seek(e.clientX)
+    const onMove = (me: MouseEvent) => seek(me.clientX)
+    const onUp = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp) }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+
+  function handleTimelineTouchStart(e: React.TouchEvent<HTMLCanvasElement>) {
+    if (!wsRef.current || !duration) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const seek = (clientX: number) => {
+      const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+      wsRef.current?.seekTo(pct)
+      if (playheadRef.current) playheadRef.current.style.left = `${pct * 100}%`
+    }
+    seek(e.touches[0].clientX)
+    const onMove = (te: TouchEvent) => seek(te.touches[0].clientX)
+    const onEnd = () => { window.removeEventListener('touchmove', onMove); window.removeEventListener('touchend', onEnd) }
+    window.addEventListener('touchmove', onMove, { passive: true })
+    window.addEventListener('touchend', onEnd)
+  }
+
   function handleWaveformContextMenu(e: React.MouseEvent<HTMLDivElement>) {
     e.preventDefault()
     if (!wsReady || !duration || !waveRef.current) return
@@ -1131,6 +1505,8 @@ export default function EditorModal({
   }
 
   function handleWaveformClick(e: React.MouseEvent<HTMLDivElement>) {
+    setSelectedRegionId(null)
+    setRegionContextMenu(null)
     if (!wsReady || !duration || !waveRef.current) return
     const rect = waveRef.current.getBoundingClientRect()
     const progress = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
@@ -1146,7 +1522,17 @@ export default function EditorModal({
     const target = e.target as HTMLElement
     const inInput = ['INPUT', 'TEXTAREA'].includes(target.tagName)
 
-    if (e.key === 'Escape') { e.preventDefault(); handleClose(); return }
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      if (selectedRegionIdRef.current) { setSelectedRegionId(null); setRegionContextMenu(null); return }
+      handleClose()
+      return
+    }
+    if (!inInput && (e.key === 'Delete' || e.key === 'Backspace') && selectedRegionIdRef.current) {
+      e.preventDefault()
+      removeSelected()
+      return
+    }
 
     if (e.key === ' ' && !inInput) {
       e.preventDefault()
@@ -1314,6 +1700,12 @@ export default function EditorModal({
                 </div>
               </div>
               <div className="relative px-2 pb-2">
+                <canvas
+                  ref={origTimelineCanvasRef}
+                  className="w-full h-5 block cursor-pointer select-none"
+                  onMouseDown={handleOrigTimelineMouseDown}
+                  onTouchStart={handleOrigTimelineTouchStart}
+                />
                 <div ref={origWaveRef} className="w-full min-h-[80px]" />
                 {!origReady && (
                   <div className="absolute inset-0 flex items-end justify-center gap-px px-2 pb-2 pointer-events-none overflow-hidden">
@@ -1365,7 +1757,23 @@ export default function EditorModal({
                 </span>
               </div>
               <div className="relative px-2 pb-2">
-                <div ref={waveRef} data-testid="waveform" onClick={handleWaveformClick} onContextMenu={handleWaveformContextMenu} className="w-full rounded overflow-hidden min-h-[80px] cursor-crosshair" />
+                {/* DAW-style seek strip + waveform share a relative container so the playhead spans both */}
+                <div ref={timelineContainerRef} className="relative">
+                  {/* Timeline ruler — tap/drag to seek */}
+                  <canvas
+                    ref={timelineCanvasRef}
+                    className="w-full h-5 block cursor-pointer select-none"
+                    onMouseDown={handleTimelineMouseDown}
+                    onTouchStart={handleTimelineTouchStart}
+                  />
+                  <div ref={waveRef} data-testid="waveform" onClick={handleWaveformClick} onContextMenu={handleWaveformContextMenu} className="w-full rounded overflow-hidden min-h-[80px] cursor-crosshair" />
+                  {/* Playhead — spans ruler + waveform, no pointer events so regions still receive clicks */}
+                  <div
+                    ref={playheadRef}
+                    className="absolute top-0 bottom-0 pointer-events-none z-20"
+                    style={{ left: '0%', width: '1px', background: '#38bdf8', opacity: 0.85 }}
+                  />
+                </div>
                 {!wsReady && (
                   <div className="absolute inset-0 flex items-end justify-center gap-px px-2 pb-2 pointer-events-none overflow-hidden">
                     {WAVEFORM_SKELETON.map((h, i) => (
@@ -1374,67 +1782,6 @@ export default function EditorModal({
                     ))}
                   </div>
                 )}
-                {duration > 0 && <>
-                  {/* trim zone darkness */}
-                  {params.trim_start > 0 && (
-                    <div className="absolute inset-y-0 left-0 bg-black/50 pointer-events-none" style={{ width: `${(params.trim_start / duration) * 100}%` }} />
-                  )}
-                  {(params.trim_end !== null && params.trim_end < duration) && (
-                    <div className="absolute inset-y-0 right-0 bg-black/50 pointer-events-none" style={{ width: `${((duration - params.trim_end) / duration) * 100}%` }} />
-                  )}
-                  {/* cut/fade overlays clipped to trim region */}
-                  <div className="absolute inset-0 pointer-events-none" style={{
-                    clipPath: `inset(0 ${((duration - trimEnd) / duration * 100).toFixed(4)}% 0 ${(params.trim_start / duration * 100).toFixed(4)}%)`,
-                  }}>
-                    {/* cut darkness */}
-                    {params.cuts.map(cut => (
-                      <div key={`dark-${cut.id}`} className="absolute inset-y-0 bg-black/50" style={{
-                        left: `${(cut.start / duration) * 100}%`,
-                        width: `${((cut.end - cut.start) / duration) * 100}%`,
-                      }} />
-                    ))}
-                    {/* fade overlays */}
-                    {params.fades.map(fade => {
-                      const left = `${(fade.start / duration) * 100}%`
-                      const width = `${((fade.end - fade.start) / duration) * 100}%`
-                      const isIn = fade.type === 'in'
-                      return (
-                        <React.Fragment key={fade.id}>
-                          <div
-                            className={`absolute inset-y-0 from-black/50 to-transparent ${isIn ? 'bg-gradient-to-r' : 'bg-gradient-to-l'}`}
-                            style={{ left, width }}
-                          />
-                          <div className="absolute inset-y-0" style={{
-                            left, width,
-                            background: isIn ? 'rgba(56,189,248,0.18)' : 'rgba(251,191,36,0.18)',
-                            clipPath: isIn
-                              ? 'polygon(0% 50%, 100% 0%, 100% 100%)'
-                              : 'polygon(0% 0%, 0% 100%, 100% 50%)',
-                          }} />
-                        </React.Fragment>
-                      )
-                    })}
-                    {/* cut fade ramps */}
-                    {params.cuts.map(cut => (
-                      <React.Fragment key={`ramp-${cut.id}`}>
-                        {cut.fade_out > 0 && (
-                          <div className="absolute inset-y-0 bg-red-400/25" style={{
-                            left: `${Math.max(0, (cut.start - cut.fade_out) / duration) * 100}%`,
-                            width: `${(cut.fade_out / duration) * 100}%`,
-                            clipPath: 'polygon(0% 0%, 0% 100%, 100% 50%)',
-                          }} />
-                        )}
-                        {cut.fade_in > 0 && (
-                          <div className="absolute inset-y-0 bg-red-400/25" style={{
-                            left: `${(cut.end / duration) * 100}%`,
-                            width: `${(cut.fade_in / duration) * 100}%`,
-                            clipPath: 'polygon(0% 50%, 100% 0%, 100% 100%)',
-                          }} />
-                        )}
-                      </React.Fragment>
-                    ))}
-                  </div>
-                </>}
                 {(jobStatus === 'submitting' || jobStatus === 'polling') && (
                   <div className="absolute inset-0 flex items-end justify-center gap-px px-2 pb-2 pointer-events-none overflow-hidden rounded bg-gray-950/50">
                     {WAVEFORM_SKELETON.map((h, i) => (
@@ -1773,6 +2120,23 @@ export default function EditorModal({
             onClick={() => { addFadeAtTime(contextMenu.time, 'out'); setContextMenu(null) }}
           >
             Fade out to here
+          </button>
+        </div>
+      )}
+
+      {/* region right-click / long-press context menu */}
+      {regionContextMenu && (
+        <div
+          className="fixed z-[70] bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl py-1 min-w-[140px] text-sm"
+          style={{ left: regionContextMenu.x, top: regionContextMenu.y }}
+          onClick={e => e.stopPropagation()}
+          onMouseLeave={() => setRegionContextMenu(null)}
+        >
+          <button
+            className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 text-red-400 transition-colors"
+            onClick={() => { removeSelected(); setRegionContextMenu(null) }}
+          >
+            Remove
           </button>
         </div>
       )}
