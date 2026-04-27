@@ -270,7 +270,16 @@ export default function EditorModal({
       if (r.id !== 'trim' && !r.id.startsWith('fade-')) {
         setParams(prev => {
           if (!regionPreDragRef.current) regionPreDragRef.current = prev
-          return { ...prev, cuts: prev.cuts.map(c => c.id === r.id ? { ...c, start: r.start, end: r.end } : c) }
+          const trimStart = prev.trim_start
+          const trimEnd = prev.trim_end ?? duration
+          const start = Math.max(trimStart, r.start)
+          const end = Math.min(trimEnd, r.end)
+          if (start !== r.start || end !== r.end) {
+            programmaticRegionRef.current = true
+            r.setOptions({ start, end })
+            programmaticRegionRef.current = false
+          }
+          return { ...prev, cuts: prev.cuts.map(c => c.id === r.id ? { ...c, start, end } : c) }
         })
       }
     })
@@ -303,7 +312,9 @@ export default function EditorModal({
       } else {
         setParams(prev => {
           if (!regionPreDragRef.current) regionPreDragRef.current = prev
-          const { start, end } = _clampCutNoOverlap(prev.cuts, r.id, r.start, r.end)
+          const trimStart = prev.trim_start
+          const trimEnd = prev.trim_end ?? duration
+          const { start, end } = _clampCutNoOverlap(prev.cuts, r.id, r.start, r.end, trimStart, trimEnd)
           if (start !== r.start || end !== r.end) {
             programmaticRegionRef.current = true
             r.setOptions({ start, end })
@@ -435,21 +446,24 @@ export default function EditorModal({
 
   function addCut() {
     if (!wsReady || !duration) return
-    const span = Math.min(10, duration * 0.15)
-    const sorted = [...paramsRef.current.cuts].sort((a, b) => a.start - b.start)
-    // Try cursor position, then scan forward for a free gap
-    let start = Math.max(0, Math.min(duration - span, (wsRef.current?.getCurrentTime() ?? duration / 2) - span / 2))
+    const p = paramsRef.current
+    const trimStart = p.trim_start
+    const trimEnd = p.trim_end ?? duration
+    const span = Math.min(10, trimEnd - trimStart)
+    const sorted = [...p.cuts].sort((a, b) => a.start - b.start)
+    const cursor = wsRef.current?.getCurrentTime() ?? (trimStart + trimEnd) / 2
+    let start = Math.max(trimStart, Math.min(trimEnd - span, cursor - span / 2))
     for (let i = 0; i <= sorted.length; i++) {
-      const end = Math.min(duration, start + span)
-      if (end - start < 0.5) return // no room
+      const end = Math.min(trimEnd, start + span)
+      if (end - start < 0.5) return
       const hit = sorted.find(c => start < c.end && end > c.start)
       if (!hit) break
       start = hit.end + 0.1
     }
-    const end = Math.min(duration, start + span)
+    const end = Math.min(trimEnd, start + span)
     if (end - start < 0.5) return
     const id = crypto.randomUUID()
-    pushHistory(paramsRef.current)
+    pushHistory(p)
     regionsRef.current?.addRegion({ id, start, end, color: 'rgba(239,68,68,0.15)', drag: true, resize: true })
     setParams(prev => ({ ...prev, cuts: [...prev.cuts, { id, start, end, fade_in: 0, fade_out: 0 }] }))
   }
@@ -468,7 +482,9 @@ export default function EditorModal({
     })
   }
 
-  function _clampCutNoOverlap(cuts: Cut[], id: string, start: number, end: number): { start: number; end: number } {
+  function _clampCutNoOverlap(cuts: Cut[], id: string, start: number, end: number, trimStart: number, trimEnd: number): { start: number; end: number } {
+    start = Math.max(trimStart, start)
+    end = Math.min(trimEnd, end)
     for (const other of cuts) {
       if (other.id === id) continue
       if (start < other.end && end > other.start) {
@@ -515,7 +531,7 @@ export default function EditorModal({
 
   function addFade(type: 'in' | 'out') {
     if (!wsReady || !duration) return
-    const DEFAULT_DUR = 2
+    const DEFAULT_DUR = 10
     const p = paramsRef.current
     const trimStart = p.trim_start
     const trimEnd = p.trim_end ?? duration
@@ -1245,26 +1261,43 @@ export default function EditorModal({
                     ))}
                   </div>
                 )}
-                {duration > 0 && params.fades.map(fade => {
-                  const left = `${(fade.start / duration) * 100}%`
-                  const width = `${((fade.end - fade.start) / duration) * 100}%`
-                  const isIn = fade.type === 'in'
-                  return (
-                    <React.Fragment key={fade.id}>
-                      <div
-                        className={`absolute inset-y-0 pointer-events-none from-white/80 dark:from-gray-950/80 to-transparent ${isIn ? 'bg-gradient-to-r' : 'bg-gradient-to-l'}`}
-                        style={{ left, width }}
-                      />
-                      <div className="absolute inset-y-0 pointer-events-none" style={{
-                        left, width,
-                        background: isIn ? 'rgba(56,189,248,0.18)' : 'rgba(251,191,36,0.18)',
-                        clipPath: isIn
-                          ? 'polygon(0% 50%, 100% 0%, 100% 100%)'
-                          : 'polygon(0% 0%, 0% 100%, 100% 50%)',
-                      }} />
-                    </React.Fragment>
-                  )
-                })}
+                {duration > 0 && <>
+                  {/* trim zone darkness */}
+                  {params.trim_start > 0 && (
+                    <div className="absolute inset-y-0 left-0 bg-black/50 pointer-events-none" style={{ width: `${(params.trim_start / duration) * 100}%` }} />
+                  )}
+                  {(params.trim_end !== null && params.trim_end < duration) && (
+                    <div className="absolute inset-y-0 right-0 bg-black/50 pointer-events-none" style={{ width: `${((duration - params.trim_end) / duration) * 100}%` }} />
+                  )}
+                  {/* cut darkness */}
+                  {params.cuts.map(cut => (
+                    <div key={`dark-${cut.id}`} className="absolute inset-y-0 bg-black/50 pointer-events-none" style={{
+                      left: `${(cut.start / duration) * 100}%`,
+                      width: `${((cut.end - cut.start) / duration) * 100}%`,
+                    }} />
+                  ))}
+                  {/* fade overlays */}
+                  {params.fades.map(fade => {
+                    const left = `${(fade.start / duration) * 100}%`
+                    const width = `${((fade.end - fade.start) / duration) * 100}%`
+                    const isIn = fade.type === 'in'
+                    return (
+                      <React.Fragment key={fade.id}>
+                        <div
+                          className={`absolute inset-y-0 pointer-events-none from-black/50 to-transparent ${isIn ? 'bg-gradient-to-r' : 'bg-gradient-to-l'}`}
+                          style={{ left, width }}
+                        />
+                        <div className="absolute inset-y-0 pointer-events-none" style={{
+                          left, width,
+                          background: isIn ? 'rgba(56,189,248,0.18)' : 'rgba(251,191,36,0.18)',
+                          clipPath: isIn
+                            ? 'polygon(0% 50%, 100% 0%, 100% 100%)'
+                            : 'polygon(0% 0%, 0% 100%, 100% 50%)',
+                        }} />
+                      </React.Fragment>
+                    )
+                  })}
+                </>}
                 {(jobStatus === 'submitting' || jobStatus === 'polling') && (
                   <div className="absolute inset-0 flex items-end justify-center gap-px px-2 pb-2 pointer-events-none overflow-hidden rounded bg-gray-950/50">
                     {WAVEFORM_SKELETON.map((h, i) => (
