@@ -3,8 +3,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { startImport, listImportJobs, ImportJobResult } from '../lib/data'
 import { FaUpload } from 'react-icons/fa'
 import ImportJobsTable, { ImportJobsTableHandle } from '../components/import-jobs-table'
+import { useOnline } from '../lib/use-online'
 
 export default function ImportPage() {
+  const online = useOnline()
   const [dragging, setDragging] = useState(false)
   const [initialJobs, setInitialJobs] = useState<ImportJobResult[]>([])
   const [initialTotal, setInitialTotal] = useState(0)
@@ -54,12 +56,13 @@ export default function ImportPage() {
 
       <div
         data-testid="import-dropzone"
-        className={`w-full flex flex-col items-center justify-center gap-3 border-2 border-dashed rounded-xl p-10 cursor-pointer transition-colors ${dragging ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30' : 'border-gray-300 dark:border-gray-700 hover:border-sky-500'}`}
-        onDragOver={e => { e.preventDefault(); setDragging(true) }}
+        className={`w-full flex flex-col items-center justify-center gap-3 border-2 border-dashed rounded-xl p-10 transition-colors ${!online ? 'opacity-40 cursor-not-allowed border-gray-300 dark:border-gray-700' : `cursor-pointer ${dragging ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30' : 'border-gray-300 dark:border-gray-700 hover:border-sky-500'}`}`}
+        onDragOver={e => { if (!online) return; e.preventDefault(); setDragging(true) }}
         onDragLeave={() => setDragging(false)}
-        onDrop={onDrop}
-        onClick={() => inputRef.current?.click()}
+        onDrop={e => { if (!online) return; onDrop(e) }}
+        onClick={() => { if (!online) return; inputRef.current?.click() }}
       >
+        {!online && <p className="text-xs text-amber-700 font-medium">unavailable offline</p>}
         <FaUpload size={24} className="text-gray-400" />
         <p className="text-sm text-gray-500">drag & drop .mp3 / .m4a files, or click to select</p>
         <p className="text-xs text-gray-400">multiple files supported — uploads run in parallel</p>

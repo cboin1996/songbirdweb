@@ -63,6 +63,8 @@ function stripClientIds(params: EditParams): EditParams {
 }
 
 const DRAFT_EXPIRY_DAYS = 30
+const MAX_FADE_DUR = 5
+const MIN_REGION_DUR = 0.5
 
 interface Props {
   songId: string
@@ -148,6 +150,9 @@ export default function EditorModal({
   const [jobStatus, setJobStatus] = useState<'idle' | 'submitting' | 'polling' | 'done' | 'error'>('idle')
   const [jobError, setJobError] = useState('')
   const [overwrite, setOverwrite] = useState(false)
+
+  // --- waveform context menu ---
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; time: number } | null>(null)
 
   // --- close guard ---
   const [closeConfirm, setCloseConfirm] = useState(false)
@@ -237,7 +242,7 @@ export default function EditorModal({
       programmaticRegionRef.current = true
       regions.addRegion({
         id: 'trim', start: p.trim_start, end: p.trim_end ?? dur,
-        color: 'rgba(56,189,248,0.12)', drag: false, resize: true,
+        color: 'rgba(56,189,248,0.12)', drag: true, resize: true,
       })
       p.cuts.forEach(cut => {
         regions.addRegion({
@@ -272,13 +277,54 @@ export default function EditorModal({
     ws.on('error', (err: Error) => { if (err?.name !== 'AbortError') console.error('WaveSurfer:', err) })
     regions.on('region-update', r => {
       if (programmaticRegionRef.current) return
-      if (r.id !== 'trim' && !r.id.startsWith('fade-')) {
+      const dur = wsRef.current?.getDuration() ?? duration
+      if (r.id === 'trim') {
+        setParams(prev => {
+          if (!regionPreDragRef.current) regionPreDragRef.current = prev
+          let newStart = Math.max(0, r.start)
+          let newEnd = Math.min(dur, r.end)
+          if (newEnd - newStart < MIN_REGION_DUR) {
+            // infer which handle moved and clamp the other
+            if (Math.abs(newStart - prev.trim_start) >= Math.abs(newEnd - (prev.trim_end ?? dur))) {
+              newStart = newEnd - MIN_REGION_DUR
+            } else {
+              newEnd = newStart + MIN_REGION_DUR
+            }
+          }
+          if (newStart !== r.start || newEnd !== r.end) {
+            programmaticRegionRef.current = true
+            r.setOptions({ start: newStart, end: newEnd })
+            programmaticRegionRef.current = false
+          }
+          return { ...prev, trim_start: newStart, trim_end: newEnd }
+        })
+      } else if (r.id.startsWith('fade-')) {
+        const fadeId = r.id.slice(5)
         setParams(prev => {
           if (!regionPreDragRef.current) regionPreDragRef.current = prev
           const trimStart = prev.trim_start
-          const trimEnd = prev.trim_end ?? duration
-          const start = Math.max(trimStart, r.start)
-          const end = Math.min(trimEnd, r.end)
+          const trimEnd = prev.trim_end ?? dur
+          const fade = prev.fades.find(f => f.id === fadeId)
+          const obstacles = [...prev.fades, ...prev.cuts]
+          let { start, end } = _snap(r.start, r.end, obstacles, fadeId, trimStart, trimEnd)
+          if (fade && end - start > MAX_FADE_DUR) {
+            if (fade.type === 'in') end = start + MAX_FADE_DUR
+            else start = end - MAX_FADE_DUR
+          }
+          if (start !== r.start || end !== r.end) {
+            programmaticRegionRef.current = true
+            r.setOptions({ start, end })
+            programmaticRegionRef.current = false
+          }
+          return { ...prev, fades: prev.fades.map(f => f.id === fadeId ? { ...f, start, end } : f) }
+        })
+      } else {
+        setParams(prev => {
+          if (!regionPreDragRef.current) regionPreDragRef.current = prev
+          const trimStart = prev.trim_start
+          const trimEnd = prev.trim_end ?? dur
+          const obstacles = [...prev.cuts, ...prev.fades]
+          const { start, end } = _snap(r.start, r.end, obstacles, r.id, trimStart, trimEnd)
           if (start !== r.start || end !== r.end) {
             programmaticRegionRef.current = true
             r.setOptions({ start, end })
@@ -302,9 +348,15 @@ export default function EditorModal({
         setParams(prev => {
           if (!regionPreDragRef.current) regionPreDragRef.current = prev
           const trimStart = prev.trim_start
-          const trimEnd = prev.trim_end ?? duration
-          const { start, end } = _clampFadeNoOverlap(prev.fades, prev.cuts, fadeId,
-            Math.max(trimStart, r.start), Math.min(trimEnd, r.end), trimStart, trimEnd)
+          const dur = wsRef.current?.getDuration() ?? duration
+          const trimEnd = prev.trim_end ?? dur
+          const fade = prev.fades.find(f => f.id === fadeId)
+          const obstacles = [...prev.fades, ...prev.cuts]
+          let { start, end } = _snap(r.start, r.end, obstacles, fadeId, trimStart, trimEnd)
+          if (fade && end - start > MAX_FADE_DUR) {
+            if (fade.type === 'in') end = start + MAX_FADE_DUR
+            else start = end - MAX_FADE_DUR
+          }
           if (start !== r.start || end !== r.end) {
             programmaticRegionRef.current = true
             r.setOptions({ start, end })
@@ -319,7 +371,7 @@ export default function EditorModal({
           if (!regionPreDragRef.current) regionPreDragRef.current = prev
           const trimStart = prev.trim_start
           const trimEnd = prev.trim_end ?? duration
-          const { start, end } = _clampCutNoOverlap(prev.cuts, r.id, r.start, r.end, trimStart, trimEnd)
+          const { start, end } = _snap(r.start, r.end, [...prev.cuts, ...prev.fades], r.id, trimStart, trimEnd)
           if (start !== r.start || end !== r.end) {
             programmaticRegionRef.current = true
             r.setOptions({ start, end })
@@ -443,7 +495,7 @@ export default function EditorModal({
   function applyParams(p: EditParams) {
     setParams(p)
     const region = regionsRef.current?.getRegions().find(r => r.id === 'trim')
-    if (region && duration > 0) region.setOptions({ start: p.trim_start, end: p.trim_end ?? duration, drag: false })
+    if (region && duration > 0) region.setOptions({ start: p.trim_start, end: p.trim_end ?? duration, drag: true })
     wsRef.current?.setVolume(p.volume)
     syncCutRegions(p.cuts)
     syncFadeRegions(p.fades)
@@ -487,50 +539,32 @@ export default function EditorModal({
     })
   }
 
-  function _clampCutNoOverlap(cuts: Cut[], id: string, start: number, end: number, trimStart: number, trimEnd: number): { start: number; end: number } {
-    start = Math.max(trimStart, start)
-    end = Math.min(trimEnd, end)
-    for (const other of cuts) {
-      if (other.id === id) continue
-      if (start < other.end && end > other.start) {
-        const myMid = (start + end) / 2
-        const otherMid = (other.start + other.end) / 2
-        if (myMid <= otherMid) {
-          end = Math.min(end, other.start)
-          if (end < start + 0.05) end = start + 0.05
-        } else {
-          start = Math.max(start, other.end)
-          if (start > end - 0.05) start = end - 0.05
-        }
-      }
-    }
-    return { start, end }
-  }
-
-  function _clampFadeNoOverlap(
-    fades: FadeEdit[], cuts: Cut[], id: string,
-    start: number, end: number, trimStart: number, trimEnd: number,
+  // Snap: clamp region within [trimStart, trimEnd] and push it away from any overlapping
+  // obstacle. Direction determined by which side of the obstacle the region's center falls on.
+  function _snap(
+    rawStart: number, rawEnd: number,
+    obstacles: Array<{ id?: string; start: number; end: number }>,
+    id: string | undefined, trimStart: number, trimEnd: number,
   ): { start: number; end: number } {
+    let start = Math.max(trimStart, rawStart)
+    let end = Math.min(trimEnd, rawEnd)
+    const rawCenter = (rawStart + rawEnd) / 2
+    const sorted = obstacles
+      .filter(o => o.id !== id)
+      .sort((a, b) => Math.abs((a.start + a.end) / 2 - rawCenter) - Math.abs((b.start + b.end) / 2 - rawCenter))
+    for (const obs of sorted) {
+      if (start >= obs.end || end <= obs.start) continue
+      const obsCenter = (obs.start + obs.end) / 2
+      if (rawCenter <= obsCenter) {
+        end = obs.start
+        start = Math.min(start, end - MIN_REGION_DUR)
+      } else {
+        start = obs.end
+        end = Math.max(end, start + MIN_REGION_DUR)
+      }
+    }
     start = Math.max(trimStart, start)
     end = Math.min(trimEnd, end)
-    if (end < start + 0.05) end = start + 0.05
-    for (const f of fades) {
-      if (f.id === id) continue
-      if (start < f.end && end > f.start) {
-        const myMid = (start + end) / 2
-        const fMid = (f.start + f.end) / 2
-        if (myMid <= fMid) { end = Math.min(end, f.start); if (end < start + 0.05) end = start + 0.05 }
-        else { start = Math.max(start, f.end); if (start > end - 0.05) start = end - 0.05 }
-      }
-    }
-    for (const c of cuts) {
-      if (start < c.end && end > c.start) {
-        const myMid = (start + end) / 2
-        const cMid = (c.start + c.end) / 2
-        if (myMid <= cMid) { end = Math.min(end, c.start); if (end < start + 0.05) end = start + 0.05 }
-        else { start = Math.max(start, c.end); if (start > end - 0.05) start = end - 0.05 }
-      }
-    }
     return { start, end }
   }
 
@@ -563,6 +597,43 @@ export default function EditorModal({
     setParams(prev => ({ ...prev, fades: [...prev.fades, { id, start, end, type }] }))
   }
 
+  function addCutAtTime(time: number) {
+    if (!wsReady || !duration) return
+    const p = paramsRef.current
+    const trimStart = p.trim_start
+    const trimEnd = p.trim_end ?? duration
+    const span = Math.min(10, trimEnd - trimStart)
+    const start = Math.max(trimStart, Math.min(trimEnd - span, time - span / 2))
+    const end = Math.min(trimEnd, start + span)
+    if (end - start < 0.5) return
+    const id = crypto.randomUUID()
+    pushHistory(p)
+    regionsRef.current?.addRegion({ id, start, end, color: 'rgba(239,68,68,0.15)', drag: true, resize: true })
+    setParams(prev => ({ ...prev, cuts: [...prev.cuts, { id, start, end, fade_in: 0, fade_out: 0 }] }))
+  }
+
+  function addFadeAtTime(time: number, type: 'in' | 'out') {
+    if (!wsReady || !duration) return
+    const DEFAULT_DUR = 10
+    const p = paramsRef.current
+    const trimStart = p.trim_start
+    const trimEnd = p.trim_end ?? duration
+    let start: number, end: number
+    if (type === 'in') {
+      start = Math.max(trimStart, time)
+      end = Math.min(trimEnd, start + DEFAULT_DUR)
+    } else {
+      end = Math.min(trimEnd, time)
+      start = Math.max(trimStart, end - DEFAULT_DUR)
+    }
+    if (end - start < 0.5) return
+    const id = crypto.randomUUID()
+    pushHistory(p)
+    const color = type === 'in' ? 'rgba(56,189,248,0.18)' : 'rgba(251,191,36,0.18)'
+    regionsRef.current?.addRegion({ id: `fade-${id}`, start, end, color, drag: true, resize: true })
+    setParams(prev => ({ ...prev, fades: [...prev.fades, { id, start, end, type }] }))
+  }
+
   function removeFade(id: string) {
     pushHistory(paramsRef.current)
     regionsRef.current?.getRegions().find(r => r.id === `fade-${id}`)?.remove()
@@ -573,41 +644,7 @@ export default function EditorModal({
     })
   }
 
-  function updateFadeDuration(id: string, newDur: number) {
-    setParams(prev => {
-      const fade = prev.fades.find(f => f.id === id)
-      if (!fade) return prev
-      const trimStart = prev.trim_start
-      const trimEnd = prev.trim_end ?? duration
-      let { start, end } = fade
-      if (fade.type === 'in') {
-        end = start + newDur
-        for (const o of [...prev.fades, ...prev.cuts]) {
-          if (o.id === id) continue
-          if (o.start >= start && end > o.start) end = Math.min(end, o.start)
-        }
-        end = Math.min(trimEnd, end)
-      } else {
-        start = end - newDur
-        for (const o of [...prev.fades, ...prev.cuts]) {
-          if (o.id === id) continue
-          if (o.end <= end && start < o.end) start = Math.max(start, o.end)
-        }
-        start = Math.max(trimStart, start)
-      }
-      const region = regionsRef.current?.getRegions().find(r => r.id === `fade-${id}`)
-      if (region) {
-        programmaticRegionRef.current = true
-        region.setOptions({ start, end })
-        programmaticRegionRef.current = false
-      }
-      const next = { ...prev, fades: prev.fades.map(f => f.id === id ? { ...f, start, end } : f) }
-      scheduleSave(next)
-      return next
-    })
-  }
-
-  // (updateCutTime removed — cut timing is GUI-only via waveform drag)
+  // (fade timing and cut timing are GUI-only via waveform drag)
 
   function handleSliderReset(key: keyof EditParams, defaultVal: number) {
     pushHistory(paramsRef.current)
@@ -1042,6 +1079,14 @@ export default function EditorModal({
     return `${m}:${Math.floor(s % 60).toString().padStart(2, '0')}`
   }
 
+  function handleWaveformContextMenu(e: React.MouseEvent<HTMLDivElement>) {
+    e.preventDefault()
+    if (!wsReady || !duration || !waveRef.current) return
+    const rect = waveRef.current.getBoundingClientRect()
+    const progress = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+    setContextMenu({ x: e.clientX, y: e.clientY, time: progress * duration })
+  }
+
   function handleWaveformClick(e: React.MouseEvent<HTMLDivElement>) {
     if (!wsReady || !duration || !waveRef.current) return
     const rect = waveRef.current.getBoundingClientRect()
@@ -1133,7 +1178,7 @@ export default function EditorModal({
         onKeyDown={handleKeyDown}
         data-testid="editor-modal"
         className="bg-white dark:bg-gray-950 border border-gray-100 dark:border-gray-800 w-full sm:rounded-xl sm:max-w-3xl lg:max-w-4xl sm:max-h-[92vh] h-full sm:h-auto overflow-y-auto flex flex-col outline-none"
-        onClick={e => e.stopPropagation()}
+        onClick={e => { e.stopPropagation(); setContextMenu(null) }}
       >
         {/* header */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 dark:border-gray-800 shrink-0">
@@ -1268,7 +1313,7 @@ export default function EditorModal({
                 </span>
               </div>
               <div className="relative px-2 pb-2">
-                <div ref={waveRef} data-testid="waveform" onClick={handleWaveformClick} className="w-full rounded overflow-hidden min-h-[80px] cursor-crosshair" />
+                <div ref={waveRef} data-testid="waveform" onClick={handleWaveformClick} onContextMenu={handleWaveformContextMenu} className="w-full rounded overflow-hidden min-h-[80px] cursor-crosshair" />
                 {!wsReady && (
                   <div className="absolute inset-0 flex items-end justify-center gap-px px-2 pb-2 pointer-events-none overflow-hidden">
                     {WAVEFORM_SKELETON.map((h, i) => (
@@ -1426,8 +1471,8 @@ export default function EditorModal({
                     const trimEnd = params.trim_end ?? duration
                     const prev = idx > 0 ? sorted[idx - 1] : null
                     const next = idx < sorted.length - 1 ? sorted[idx + 1] : null
-                    const maxFadeOut = Math.min(5, Math.max(0, cut.start - Math.max(trimStart, prev ? prev.end + prev.fade_in : trimStart)))
-                    const maxFadeIn = Math.min(5, Math.max(0, Math.min(trimEnd, next ? next.start - next.fade_out : trimEnd) - cut.end))
+                    const maxFadeOut = Math.min(10, Math.max(0, cut.start - Math.max(trimStart, prev ? prev.end + prev.fade_in : trimStart)))
+                    const maxFadeIn = Math.min(10, Math.max(0, Math.min(trimEnd, next ? next.start - next.fade_out : trimEnd) - cut.end))
                     return (
                     <div key={cut.id} className="flex flex-col gap-2 bg-red-50 dark:bg-red-950/30 rounded px-2 py-2">
                       {/* header row: icon + time display + duration + remove */}
@@ -1491,43 +1536,16 @@ export default function EditorModal({
                   {params.fades.map(fade => {
                     const dur = fade.end - fade.start
                     const isIn = fade.type === 'in'
-                    const trimStart = params.trim_start
-                    const trimEnd = params.trim_end ?? duration
-                    // max duration: from fade.start to nearest obstacle (or trim boundary)
-                    let maxDur = isIn
-                      ? Math.min(5, trimEnd - fade.start)
-                      : Math.min(5, fade.end - trimStart)
-                    for (const o of [...params.fades, ...params.cuts]) {
-                      if (o.id === fade.id) continue
-                      if (isIn && o.start >= fade.start) maxDur = Math.min(maxDur, o.start - fade.start)
-                      if (!isIn && o.end <= fade.end) maxDur = Math.min(maxDur, fade.end - o.end)
-                    }
-                    maxDur = Math.max(0.5, maxDur)
                     return (
-                      <div key={fade.id} className={`flex flex-col gap-2 rounded px-2 py-2 ${isIn ? 'bg-sky-950/30' : 'bg-amber-950/30'}`}>
-                        <div className="flex items-center gap-2 text-sm">
-                          <span className={`text-xs font-medium ${isIn ? 'text-sky-400' : 'text-amber-400'}`}>{isIn ? 'fade in' : 'fade out'}</span>
-                          <div className="flex items-center gap-1 flex-1 min-w-0">
-                            <span className="tabular-nums text-xs text-gray-500">{fmt(fade.start)}</span>
-                            <span className="text-gray-400 text-xs">–</span>
-                            <span className="tabular-nums text-xs text-gray-500">{fmt(fade.end)}</span>
-                            <span className="text-gray-400 dark:text-gray-600 text-xs tabular-nums">({dur.toFixed(1)}s)</span>
-                          </div>
-                          <button onClick={() => removeFade(fade.id!)} className="text-gray-400 hover:text-red-400 transition-colors shrink-0"><FaTimes size={10} /></button>
+                      <div key={fade.id} className={`flex items-center gap-2 rounded px-2 py-1.5 ${isIn ? 'bg-sky-950/30' : 'bg-amber-950/30'}`}>
+                        <span className={`text-xs font-medium shrink-0 ${isIn ? 'text-sky-400' : 'text-amber-400'}`}>{isIn ? 'fade in' : 'fade out'}</span>
+                        <div className="flex items-center gap-1 flex-1 min-w-0 text-xs text-gray-500">
+                          <span className="tabular-nums">{fmt(fade.start)}</span>
+                          <span className="text-gray-400">–</span>
+                          <span className="tabular-nums">{fmt(fade.end)}</span>
+                          <span className="text-gray-400 dark:text-gray-600 tabular-nums">({dur.toFixed(1)}s)</span>
                         </div>
-                        <div className="flex flex-col gap-1">
-                          <span className="text-xs flex justify-between">
-                            <span className={isIn ? 'text-sky-400' : 'text-amber-400'}>duration</span>
-                            <span className={`tabular-nums ${isIn ? 'text-sky-400' : 'text-amber-400'}`}>{dur.toFixed(1)}s</span>
-                          </span>
-                          <Slider
-                            value={Math.min(dur, maxDur)} min={0.5} max={maxDur} step={0.1}
-                            onChange={v => updateFadeDuration(fade.id!, v)}
-                            onStart={handleSliderStart}
-                            onCommit={handleSliderCommit}
-                            label={isIn ? 'fade in duration' : 'fade out duration'}
-                          />
-                        </div>
+                        <button onClick={() => removeFade(fade.id!)} className="text-gray-400 hover:text-red-400 transition-colors shrink-0"><FaTimes size={10} /></button>
                       </div>
                     )
                   })}
@@ -1668,6 +1686,38 @@ export default function EditorModal({
           </div>
         )}
       </div>
+
+      {/* waveform right-click context menu */}
+      {contextMenu && (
+        <div
+          className="fixed z-[70] bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl py-1 min-w-[160px] text-sm"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onClick={e => e.stopPropagation()}
+          onMouseLeave={() => setContextMenu(null)}
+        >
+          <div className="px-3 py-1 text-[10px] text-gray-400 border-b border-gray-100 dark:border-gray-800 font-mono tabular-nums">
+            {fmt(contextMenu.time)}
+          </div>
+          <button
+            className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 text-red-400 transition-colors"
+            onClick={() => { addCutAtTime(contextMenu.time); setContextMenu(null) }}
+          >
+            Add cut here
+          </button>
+          <button
+            className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 text-sky-400 transition-colors"
+            onClick={() => { addFadeAtTime(contextMenu.time, 'in'); setContextMenu(null) }}
+          >
+            Fade in from here
+          </button>
+          <button
+            className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 text-amber-400 transition-colors"
+            onClick={() => { addFadeAtTime(contextMenu.time, 'out'); setContextMenu(null) }}
+          >
+            Fade out to here
+          </button>
+        </div>
+      )}
 
       {/* restore confirm overlay */}
       {restoreConfirm && (

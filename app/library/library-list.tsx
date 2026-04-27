@@ -4,6 +4,7 @@ import Image from "next/image"
 import { useRouter, useSearchParams } from "next/navigation"
 import { LibrarySong, Playlist, artworkUrl, fetchLibrarySongs, fetchPlaylists, publishEligibleSongs } from "../lib/data"
 import { cacheSong, getCachedSongIds } from "../lib/offline"
+import { useOnline } from "../lib/use-online"
 import Song from "../components/song"
 import { usePlayer } from "../components/player"
 import { routes } from "../lib/routes"
@@ -85,11 +86,17 @@ function AlbumCard({ album, isCompact, onClick }: { album: LibraryAlbum; isCompa
 }
 
 export default function LibraryList({ initialSongs }: { initialSongs: LibrarySong[] }) {
+    const online = useOnline()
     const [songs, setSongs] = useState(initialSongs)
     const router = useRouter()
     const searchParams = useSearchParams()
     const initialView = (searchParams.get('view') as ViewMode | null) ?? 'songs'
     const [viewMode, setViewMode] = useState<ViewMode>(initialView)
+
+    useEffect(() => {
+        const v = (searchParams.get('view') as ViewMode | null) ?? 'songs'
+        setViewMode(v)
+    }, [searchParams])
     const { play, current } = usePlayer()
     const sectionRefs = useRef<Record<string, HTMLElement | null>>({})
     const isDesktop = useIsDesktop()
@@ -332,7 +339,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                 {viewMode !== 'playlists' && (
                     <button
                         onClick={saveAllOffline}
-                        disabled={savingAll}
+                        disabled={savingAll || !online}
                         className="flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors disabled:opacity-50 text-gray-400 hover:text-sky-500 border border-gray-200 dark:border-gray-800 hover:border-sky-500 transition-colors"
                     >
                         <FaCloudDownloadAlt size={12} />
@@ -342,7 +349,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                 {privateSongCount > 0 && viewMode !== 'playlists' && (
                     <button
                         onClick={handlePublish}
-                        disabled={publishing}
+                        disabled={publishing || !online}
                         className="flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors disabled:opacity-50 text-gray-400 hover:text-sky-500 border border-gray-200 dark:border-gray-800 hover:border-sky-500 transition-colors"
                     >
                         {publishing ? 'publishing…' : publishResult !== null ? `published ${publishResult}` : `publish eligible (${privateSongCount})`}

@@ -2,8 +2,7 @@ import { Page, expect } from '@playwright/test'
 
 export const USERNAME = process.env.TEST_USERNAME!
 export const PASSWORD = process.env.TEST_PASSWORD!
-const API_HOST = process.env.NEXT_PUBLIC_API_HOST ?? 'localhost'
-const API_BASE = `http://${API_HOST}:8000`
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8000'
 
 export function ignoreError(msg: string) {
     return /AbortError|favicon|401|no supported sources/i.test(msg)

@@ -25,6 +25,9 @@ export default function EditsBanner() {
 
   useEffect(() => {
     fetchDrafts().then(setDrafts)
+    function onDraftChanged() { fetchDrafts().then(setDrafts) }
+    window.addEventListener('songbird:draft-changed', onDraftChanged)
+    return () => window.removeEventListener('songbird:draft-changed', onDraftChanged)
   }, [])
 
   useEffect(() => {

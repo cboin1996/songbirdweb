@@ -9,6 +9,7 @@ import Image from "next/image";
 import { usePlayer } from "./player";
 import EditorModal from "./editor-modal";
 import { useUser } from "../lib/user-context";
+import { useOnline } from "../lib/use-online";
 
 export default function Song({ song, selected, onClick, inLibrary: initialInLibrary, cachedOffline: initialCachedOffline, onRemove, onCacheChange, compact, rank, editContext, onEditComplete, isPrivate, playlists, onPlaylistAdd }: {
     song: DownloadedSong,
@@ -27,6 +28,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
     onPlaylistAdd?: () => void,
 }) {
     const { isAdmin } = useUser()
+    const online = useOnline()
     const router = useRouter()
     const pathname = usePathname()
     const searchParams = useSearchParams()
@@ -153,7 +155,8 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                 onClick={e => e.stopPropagation()}
             >
                 <button onClick={() => { setKebabOpen(false); handleDownload() }}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700">
+                    disabled={!online}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed">
                     Download
                 </button>
                 <button onClick={() => { setKebabOpen(false); insertNext({ uuid: song.songId!, properties: song.properties }) }}
@@ -161,12 +164,13 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                     Play next
                 </button>
                 <button onClick={() => { setKebabOpen(false); handleShare() }}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700">
+                    disabled={!online}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed">
                     {copied ? 'Link copied!' : 'Copy share link'}
                 </button>
                 <button onClick={() => { setKebabOpen(false); handleOfflineToggle() }}
-                    disabled={offlinePending}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40">
+                    disabled={offlinePending || (!online && !offlineCached)}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed">
                     {offlinePending
                         ? `Saving… ${offlineProgress > 0 ? Math.round(offlineProgress * 100) + '%' : ''}`
                         : offlineCached ? 'Remove offline copy' : 'Save offline'}
@@ -204,7 +208,8 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                 )}
                 <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
                 <button onClick={() => { setKebabOpen(false); openEditor() }}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700">
+                    disabled={!online}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed">
                     Edit
                 </button>
             </div>

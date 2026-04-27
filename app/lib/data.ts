@@ -1,5 +1,6 @@
-export const API_HOST = process.env.NEXT_PUBLIC_API_HOST;
-export const BASE_URL = `http://${API_HOST}:8000`;
+import { cacheLibraryData, getCachedData } from './offline-db'
+
+export const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
 export const API_V1 = `${BASE_URL}/v1`;
 export const DOWNLOAD_URL = `${API_V1}/download`;
 export const TAGGING_URL = `${API_V1}/properties`;
@@ -183,7 +184,15 @@ export async function fetchDrafts(): Promise<DraftSummary[]> {
 
 
 export async function fetchLibrarySongs(): Promise<LibrarySong[]> {
-  return await fetchData<LibrarySong[]>({ url: `${API_V1}/songs/library`, method: 'GET' }) ?? []
+  const result = await fetchData<LibrarySong[]>({ url: `${API_V1}/songs/library`, method: 'GET' })
+  if (result !== undefined) {
+    if (typeof window !== 'undefined') cacheLibraryData('library-songs', result)
+    return result
+  }
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return await getCachedData<LibrarySong[]>('library-songs') ?? []
+  }
+  return []
 }
 
 export async function fetchAllSongs(): Promise<LibrarySong[]> {
@@ -672,6 +681,7 @@ export async function saveEditDraft(songId: string, params: EditParams): Promise
   try {
     const options = await buildFetchOptions('PUT', params)
     await fetch(`${API_V1}/edit/songs/${songId}/draft`, options)
+    window.dispatchEvent(new CustomEvent('songbird:draft-changed'))
   } catch {}
 }
 
@@ -679,6 +689,7 @@ export async function deleteEditDraft(songId: string): Promise<void> {
   try {
     const options = await buildFetchOptions('DELETE')
     await fetch(`${API_V1}/edit/songs/${songId}/draft`, options)
+    window.dispatchEvent(new CustomEvent('songbird:draft-changed'))
   } catch {}
 }
 
@@ -699,7 +710,15 @@ export interface PlaylistSong {
 }
 
 export async function fetchPlaylists(): Promise<Playlist[]> {
-  return await fetchData<Playlist[]>({ url: `${API_V1}/playlists`, method: 'GET' }) ?? []
+  const result = await fetchData<Playlist[]>({ url: `${API_V1}/playlists`, method: 'GET' })
+  if (result !== undefined) {
+    if (typeof window !== 'undefined') cacheLibraryData('playlists', result)
+    return result
+  }
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return await getCachedData<Playlist[]>('playlists') ?? []
+  }
+  return []
 }
 
 export async function createPlaylist(name: string): Promise<Playlist | undefined> {
@@ -719,7 +738,15 @@ export async function deletePlaylist(id: string): Promise<boolean> {
 }
 
 export async function fetchPlaylistSongs(id: string): Promise<PlaylistSong[]> {
-  return await fetchData<PlaylistSong[]>({ url: `${API_V1}/playlists/${id}/songs`, method: 'GET' }) ?? []
+  const result = await fetchData<PlaylistSong[]>({ url: `${API_V1}/playlists/${id}/songs`, method: 'GET' })
+  if (result !== undefined) {
+    if (typeof window !== 'undefined') cacheLibraryData(`playlist-songs:${id}`, result)
+    return result
+  }
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return await getCachedData<PlaylistSong[]>(`playlist-songs:${id}`) ?? []
+  }
+  return []
 }
 
 export async function addSongToPlaylist(playlistId: string, songUuid: string): Promise<boolean> {

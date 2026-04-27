@@ -166,6 +166,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             audio.src = `${DOWNLOAD_URL}/${song.uuid}`
         }
         audio.load()
+        audio.currentTime = 0
         setCurrent(song)
         setIsPlaying(true)
     }
@@ -208,7 +209,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     }
 
     function resume() {
-        audioRef.current?.play()
+        audioRef.current?.play().catch(() => {})
         setIsPlaying(true)
     }
 
@@ -431,6 +432,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                     } else {
                         audio.src = `${DOWNLOAD_URL}/${song.uuid}`
                     }
+                    audio.load()
                 }
             } else {
                 // fallback: restore last played song
@@ -453,6 +455,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                         } else {
                             audio.src = `${DOWNLOAD_URL}/${last.uuid}`
                         }
+                        audio.load()
                     }
                 }
             }
