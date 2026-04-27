@@ -202,7 +202,7 @@ export default function EditorModal({
 
   // --- close guard ---
   const [closeConfirm, setCloseConfirm] = useState(false)
-  const [showShortcuts, setShowShortcuts] = useState(false)
+  const [showHelp, setShowHelp] = useState(false)
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // --- paste warning ---
@@ -226,6 +226,77 @@ export default function EditorModal({
   const artworkInputRef = useRef<HTMLInputElement>(null)
 
   const mainWaveCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const origWaveCanvasRef = useRef<HTMLCanvasElement | null>(null)
+
+  function drawDbfsGridlines(ctx: CanvasRenderingContext2D, width: number, height: number) {
+    const centerY = height / 2
+    const DB_LEVELS = [0, -6, -12]
+    const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+    const dpr = window.devicePixelRatio ?? 1
+    ctx.save()
+    for (const db of DB_LEVELS) {
+      const lin = Math.pow(10, db / 20)
+      const yOff = lin * centerY
+      for (const y of db === 0 ? [centerY] : [centerY - yOff, centerY + yOff]) {
+        ctx.strokeStyle = isDark ? 'rgba(148,163,184,0.2)' : 'rgba(100,116,139,0.18)'
+        ctx.lineWidth = dpr
+        ctx.setLineDash(db === 0 ? [] : [4 * dpr, 5 * dpr])
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke()
+      }
+    }
+    ctx.setLineDash([])
+    ctx.restore()
+  }
+
+  const DB_AXIS = [0, -6, -12] as const
+  function DbfsAxis() {
+    return (
+      <div className="relative w-12 shrink-0 mt-5 min-h-[80px] select-none pointer-events-none">
+        {DB_AXIS.map(db => {
+          const pct = (1 - Math.pow(10, db / 20)) / 2 * 100
+          return (
+            <div
+              key={db}
+              className="absolute right-0 flex items-center gap-1"
+              style={{ top: `${pct}%`, transform: db === 0 ? 'none' : 'translateY(-50%)' }}
+            >
+              <span className="text-[11px] font-mono text-gray-400 dark:text-gray-500 tabular-nums leading-none">{db}</span>
+              <div className="w-2 h-px bg-slate-500/30 dark:bg-slate-400/20" />
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
+  const renderOrigWave = useCallback((peaks: Array<Float32Array | number[]>, ctx: CanvasRenderingContext2D) => {
+    const isReplacement = origWaveCanvasRef.current && !origWaveCanvasRef.current.isConnected
+    if (!origWaveCanvasRef.current || isReplacement) origWaveCanvasRef.current = ctx.canvas
+    if (ctx.canvas !== origWaveCanvasRef.current) { ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height); return }
+    const peakData = peaks[0]
+    if (!peakData) return
+    const { width, height } = ctx.canvas
+    const centerY = height / 2
+    const BAR_W = 2, BAR_GAP = 1, BAR_R = 2
+    const step = BAR_W + BAR_GAP
+    const numBars = Math.floor(width / step)
+    const numSamples = peakData.length
+    ctx.clearRect(0, 0, width, height)
+    ctx.fillStyle = '#64748b'
+    for (let i = 0; i < numBars; i++) {
+      const si = Math.floor((i / numBars) * numSamples)
+      const ei = Math.min(si + Math.ceil(numSamples / numBars), numSamples)
+      let peak = 0
+      for (let j = si; j < ei; j++) peak = Math.max(peak, Math.abs(peakData[j]))
+      const barH = Math.max(1, peak * centerY)
+      ctx.beginPath()
+      if (ctx.roundRect) ctx.roundRect(i * step, centerY - barH, BAR_W, barH * 2, Math.min(BAR_R, barH))
+      else ctx.rect(i * step, centerY - barH, BAR_W, barH * 2)
+      ctx.fill()
+    }
+    drawDbfsGridlines(ctx, width, height)
+  }, [])
+
   const renderWave = useCallback((peaks: Array<Float32Array | number[]>, ctx: CanvasRenderingContext2D) => {
     const isReplacement = mainWaveCanvasRef.current && !mainWaveCanvasRef.current.isConnected
     if (!mainWaveCanvasRef.current || isReplacement) mainWaveCanvasRef.current = ctx.canvas
@@ -249,6 +320,7 @@ export default function EditorModal({
     const trimStart = p.trim_start
     const trimEnd = p.trim_end ?? dur
     ctx.clearRect(0, 0, width, height)
+
     for (let i = 0; i < numBars; i++) {
       const x = i * step
       const t = (x / width) * dur
@@ -286,13 +358,14 @@ export default function EditorModal({
       const ei = Math.min(si + Math.ceil(numSamples / numBars), numSamples)
       let peak = 0
       for (let j = si; j < ei; j++) peak = Math.max(peak, Math.abs(peakData[j]))
-      const barH = Math.max(1, peak * amp * centerY)
+      const barH = Math.max(1, Math.min(centerY, peak * amp * p.volume * centerY))
       ctx.fillStyle = color
       ctx.beginPath()
       if (ctx.roundRect) ctx.roundRect(x, centerY - barH, BAR_W, barH * 2, Math.min(BAR_R, barH))
       else ctx.rect(x, centerY - barH, BAR_W, barH * 2)
       ctx.fill()
     }
+    drawDbfsGridlines(ctx, width, height)
     // Fade handle bar + triangle — triangle sits at fade extent, bar connects to cut edge
     const HS = 7 * (window.devicePixelRatio ?? 1)
     for (const cut of p.cuts) {
@@ -479,7 +552,13 @@ export default function EditorModal({
       raf = requestAnimationFrame(() => { raf = null; canvases.forEach(drawRuler) })
     })
     canvases.forEach(c => ro.observe(c))
-    return () => { ro.disconnect(); if (raf !== null) cancelAnimationFrame(raf) }
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const onSchemeChange = () => {
+      canvases.forEach(drawRuler)
+      if (peaksRef.current && waveCtxRef.current) renderWave(peaksRef.current, waveCtxRef.current)
+    }
+    mq.addEventListener('change', onSchemeChange)
+    return () => { ro.disconnect(); if (raf !== null) cancelAnimationFrame(raf); mq.removeEventListener('change', onSchemeChange) }
   }, [duration])
 
   // debounced auto-save
@@ -1047,16 +1126,14 @@ export default function EditorModal({
     if (!origWaveRef.current) return
     const ws = WaveSurfer.create({
       container: origWaveRef.current,
-      waveColor: '#64748b',
-      progressColor: '#38bdf8',
       cursorColor: '#38bdf8',
       height: 80,
-      barWidth: 2,
-      barGap: 1,
-      barRadius: 2,
       fetchParams: { credentials: 'include' },
+      renderFunction: renderOrigWave,
     })
     wsOrigRef.current = ws
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(ws as any).renderer.renderProgress = () => {}
     ws.load(`${DOWNLOAD_URL}/${songId}`).catch((err: Error) => {
       if (err?.name !== 'AbortError') console.error('WaveSurfer orig:', err)
     })
@@ -1555,10 +1632,10 @@ export default function EditorModal({
     const startOrig = (cursorTime >= p.trim_start && cursorTime < trimEnd) ? cursorTime : p.trim_start
 
     const hasCuts = p.cuts.length > 0
-    const needsWebAudio = hasCuts || p.speed !== 1.0 || p.fades.length > 0
+    const needsWebAudio = hasCuts || p.speed !== 1.0 || p.fades.length > 0 || p.volume !== 1.0
 
     if (!needsWebAudio) {
-      wsRef.current?.setVolume(p.volume)
+      wsRef.current?.setVolume(1)
       wsRef.current?.play(startOrig, p.trim_end ?? undefined)
       wsPreviewRef.current = true
       setPreviewing(true)
@@ -2183,49 +2260,52 @@ export default function EditorModal({
                   )}
                 </div>
               </div>
-              <div
-                className="relative px-2 pb-2"
-              >
-                <canvas
-                  ref={origTimelineCanvasRef}
-                  className="w-full h-5 block cursor-pointer select-none"
-                  onMouseDown={handleOrigTimelineMouseDown}
-                  onTouchStart={handleOrigTimelineTouchStart}
-                  onPointerMove={e => {
-                    const container = e.currentTarget.parentElement
-                    if (!container) return
-                    const rect = container.getBoundingClientRect()
-                    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
-                    const h = container.querySelector<HTMLElement>('[data-orig-hover]')
-                    if (h) { h.style.left = `${pct * 100}%`; h.style.display = 'block' }
-                  }}
-                  onPointerLeave={e => {
-                    const h = e.currentTarget.parentElement?.querySelector<HTMLElement>('[data-orig-hover]')
-                    if (h) h.style.display = 'none'
-                  }}
-                />
-                <div ref={origWaveRef} className="w-full min-h-[80px]" />
-                <div
-                  data-orig-hover=""
-                  className="absolute top-0 bottom-0 pointer-events-none"
-                  style={{ display: 'none', left: '0%', width: '1px', background: '#94a3b8', opacity: 0.5 }}
-                />
-                {!origReady && (
-                  <div className="absolute inset-0 flex items-end justify-center gap-px px-2 pb-2 pointer-events-none overflow-hidden">
-                    {WAVEFORM_SKELETON.slice(0, 80).map((h, i) => (
-                      <div key={i} className="flex-1 bg-gray-200 dark:bg-gray-800 rounded-sm animate-pulse"
-                        style={{ height: `${h * 0.6}%`, animationDelay: `${(i % 8) * 60}ms` }} />
-                    ))}
+              <div className="relative pb-2">
+                <div className="flex items-stretch pl-1 pr-2">
+                  <DbfsAxis />
+                  <div className="relative flex-1">
+                    <canvas
+                      ref={origTimelineCanvasRef}
+                      className="w-full h-5 block cursor-pointer select-none"
+                      onMouseDown={handleOrigTimelineMouseDown}
+                      onTouchStart={handleOrigTimelineTouchStart}
+                      onPointerMove={e => {
+                        const container = e.currentTarget.parentElement
+                        if (!container) return
+                        const rect = container.getBoundingClientRect()
+                        const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+                        const h = container.querySelector<HTMLElement>('[data-orig-hover]')
+                        if (h) { h.style.left = `${pct * 100}%`; h.style.display = 'block' }
+                      }}
+                      onPointerLeave={e => {
+                        const h = e.currentTarget.parentElement?.querySelector<HTMLElement>('[data-orig-hover]')
+                        if (h) h.style.display = 'none'
+                      }}
+                    />
+                    <div ref={origWaveRef} className="w-full min-h-[80px]" />
+                    <div
+                      data-orig-hover=""
+                      className="absolute top-0 bottom-0 pointer-events-none"
+                      style={{ display: 'none', left: '0%', width: '1px', background: '#94a3b8', opacity: 0.5 }}
+                    />
+                    {!origReady && (
+                      <div className="absolute inset-0 flex items-end justify-center gap-px pb-0 pointer-events-none overflow-hidden">
+                        {WAVEFORM_SKELETON.slice(0, 80).map((h, i) => (
+                          <div key={i} className="flex-1 bg-gray-200 dark:bg-gray-800 rounded-sm animate-pulse"
+                            style={{ height: `${h * 0.6}%`, animationDelay: `${(i % 8) * 60}ms` }} />
+                        ))}
+                      </div>
+                    )}
+                    {(jobStatus === 'submitting' || jobStatus === 'polling' || restoring) && (
+                      <div className="absolute inset-0 flex items-end justify-center gap-px pb-0 pointer-events-none overflow-hidden rounded bg-gray-950/50">
+                        {WAVEFORM_SKELETON.slice(0, 80).map((h, i) => (
+                          <div key={i} className="flex-1 bg-gray-700/60 rounded-sm animate-pulse"
+                            style={{ height: `${h * 0.6}%`, animationDelay: `${(i % 8) * 60}ms` }} />
+                        ))}
+                      </div>
+                    )}
                   </div>
-                )}
-                {(jobStatus === 'submitting' || jobStatus === 'polling' || restoring) && (
-                  <div className="absolute inset-0 flex items-end justify-center gap-px px-2 pb-2 pointer-events-none overflow-hidden rounded bg-gray-950/50">
-                    {WAVEFORM_SKELETON.slice(0, 80).map((h, i) => (
-                      <div key={i} className="flex-1 bg-gray-700/60 rounded-sm animate-pulse"
-                        style={{ height: `${h * 0.6}%`, animationDelay: `${(i % 8) * 60}ms` }} />
-                    ))}
-                  </div>
-                )}
+                </div>
               </div>
               <div className="flex items-center gap-2 px-2 pb-2 border-t border-gray-100 dark:border-gray-800 pt-1.5">
                 <button
@@ -2252,59 +2332,62 @@ export default function EditorModal({
                   {previewing ? 'preview' : jobStatus === 'submitting' ? 'submitting…' : jobStatus === 'polling' ? 'processing…' : activeRootSongId ? 'edited' : 'edit'}
                 </span>
               </div>
-              <div className="relative px-2 pb-2">
-                {/* DAW-style seek strip + waveform share a relative container so the playhead spans both */}
-                <div
-                  ref={timelineContainerRef}
-                  className="relative"
-                >
-                  {/* Timeline ruler — tap/drag to seek */}
-                  <canvas
-                    ref={timelineCanvasRef}
-                    className="w-full h-5 block cursor-pointer select-none"
-                    onMouseDown={handleTimelineMouseDown}
-                    onTouchStart={handleTimelineTouchStart}
-                    onPointerMove={e => {
-                      const el = timelineContainerRef.current
-                      const h = hoverPlayheadRef.current
-                      if (!el || !h) return
-                      const rect = el.getBoundingClientRect()
-                      const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
-                      h.style.left = `${pct * 100}%`
-                      h.style.display = 'block'
-                    }}
-                    onPointerLeave={() => { if (hoverPlayheadRef.current) hoverPlayheadRef.current.style.display = 'none' }}
-                  />
-                  <div ref={waveRef} data-testid="waveform" onClick={handleWaveformClick} className="w-full rounded overflow-hidden min-h-[80px] cursor-crosshair" />
-                  {/* Playhead — spans ruler + waveform, no pointer events so regions still receive clicks */}
+              <div className="relative pb-2">
+                <div className="flex items-stretch pl-1 pr-2">
+                  <DbfsAxis />
+                  {/* DAW-style seek strip + waveform share a relative container so the playhead spans both */}
                   <div
-                    ref={playheadRef}
-                    className="absolute top-0 bottom-0 pointer-events-none z-20"
-                    style={{ left: '0%', width: '1px', background: '#38bdf8', opacity: 0.85 }}
-                  />
-                  {/* Ghost playhead — follows mouse hover */}
-                  <div
-                    ref={hoverPlayheadRef}
-                    className="absolute top-0 bottom-0 pointer-events-none z-19"
-                    style={{ display: 'none', left: '0%', width: '1px', background: '#94a3b8', opacity: 0.5 }}
-                  />
+                    ref={timelineContainerRef}
+                    className="relative flex-1"
+                  >
+                    {/* Timeline ruler — tap/drag to seek */}
+                    <canvas
+                      ref={timelineCanvasRef}
+                      className="w-full h-5 block cursor-pointer select-none"
+                      onMouseDown={handleTimelineMouseDown}
+                      onTouchStart={handleTimelineTouchStart}
+                      onPointerMove={e => {
+                        const el = timelineContainerRef.current
+                        const h = hoverPlayheadRef.current
+                        if (!el || !h) return
+                        const rect = el.getBoundingClientRect()
+                        const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+                        h.style.left = `${pct * 100}%`
+                        h.style.display = 'block'
+                      }}
+                      onPointerLeave={() => { if (hoverPlayheadRef.current) hoverPlayheadRef.current.style.display = 'none' }}
+                    />
+                    <div ref={waveRef} data-testid="waveform" onClick={handleWaveformClick} className="w-full rounded overflow-hidden min-h-[80px] cursor-crosshair" />
+                    {/* Playhead — spans ruler + waveform, no pointer events so regions still receive clicks */}
+                    <div
+                      ref={playheadRef}
+                      className="absolute top-0 bottom-0 pointer-events-none z-20"
+                      style={{ left: '0%', width: '1px', background: '#38bdf8', opacity: 0.85 }}
+                    />
+                    {/* Ghost playhead — follows mouse hover */}
+                    <div
+                      ref={hoverPlayheadRef}
+                      className="absolute top-0 bottom-0 pointer-events-none z-19"
+                      style={{ display: 'none', left: '0%', width: '1px', background: '#94a3b8', opacity: 0.5 }}
+                    />
+                    {!wsReady && (
+                      <div className="absolute inset-0 flex items-end justify-center gap-px pb-0 pointer-events-none overflow-hidden">
+                        {WAVEFORM_SKELETON.map((h, i) => (
+                          <div key={i} className="flex-1 bg-gray-200 dark:bg-gray-800 rounded-sm animate-pulse"
+                            style={{ height: `${h}%`, animationDelay: `${(i % 8) * 60}ms` }} />
+                        ))}
+                      </div>
+                    )}
+                    {(jobStatus === 'submitting' || jobStatus === 'polling') && (
+                      <div className="absolute inset-0 flex items-end justify-center gap-px pb-0 pointer-events-none overflow-hidden rounded bg-gray-950/50">
+                        {WAVEFORM_SKELETON.map((h, i) => (
+                          <div key={i} className="flex-1 bg-sky-500/40 rounded-sm animate-pulse"
+                            style={{ height: `${h}%`, animationDelay: `${(i % 8) * 60}ms` }} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
-                {!wsReady && (
-                  <div className="absolute inset-0 flex items-end justify-center gap-px px-2 pb-2 pointer-events-none overflow-hidden">
-                    {WAVEFORM_SKELETON.map((h, i) => (
-                      <div key={i} className="flex-1 bg-gray-200 dark:bg-gray-800 rounded-sm animate-pulse"
-                        style={{ height: `${h}%`, animationDelay: `${(i % 8) * 60}ms` }} />
-                    ))}
-                  </div>
-                )}
-                {(jobStatus === 'submitting' || jobStatus === 'polling') && (
-                  <div className="absolute inset-0 flex items-end justify-center gap-px px-2 pb-2 pointer-events-none overflow-hidden rounded bg-gray-950/50">
-                    {WAVEFORM_SKELETON.map((h, i) => (
-                      <div key={i} className="flex-1 bg-sky-500/40 rounded-sm animate-pulse"
-                        style={{ height: `${h}%`, animationDelay: `${(i % 8) * 60}ms` }} />
-                    ))}
-                  </div>
-                )}
               </div>
 
               {pasteWarning && (
@@ -2390,7 +2473,7 @@ export default function EditorModal({
               </span>
               <span className="text-gray-200 dark:text-gray-700 select-none">·</span>
               <div className="flex items-center gap-3 shrink-0">
-                <label className="flex items-center gap-1.5 text-sm select-none" title="Boost/lower gain so the loudest peak reaches 0 dBFS — maximises loudness without clipping">
+                <label className="flex items-center gap-1.5 text-sm select-none">
                   <input type="checkbox" checked={params.normalize} onChange={e => { pushHistory(paramsRef.current); setParams(prev => { const next = { ...prev, normalize: e.target.checked }; scheduleSave(next); return next }) }} className="accent-sky-500" />
                   <span className={params.normalize ? 'text-sky-500' : 'text-gray-400'}>Normalize</span>
                 </label>
@@ -2443,7 +2526,7 @@ export default function EditorModal({
                     const dur = fade.end - fade.start
                     const isIn = fade.type === 'in'
                     return (
-                      <div key={fade.id} className={`flex items-center gap-2 rounded px-2 py-1.5 ${isIn ? 'bg-sky-950/30' : 'bg-amber-950/30'}`}>
+                      <div key={fade.id} className={`flex items-center gap-2 rounded px-2 py-1.5 ${isIn ? 'bg-sky-100 dark:bg-sky-950/30' : 'bg-amber-100 dark:bg-amber-950/30'}`}>
                         <span className={`text-sm font-medium shrink-0 w-16 ${isIn ? 'text-sky-400' : 'text-amber-400'}`}>{isIn ? 'fade in' : 'fade out'}</span>
                         <div className="flex items-center gap-1 min-w-0 flex-1 text-sm text-gray-500">
                           <span className="tabular-nums">{fmt(fade.start)}</span>
@@ -2506,34 +2589,49 @@ export default function EditorModal({
 
             </div>{/* end edit-controls wrapper */}
 
-            {/* keyboard shortcuts panel — inline, above footer */}
-            {showShortcuts && (
-              <div className="bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-3 text-xs text-gray-400 dark:text-gray-500 flex flex-col gap-1.5">
-                <div className="flex flex-wrap gap-x-4 gap-y-1">
-                  <span className="flex items-center gap-1"><Kbd>Space</Kbd> play/pause</span>
-                  <span className="flex items-center gap-1"><Kbd>H</Kbd><Kbd>L</Kbd> seek ±5s</span>
-                  <span className="flex items-center gap-1"><Kbd>J</Kbd><Kbd>K</Kbd> switch waveform</span>
-                  <span className="flex items-center gap-1"><Kbd>Del</Kbd> delete selected</span>
+            {/* help panel */}
+            {showHelp && (
+              <div className="bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-4 text-xs text-gray-600 dark:text-gray-400 flex flex-col gap-4">
+                <div className="flex flex-col gap-1.5">
+                  <p className="text-gray-400 dark:text-gray-500 font-medium text-xs uppercase tracking-wide">Controls</p>
+                  <p><span className="text-gray-800 dark:text-gray-300 font-medium">Volume</span> — −40 to +6 dB (0 dB = original level, +6 dB ≈ 2× amplitude). Preview matches the saved result exactly.</p>
+                  <p><span className="text-gray-800 dark:text-gray-300 font-medium">Speed</span> — 0.25× to 4×. Affects pitch. Preview matches.</p>
+                  <p><span className="text-gray-800 dark:text-gray-300 font-medium">Normalize</span> — raises or lowers gain so the loudest peak hits 0 dBFS, maximising loudness without clipping.</p>
+                  <p><span className="text-gray-800 dark:text-gray-300 font-medium">Cuts</span> — removes a section of audio. Drag the triangles at each cut edge to add a crossfade.</p>
+                  <p><span className="text-gray-800 dark:text-gray-300 font-medium">Fades</span> — volume fade-in or fade-out over a region. Drag either edge to resize.</p>
                 </div>
-                <div className="flex flex-wrap gap-x-4 gap-y-1">
-                  <span className="flex items-center gap-1"><Kbd>Ctrl</Kbd><Kbd>Z</Kbd> undo</span>
-                  <span className="flex items-center gap-1"><Kbd>Ctrl</Kbd><Kbd>⇧Z</Kbd> redo</span>
-                  <span className="flex items-center gap-1"><Kbd>Ctrl</Kbd><Kbd>C</Kbd> copy region</span>
-                  <span className="flex items-center gap-1"><Kbd>Ctrl</Kbd><Kbd>X</Kbd> cut region</span>
-                  <span className="flex items-center gap-1"><Kbd>Ctrl</Kbd><Kbd>V</Kbd> paste at cursor</span>
-                  <span className="flex items-center gap-1"><Kbd>Ctrl</Kbd><Kbd>A</Kbd> cycle regions</span>
+                <div className="flex flex-col gap-1.5">
+                  <p className="text-gray-400 dark:text-gray-500 font-medium text-xs uppercase tracking-wide">Keyboard shortcuts</p>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1">
+                    <span className="flex items-center gap-1"><Kbd>Space</Kbd> play/pause</span>
+                    <span className="flex items-center gap-1"><Kbd>H</Kbd><Kbd>L</Kbd> seek ±5s</span>
+                    <span className="flex items-center gap-1"><Kbd>J</Kbd><Kbd>K</Kbd> switch waveform</span>
+                    <span className="flex items-center gap-1"><Kbd>Del</Kbd> delete selected</span>
+                    <span className="flex items-center gap-1"><Kbd>Ctrl</Kbd><Kbd>Z</Kbd> undo</span>
+                    <span className="flex items-center gap-1"><Kbd>Ctrl</Kbd><Kbd>⇧Z</Kbd> redo</span>
+                    <span className="flex items-center gap-1"><Kbd>Ctrl</Kbd><Kbd>C</Kbd> copy region</span>
+                    <span className="flex items-center gap-1"><Kbd>Ctrl</Kbd><Kbd>X</Kbd> cut region</span>
+                    <span className="flex items-center gap-1"><Kbd>Ctrl</Kbd><Kbd>V</Kbd> paste at cursor</span>
+                    <span className="flex items-center gap-1"><Kbd>Ctrl</Kbd><Kbd>A</Kbd> cycle regions</span>
+                  </div>
                 </div>
-                <div className="text-gray-500 dark:text-gray-600">drag trim handles · drag cut fades on waveform</div>
+                <div className="flex flex-col gap-1">
+                  <p className="text-gray-400 dark:text-gray-500 font-medium text-xs uppercase tracking-wide">Tips</p>
+                  <p>Double-click any value (Vol, Speed) to type a number directly.</p>
+                  <p>Drag the trim region handles to set the start and end of the kept audio.</p>
+                  <p>Saving to library commits edits permanently — you can always revert via restore original.</p>
+                </div>
               </div>
             )}
 
             {/* footer */}
             <div className="flex items-center justify-between pt-1 border-t border-gray-100 dark:border-gray-800">
               <button
-                onClick={() => setShowShortcuts(s => !s)}
-                className="text-xs text-gray-400 hover:text-gray-300 transition-colors"
+                onClick={() => setShowHelp(s => !s)}
+                className="text-xs text-gray-400 hover:text-gray-300 transition-colors flex items-center gap-1"
               >
-                {showShortcuts ? 'hide shortcuts' : 'keyboard shortcuts'}
+                <span className="w-4 h-4 rounded-full border border-current flex items-center justify-center text-[10px] font-bold leading-none">?</span>
+                {showHelp ? 'hide help' : 'help'}
               </button>
               <div className="flex items-center gap-3">
                 <button onClick={handleDiscard} className="flex items-center gap-1 text-sm text-gray-400 hover:text-red-400 transition-colors">
