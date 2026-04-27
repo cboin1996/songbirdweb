@@ -64,7 +64,7 @@ function stripClientIds(params: EditParams): EditParams {
 }
 
 const DRAFT_EXPIRY_DAYS = 30
-const MAX_FADE_DUR = 5
+const MAX_FADE_DUR = 15
 const MIN_REGION_DUR = 0.5
 
 interface Props {
@@ -283,13 +283,26 @@ export default function EditorModal({
       if (r.id === 'trim') {
         setParams(prev => {
           if (!regionPreDragRef.current) regionPreDragRef.current = prev
-          let newStart = Math.max(0, r.start)
-          let newEnd = Math.min(dur, r.end)
-          // trim must encompass all cuts and fades
-          const contentStarts = [...prev.cuts.map(c => c.start), ...prev.fades.map(f => f.start)]
-          const contentEnds = [...prev.cuts.map(c => c.end), ...prev.fades.map(f => f.end)]
-          if (contentStarts.length > 0) newStart = Math.min(newStart, Math.min(...contentStarts))
-          if (contentEnds.length > 0) newEnd = Math.max(newEnd, Math.max(...contentEnds))
+          const preDrag = regionPreDragRef.current ?? prev
+          const origTrimSize = (preDrag.trim_end ?? dur) - preDrag.trim_start
+          const isDragTrim = Math.abs((r.end - r.start) - origTrimSize) < 0.1
+          const contentStarts = [...prev.cuts.map(c => c.start - (c.fade_out ?? 0)), ...prev.fades.map(f => f.start)]
+          const contentEnds = [...prev.cuts.map(c => c.end + (c.fade_in ?? 0)), ...prev.fades.map(f => f.end)]
+          const hasContent = contentStarts.length > 0
+          let newStart: number
+          let newEnd: number
+          if (isDragTrim && !hasContent) {
+            // No content — slide as rigid unit
+            newStart = Math.max(0, Math.min(dur - origTrimSize, r.start))
+            newEnd = newStart + origTrimSize
+          } else {
+            newStart = Math.max(0, r.start)
+            newEnd = Math.min(dur, r.end)
+            if (hasContent) {
+              newStart = Math.min(newStart, Math.min(...contentStarts))
+              newEnd = Math.max(newEnd, Math.max(...contentEnds))
+            }
+          }
           if (newEnd - newStart < MIN_REGION_DUR) {
             if (Math.abs(newStart - prev.trim_start) >= Math.abs(newEnd - (prev.trim_end ?? dur))) {
               newStart = newEnd - MIN_REGION_DUR
@@ -312,11 +325,14 @@ export default function EditorModal({
           const trimEnd = prev.trim_end ?? dur
           const refFade = (regionPreDragRef.current ?? prev).fades.find(f => f.id === fadeId)
           const origSize = refFade ? (refFade.end - refFade.start) : 0
-          const isDrag = refFade ? Math.abs((r.end - r.start) - origSize) < 0.05 : false
+          const isDrag = refFade ? Math.abs((r.end - r.start) - origSize) < 0.1 : false
           const fade = prev.fades.find(f => f.id === fadeId)
-          const obstacles = [...prev.fades, ...prev.cuts]
+          const obstacles = [
+            ...prev.fades,
+            ...prev.cuts.map(c => ({ id: c.id, start: c.start - (c.fade_out ?? 0), end: c.end + (c.fade_in ?? 0) })),
+          ]
           let { start, end } = _snap(r.start, r.end, obstacles, fadeId, trimStart, trimEnd, isDrag)
-          if (fade && end - start > MAX_FADE_DUR) {
+          if (fade && end - start > MAX_FADE_DUR + 0.01) {
             if (fade.type === 'in') end = start + MAX_FADE_DUR
             else start = end - MAX_FADE_DUR
           }
@@ -334,8 +350,11 @@ export default function EditorModal({
           const trimEnd = prev.trim_end ?? dur
           const refCut = (regionPreDragRef.current ?? prev).cuts.find(c => c.id === r.id)
           const origSize = refCut ? (refCut.end - refCut.start) : 0
-          const isDrag = refCut ? Math.abs((r.end - r.start) - origSize) < 0.05 : false
-          const obstacles = [...prev.cuts, ...prev.fades]
+          const isDrag = refCut ? Math.abs((r.end - r.start) - origSize) < 0.1 : false
+          const obstacles = [
+            ...prev.cuts.map(c => ({ id: c.id, start: c.start - (c.fade_out ?? 0), end: c.end + (c.fade_in ?? 0) })),
+            ...prev.fades,
+          ]
           const { start, end } = _snap(r.start, r.end, obstacles, r.id, trimStart, trimEnd, isDrag)
           if (start !== r.start || end !== r.end) {
             programmaticRegionRef.current = true
@@ -350,13 +369,26 @@ export default function EditorModal({
       if (programmaticRegionRef.current) return
       if (r.id === 'trim') {
         setParams(prev => {
-          if (!regionPreDragRef.current) regionPreDragRef.current = prev
-          let trimStart = r.start
-          let trimEnd = r.end
-          const contentStarts = [...prev.cuts.map(c => c.start), ...prev.fades.map(f => f.start)]
-          const contentEnds = [...prev.cuts.map(c => c.end), ...prev.fades.map(f => f.end)]
-          if (contentStarts.length > 0) trimStart = Math.min(trimStart, Math.min(...contentStarts))
-          if (contentEnds.length > 0) trimEnd = Math.max(trimEnd, Math.max(...contentEnds))
+          const preDrag = regionPreDragRef.current ?? prev
+          const origTrimSize = (preDrag.trim_end ?? duration) - preDrag.trim_start
+          const isDragTrim = Math.abs((r.end - r.start) - origTrimSize) < 0.1
+          const contentStarts = [...prev.cuts.map(c => c.start - (c.fade_out ?? 0)), ...prev.fades.map(f => f.start)]
+          const contentEnds = [...prev.cuts.map(c => c.end + (c.fade_in ?? 0)), ...prev.fades.map(f => f.end)]
+          const hasContent = contentStarts.length > 0
+          let trimStart: number
+          let trimEnd: number
+          const dur = wsRef.current?.getDuration() ?? duration
+          if (isDragTrim && !hasContent) {
+            trimStart = Math.max(0, Math.min(dur - origTrimSize, r.start))
+            trimEnd = trimStart + origTrimSize
+          } else {
+            trimStart = Math.max(0, r.start)
+            trimEnd = Math.min(dur, r.end)
+            if (hasContent) {
+              trimStart = Math.min(trimStart, Math.min(...contentStarts))
+              trimEnd = Math.max(trimEnd, Math.max(...contentEnds))
+            }
+          }
           if (trimStart !== r.start || trimEnd !== r.end) {
             programmaticRegionRef.current = true
             r.setOptions({ start: trimStart, end: trimEnd })
@@ -375,11 +407,14 @@ export default function EditorModal({
           const trimEnd = prev.trim_end ?? dur
           const refFade = (regionPreDragRef.current ?? prev).fades.find(f => f.id === fadeId)
           const origSize = refFade ? (refFade.end - refFade.start) : 0
-          const isDrag = refFade ? Math.abs((r.end - r.start) - origSize) < 0.05 : false
+          const isDrag = refFade ? Math.abs((r.end - r.start) - origSize) < 0.1 : false
           const fade = prev.fades.find(f => f.id === fadeId)
-          const obstacles = [...prev.fades, ...prev.cuts]
+          const obstacles = [
+            ...prev.fades,
+            ...prev.cuts.map(c => ({ id: c.id, start: c.start - (c.fade_out ?? 0), end: c.end + (c.fade_in ?? 0) })),
+          ]
           let { start, end } = _snap(r.start, r.end, obstacles, fadeId, trimStart, trimEnd, isDrag)
-          if (fade && end - start > MAX_FADE_DUR) {
+          if (fade && end - start > MAX_FADE_DUR + 0.01) {
             if (fade.type === 'in') end = start + MAX_FADE_DUR
             else start = end - MAX_FADE_DUR
           }
@@ -399,8 +434,12 @@ export default function EditorModal({
           const trimEnd = prev.trim_end ?? duration
           const refCut = (regionPreDragRef.current ?? prev).cuts.find(c => c.id === r.id)
           const origSize = refCut ? (refCut.end - refCut.start) : 0
-          const isDrag = refCut ? Math.abs((r.end - r.start) - origSize) < 0.05 : false
-          const { start, end } = _snap(r.start, r.end, [...prev.cuts, ...prev.fades], r.id, trimStart, trimEnd, isDrag)
+          const isDrag = refCut ? Math.abs((r.end - r.start) - origSize) < 0.1 : false
+          const obstacles = [
+            ...prev.cuts.map(c => ({ id: c.id, start: c.start - (c.fade_out ?? 0), end: c.end + (c.fade_in ?? 0) })),
+            ...prev.fades,
+          ]
+          const { start, end } = _snap(r.start, r.end, obstacles, r.id, trimStart, trimEnd, isDrag)
           if (start !== r.start || end !== r.end) {
             programmaticRegionRef.current = true
             r.setOptions({ start, end })
