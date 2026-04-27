@@ -152,6 +152,8 @@ export interface PlayableSong {
   last_played_at?: string | null
 }
 
+export const EDIT_EXPIRY_DAYS = 30
+
 export interface LibrarySong {
   uuid: string
   url: string
@@ -161,6 +163,7 @@ export interface LibrarySong {
   root_song_id: string | null
   owner_id: string | null
   added_at: string
+  song_created_at: string | null
   last_position: number
   last_played_at: string | null
 }
@@ -237,6 +240,7 @@ export interface DownloadedSong {
   artworkCached?: boolean;
   parentSongId?: string | null;
   rootSongId?: string | null;
+  songCreatedAt?: string | null;
 }
 
 export function artworkUrl(url: string, size: number): string {
