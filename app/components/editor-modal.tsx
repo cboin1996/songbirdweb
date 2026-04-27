@@ -2035,23 +2035,24 @@ export default function EditorModal({
               </div>
               <div
                 className="relative px-2 pb-2"
-                onMouseMove={e => {
-                  const el = e.currentTarget
-                  const rect = el.getBoundingClientRect()
-                  const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
-                  const h = el.querySelector<HTMLElement>('[data-orig-hover]')
-                  if (h) { h.style.left = `${pct * 100}%`; h.style.display = 'block' }
-                }}
-                onMouseLeave={e => {
-                  const h = e.currentTarget.querySelector<HTMLElement>('[data-orig-hover]')
-                  if (h) h.style.display = 'none'
-                }}
               >
                 <canvas
                   ref={origTimelineCanvasRef}
                   className="w-full h-5 block cursor-pointer select-none"
                   onMouseDown={handleOrigTimelineMouseDown}
                   onTouchStart={handleOrigTimelineTouchStart}
+                  onPointerMove={e => {
+                    const container = e.currentTarget.parentElement
+                    if (!container) return
+                    const rect = container.getBoundingClientRect()
+                    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+                    const h = container.querySelector<HTMLElement>('[data-orig-hover]')
+                    if (h) { h.style.left = `${pct * 100}%`; h.style.display = 'block' }
+                  }}
+                  onPointerLeave={e => {
+                    const h = e.currentTarget.parentElement?.querySelector<HTMLElement>('[data-orig-hover]')
+                    if (h) h.style.display = 'none'
+                  }}
                 />
                 <div ref={origWaveRef} className="w-full min-h-[80px]" />
                 <div
@@ -2113,16 +2114,6 @@ export default function EditorModal({
                 <div
                   ref={timelineContainerRef}
                   className="relative"
-                  onMouseMove={e => {
-                    const el = timelineContainerRef.current
-                    const h = hoverPlayheadRef.current
-                    if (!el || !h) return
-                    const rect = el.getBoundingClientRect()
-                    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
-                    h.style.left = `${pct * 100}%`
-                    h.style.display = 'block'
-                  }}
-                  onMouseLeave={() => { if (hoverPlayheadRef.current) hoverPlayheadRef.current.style.display = 'none' }}
                 >
                   {/* Timeline ruler — tap/drag to seek */}
                   <canvas
@@ -2130,6 +2121,16 @@ export default function EditorModal({
                     className="w-full h-5 block cursor-pointer select-none"
                     onMouseDown={handleTimelineMouseDown}
                     onTouchStart={handleTimelineTouchStart}
+                    onPointerMove={e => {
+                      const el = timelineContainerRef.current
+                      const h = hoverPlayheadRef.current
+                      if (!el || !h) return
+                      const rect = el.getBoundingClientRect()
+                      const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+                      h.style.left = `${pct * 100}%`
+                      h.style.display = 'block'
+                    }}
+                    onPointerLeave={() => { if (hoverPlayheadRef.current) hoverPlayheadRef.current.style.display = 'none' }}
                   />
                   <div ref={waveRef} data-testid="waveform" onClick={handleWaveformClick} onContextMenu={handleWaveformContextMenu} className="w-full rounded overflow-hidden min-h-[80px] cursor-crosshair" />
                   {/* Playhead — spans ruler + waveform, no pointer events so regions still receive clicks */}
