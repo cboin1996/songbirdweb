@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import Image from "next/image"
 import { useRouter, useSearchParams } from "next/navigation"
 import { LibrarySong, Playlist, artworkUrl, fetchLibrarySongs, fetchPlaylists, publishEligibleSongs, removeFromLibrary, downloadSongToFile, addSongToPlaylist, bulkRemoveFromLibrary, bulkAddSongsToPlaylist } from "../lib/data"
-import { cacheSong, getCachedSongIds } from "../lib/offline"
+import { cacheSong, uncacheSong, getCachedSongIds } from "../lib/offline"
 import { useOnline } from "../lib/use-online"
 import Song from "../components/song"
 import { usePlayer } from "../components/player"
@@ -474,6 +474,18 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         setBulkLoading(false)
     }
 
+    async function bulkRemoveOffline() {
+        setBulkLoading(true)
+        for (const id of selectedIds) {
+            if (cachedIds.has(id)) {
+                try { await uncacheSong(id) } catch {}
+                setCachedIds(prev => { const next = new Set(prev); next.delete(id); return next })
+            }
+        }
+        exitSelectMode()
+        setBulkLoading(false)
+    }
+
     async function bulkAddToPlaylist(playlistId: string) {
         setBulkLoading(true)
         setBulkPlaylistPicking(false)
@@ -699,6 +711,14 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                 >
                                     Download
                                 </button>
+                                {[...selectedIds].some(id => cachedIds.has(id)) && (
+                                    <button
+                                        onClick={bulkRemoveOffline}
+                                        className="px-4 py-2 rounded-xl text-sm font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 active:bg-gray-300 touch-manipulation min-h-[44px]"
+                                    >
+                                        Remove offline
+                                    </button>
+                                )}
                                 {playlists.length > 0 && (
                                     <div className="relative">
                                         <button

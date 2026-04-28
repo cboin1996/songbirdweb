@@ -243,18 +243,18 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                     onClick={handleLibraryToggle}
                     aria-disabled={libraryPending}
                     title={inLibrary ? 'Remove from library' : 'Add to library'}
-                    className="aria-disabled:opacity-40 hover:text-sky-500 cursor-pointer"
+                    className={`aria-disabled:opacity-40 cursor-pointer transition-colors ${inLibrary ? 'text-sky-500 hover:text-red-400' : 'text-gray-400 hover:text-sky-500'}`}
                 >
                     {inLibrary
-                        ? <FaBookmark size={iconSz} className="text-sky-500" />
-                        : <FaRegBookmark size={iconSz} className="text-gray-400" />
+                        ? <FaBookmark size={iconSz} />
+                        : <FaRegBookmark size={iconSz} />
                     }
                 </button>
             )}
             {offlineCached && (
-                <span title="Saved offline">
-                    <FaCloudDownloadAlt size={iconSz} className="text-sky-400" />
-                </span>
+                <button onClick={handleOfflineToggle} title="Remove offline copy" className="text-sky-400 hover:text-red-400 transition-colors cursor-pointer">
+                    <FaCloudDownloadAlt size={iconSz} />
+                </button>
             )}
             {!song.songId && (
                 <span className="text-red-700 text-xs">!</span>

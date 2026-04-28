@@ -141,6 +141,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const loadGenRef = useRef(0)
     const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const blobUrlRef = useRef<string | null>(null)
+    const autoplayActivatedRef = useRef(false)
     // refs mirror state so stable callbacks always see latest values
     const queueRef = useRef<PlayableSong[]>([])
     const queueIndexRef = useRef(-1)
@@ -160,20 +161,41 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             URL.revokeObjectURL(blobUrlRef.current)
             blobUrlRef.current = null
         }
-        const cachedFile = await getSongFile(song.uuid)
-        if (gen !== loadGenRef.current) return  // newer loadSong started, abort
-        if (cachedFile) {
-            blobUrlRef.current = URL.createObjectURL(cachedFile)
-            audio.src = blobUrlRef.current
-        } else {
-            audio.src = `${DOWNLOAD_URL}/${song.uuid}`
-        }
-        shouldPlayRef.current = true
-        audio.load()
+
         setCurrentTime(0)
         setDuration(0)
         setCurrent(song)
         setIsPlaying(true)
+
+        if (autoplayActivatedRef.current) {
+            // Page already activated — safe to await before touching audio element.
+            // Use offline blob directly if available, no streaming→blob swap needed.
+            const cachedFile = await getSongFile(song.uuid)
+            if (gen !== loadGenRef.current) return
+            if (cachedFile) {
+                blobUrlRef.current = URL.createObjectURL(cachedFile)
+                audio.src = blobUrlRef.current
+            } else {
+                audio.src = `${DOWNLOAD_URL}/${song.uuid}`
+            }
+            shouldPlayRef.current = true
+            audio.load()
+        } else {
+            // First play — must call play() within the user-gesture window before any await.
+            audio.src = `${DOWNLOAD_URL}/${song.uuid}`
+            shouldPlayRef.current = true
+            audio.load()
+            audio.play().catch(() => {})
+            // Swap to offline blob if available after gesture window
+            const cachedFile = await getSongFile(song.uuid)
+            if (gen !== loadGenRef.current) return
+            if (cachedFile) {
+                blobUrlRef.current = URL.createObjectURL(cachedFile)
+                audio.src = blobUrlRef.current
+                shouldPlayRef.current = true
+                audio.load()
+            }
+        }
     }
 
     function play(song: PlayableSong, newQueue?: PlayableSong[], context?: PlayContext) {
@@ -314,7 +336,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 audio!.play().catch(() => {})
             }
         }
-        function onPlay() { setIsPlaying(true) }
+        function onPlay() { setIsPlaying(true); autoplayActivatedRef.current = true }
         function onPause() { setIsPlaying(false) }
         function onTimeUpdate() { setCurrentTime(audio!.currentTime) }
         function onDurationChange() { setDuration(audio!.duration) }
