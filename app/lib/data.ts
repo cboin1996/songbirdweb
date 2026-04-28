@@ -724,6 +724,7 @@ export async function deleteEditDraft(songId: string): Promise<void> {
 export interface Playlist {
   id: string
   name: string
+  icon?: string | null
   created_at: string
   updated_at: string
   song_count: number
@@ -749,12 +750,12 @@ export async function fetchPlaylists(): Promise<Playlist[]> {
   return []
 }
 
-export async function createPlaylist(name: string): Promise<Playlist | undefined> {
-  return fetchData<Playlist>({ url: `${API_V1}/playlists`, method: 'POST', body: { name } })
+export async function createPlaylist(name: string, icon?: string | null): Promise<Playlist | undefined> {
+  return fetchData<Playlist>({ url: `${API_V1}/playlists`, method: 'POST', body: { name, icon } })
 }
 
-export async function renamePlaylist(id: string, name: string): Promise<Playlist | undefined> {
-  return fetchData<Playlist>({ url: `${API_V1}/playlists/${id}`, method: 'PATCH', body: { name } })
+export async function renamePlaylist(id: string, name: string, icon?: string | null): Promise<Playlist | undefined> {
+  return fetchData<Playlist>({ url: `${API_V1}/playlists/${id}`, method: 'PATCH', body: { name, icon } })
 }
 
 export async function deletePlaylist(id: string): Promise<boolean> {

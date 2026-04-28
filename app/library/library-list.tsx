@@ -140,6 +140,11 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     const playlistStubs = useMemo(() => playlists.map(p => ({ id: p.id, name: p.name })), [playlists])
 
     useEffect(() => {
+        if (navigator.onLine) refreshSongs()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
+
+    useEffect(() => {
         getCachedSongIds().then(async ids => {
             setCachedIds(ids)
             if (!online || songs.length === 0) {
@@ -725,7 +730,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                     })}
                                     compact={!isDesktop}
 
-                                    isPrivate={!!song.owner_id}
+                                    isPrivate={!!song.owner_id || !!song.parent_song_id}
                                     playlists={playlistStubs}
                                     onPlaylistAdd={refreshPlaylists}
                                 />
@@ -773,7 +778,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                     })}
                                     compact={!isDesktop}
 
-                                    isPrivate={!!song.owner_id}
+                                    isPrivate={!!song.owner_id || !!song.parent_song_id}
                                     playlists={playlistStubs}
                                     onPlaylistAdd={refreshPlaylists}
                                     selectMode={selectMode}

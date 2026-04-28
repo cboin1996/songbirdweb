@@ -2199,8 +2199,8 @@ export default function EditorModal({
             <Image src={artSrc} alt="" width={36} height={36} className="rounded shrink-0 object-cover" />
           )}
           <div className="flex-1 min-w-0">
-            <p className="font-medium truncate text-base">{initialProperties.trackName}</p>
-            <p className="text-sm text-sky-500 truncate">{initialProperties.artistName}</p>
+            <p className="font-medium truncate text-base">{props.trackName}</p>
+            <p className="text-sm text-sky-500 truncate">{props.artistName}</p>
             {draftUpdatedAt && (() => {
               const exp = new Date(draftUpdatedAt)
               exp.setDate(exp.getDate() + DRAFT_EXPIRY_DAYS)

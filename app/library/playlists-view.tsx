@@ -1,15 +1,63 @@
 'use client'
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import Image from 'next/image'
 import {
     Playlist, PlaylistSong,
     createPlaylist, renamePlaylist, deletePlaylist,
     fetchPlaylistSongs, removeSongFromPlaylist,
-    songArtworkUrl, artworkUrl,
+    songArtworkUrl,
 } from '../lib/data'
 import { usePlayer } from '../components/player'
-import { FaPlay, FaPause, FaPlus, FaTrash, FaTimes, FaChevronLeft, FaEllipsisV, FaMusic } from 'react-icons/fa'
+import {
+    FaPlay, FaPause, FaPlus, FaTrash, FaTimes, FaChevronLeft, FaEllipsisV, FaMusic,
+    FaHeadphones, FaHeart, FaStar, FaList, FaFire, FaBolt, FaGlobe, FaDrum, FaGuitar,
+} from 'react-icons/fa'
 import { routes } from '../lib/routes'
+
+const PLAYLIST_ICONS: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
+    music: FaMusic,
+    headphones: FaHeadphones,
+    heart: FaHeart,
+    star: FaStar,
+    list: FaList,
+    fire: FaFire,
+    bolt: FaBolt,
+    globe: FaGlobe,
+    drum: FaDrum,
+    guitar: FaGuitar,
+}
+const ICON_KEYS = Object.keys(PLAYLIST_ICONS)
+
+const BG_COLORS = [
+    'bg-sky-500', 'bg-violet-500', 'bg-rose-500', 'bg-amber-500',
+    'bg-emerald-500', 'bg-pink-500', 'bg-indigo-500', 'bg-teal-500',
+]
+function plBg(id: string) { return BG_COLORS[id.charCodeAt(0) % BG_COLORS.length] }
+
+function PlaylistIcon({ pl, size = 22 }: { pl: Playlist; size?: number }) {
+    const Icon = PLAYLIST_ICONS[pl.icon ?? 'music'] ?? FaMusic
+    return <Icon size={size} className="text-white" />
+}
+
+function IconPicker({ value, onChange }: { value: string; onChange: (k: string) => void }) {
+    return (
+        <div className="flex flex-wrap gap-1">
+            {ICON_KEYS.map(k => {
+                const Icon = PLAYLIST_ICONS[k]
+                return (
+                    <button
+                        key={k}
+                        type="button"
+                        onClick={() => onChange(k)}
+                        className={`p-1.5 rounded-lg transition-colors ${value === k ? 'bg-sky-500 text-white' : 'text-gray-400 hover:text-sky-500 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
+                    >
+                        <Icon size={14} />
+                    </button>
+                )
+            })}
+        </div>
+    )
+}
 
 export default function PlaylistsView({
     playlists,
@@ -23,9 +71,11 @@ export default function PlaylistsView({
     const [activeSongs, setActiveSongs] = useState<PlaylistSong[]>([])
     const [loadingId, setLoadingId] = useState<string | null>(null)
     const [newName, setNewName] = useState('')
+    const [newIcon, setNewIcon] = useState('music')
     const [creating, setCreating] = useState(false)
     const [renamingId, setRenamingId] = useState<string | null>(null)
     const [renameValue, setRenameValue] = useState('')
+    const [renameIcon, setRenameIcon] = useState('music')
     const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
     const [menuPos, setMenuPos] = useState({ top: 0, right: 0 })
     const menuBtnRefs = useRef<Record<string, HTMLButtonElement | null>>({})
@@ -47,8 +97,9 @@ export default function PlaylistsView({
         e.preventDefault()
         const name = newName.trim()
         if (!name) return
-        await createPlaylist(name)
+        await createPlaylist(name, newIcon)
         setNewName('')
+        setNewIcon('music')
         setCreating(false)
         onRefresh()
     }
@@ -56,10 +107,10 @@ export default function PlaylistsView({
     async function handleRename(id: string) {
         const name = renameValue.trim()
         if (!name) return
-        await renamePlaylist(id, name)
+        const updated = await renamePlaylist(id, name, renameIcon)
         setRenamingId(null)
         onRefresh()
-        if (activePlaylist?.id === id) setActivePlaylist(p => p ? { ...p, name } : p)
+        if (activePlaylist?.id === id && updated) setActivePlaylist(updated)
     }
 
     async function handleDelete(id: string) {
@@ -78,11 +129,9 @@ export default function PlaylistsView({
     function playFrom(song: PlaylistSong, songs: PlaylistSong[], pl: Playlist) {
         const playable = songs.filter(s => s.properties)
         if (!playable.length) return
-        const startIdx = playable.findIndex(s => s.uuid === song.uuid)
-        const queue = playable.map(s => ({ uuid: s.uuid, properties: s.properties! }))
         play(
             { uuid: song.uuid, properties: song.properties! },
-            queue,
+            playable.map(s => ({ uuid: s.uuid, properties: s.properties! })),
             { label: `Playlist · ${pl.name}`, href: `${routes.library}?view=playlists`, id: pl.id }
         )
     }
@@ -111,7 +160,6 @@ export default function PlaylistsView({
         const isThisPlaying = playContext?.id === activePlaylist.id && isPlaying
         return (
             <div className="pb-8">
-                {/* Header */}
                 <div className="flex items-center gap-3 mb-4">
                     <button
                         onClick={closePlaylist}
@@ -119,22 +167,20 @@ export default function PlaylistsView({
                     >
                         <FaChevronLeft size={13} />
                     </button>
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${plBg(activePlaylist.id)}`}>
+                        <PlaylistIcon pl={activePlaylist} size={14} />
+                    </div>
                     <h2 className="font-semibold text-base flex-1 min-w-0 truncate">{activePlaylist.name}</h2>
                     <span className="text-xs text-gray-400 shrink-0">{activeSongs.length} songs</span>
                     <button
                         onClick={() => playAll(activeSongs, activePlaylist)}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
-                            isThisPlaying
-                                ? 'bg-sky-500 text-white hover:bg-sky-400'
-                                : 'bg-sky-500 text-white hover:bg-sky-400'
-                        }`}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium bg-sky-500 text-white hover:bg-sky-400 transition-colors"
                     >
                         {isThisPlaying ? <FaPause size={9} /> : <FaPlay size={9} />}
                         {isThisPlaying ? 'pause' : 'play all'}
                     </button>
                 </div>
 
-                {/* Song list */}
                 {activeSongs.length === 0 ? (
                     <p className="text-gray-400 text-sm py-6 text-center">empty — add songs via the ⋮ menu on any song</p>
                 ) : (
@@ -143,13 +189,12 @@ export default function PlaylistsView({
                             const art = songArtworkUrl(s.uuid, s.artwork_cached, s.properties?.artworkUrl100, 200)
                             const isCurrentSong = current?.uuid === s.uuid
                             return (
-                                <button
+                                <div
                                     key={s.uuid}
                                     onClick={() => s.properties && playFrom(s, activeSongs, activePlaylist)}
-                                    disabled={!s.properties}
-                                    className="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-900 transition-colors text-left group disabled:opacity-50 disabled:cursor-default"
+                                    className={`flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-900 transition-colors text-left group cursor-pointer${!s.properties ? ' opacity-50 cursor-default pointer-events-none' : ''}`}
                                 >
-                                    <span className="text-xs text-gray-300 dark:text-gray-600 w-5 text-right shrink-0 tabular-nums">
+                                    <span className="text-xs text-gray-300 dark:text-gray-600 w-5 text-right shrink-0 tabular-nums leading-none">
                                         {isCurrentSong && isPlaying
                                             ? <FaPlay size={8} className="text-sky-500 ml-auto" />
                                             : i + 1}
@@ -174,7 +219,7 @@ export default function PlaylistsView({
                                     >
                                         <FaTrash size={10} />
                                     </button>
-                                </button>
+                                </div>
                             )
                         })}
                     </div>
@@ -186,21 +231,23 @@ export default function PlaylistsView({
     // ── List view ─────────────────────────────────────────────────────────────
     return (
         <div className="pb-8">
-            {/* New playlist */}
             <div className="flex items-center gap-3 mb-4">
                 {creating ? (
-                    <form onSubmit={handleCreate} className="flex items-center gap-2">
-                        <input
-                            autoFocus
-                            value={newName}
-                            onChange={e => setNewName(e.target.value)}
-                            placeholder="playlist name"
-                            className="rounded-lg bg-gray-100 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 focus:border-sky-500 px-3 py-1.5 text-sm outline-none transition-colors"
-                        />
-                        <button type="submit" className="px-3 py-1.5 bg-sky-500 hover:bg-sky-400 text-white rounded-full text-sm">create</button>
-                        <button type="button" onClick={() => { setCreating(false); setNewName('') }} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
-                            <FaTimes size={12} />
-                        </button>
+                    <form onSubmit={handleCreate} className="flex flex-col gap-2">
+                        <div className="flex items-center gap-2">
+                            <input
+                                autoFocus
+                                value={newName}
+                                onChange={e => setNewName(e.target.value)}
+                                placeholder="playlist name"
+                                className="rounded-lg bg-gray-100 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 focus:border-sky-500 px-3 py-1.5 text-sm outline-none transition-colors"
+                            />
+                            <button type="submit" className="px-3 py-1.5 bg-sky-500 hover:bg-sky-400 text-white rounded-full text-sm">create</button>
+                            <button type="button" onClick={() => { setCreating(false); setNewName(''); setNewIcon('music') }} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                                <FaTimes size={12} />
+                            </button>
+                        </div>
+                        <IconPicker value={newIcon} onChange={setNewIcon} />
                     </form>
                 ) : (
                     <button
@@ -217,79 +264,80 @@ export default function PlaylistsView({
                 <p className="text-gray-400 text-sm py-4">no playlists yet</p>
             )}
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+            <div className="flex flex-col gap-1">
                 {playlists.map(pl => {
                     const isThisPlaying = playContext?.id === pl.id && isPlaying
                     return (
-                        <div key={pl.id} className="group relative flex flex-col gap-2">
-                            {/* Artwork mosaic / tap to open */}
+                        <div key={pl.id} className="group flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-900 transition-colors">
+                            {/* Icon */}
                             <button
                                 onClick={() => openPlaylist(pl)}
-                                className="relative aspect-square rounded-xl overflow-hidden bg-gray-100 dark:bg-gray-800 w-full"
+                                className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${plBg(pl.id)} ${loadingId === pl.id ? 'opacity-60' : ''}`}
                             >
-                                {loadingId === pl.id ? (
-                                    <div className="absolute inset-0 flex items-center justify-center">
-                                        <div className="w-4 h-4 border-2 border-sky-500 border-t-transparent rounded-full animate-spin" />
+                                {loadingId === pl.id
+                                    ? <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                    : <PlaylistIcon pl={pl} size={16} />
+                                }
+                            </button>
+
+                            {/* Name / rename */}
+                            {renamingId === pl.id ? (
+                                <form
+                                    onSubmit={e => { e.preventDefault(); handleRename(pl.id) }}
+                                    className="flex-1 flex flex-col gap-1.5"
+                                >
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            autoFocus
+                                            value={renameValue}
+                                            onChange={e => setRenameValue(e.target.value)}
+                                            className="flex-1 min-w-0 rounded bg-gray-100 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 focus:border-sky-500 px-2 py-1 text-sm outline-none"
+                                        />
+                                        <button type="submit" className="text-xs px-2 py-1 bg-sky-500 text-white rounded shrink-0">save</button>
+                                        <button type="button" onClick={() => setRenamingId(null)} className="text-gray-400 hover:text-gray-600 shrink-0">
+                                            <FaTimes size={10} />
+                                        </button>
                                     </div>
-                                ) : (
-                                    <PlaylistMosaic playlistId={pl.id} />
-                                )}
-                                {/* Play/pause overlay */}
-                                <div className={`absolute inset-0 flex items-end justify-end p-2 transition-opacity ${isThisPlaying ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                                    <IconPicker value={renameIcon} onChange={setRenameIcon} />
+                                </form>
+                            ) : (
+                                <button
+                                    onClick={() => openPlaylist(pl)}
+                                    className="flex-1 min-w-0 text-left"
+                                >
+                                    <p className="text-sm font-medium truncate">{pl.name}</p>
+                                    <p className="text-xs text-gray-400">{pl.song_count} songs</p>
+                                </button>
+                            )}
+
+                            {/* Actions */}
+                            {renamingId !== pl.id && (
+                                <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
                                     <button
                                         onClick={async e => {
                                             e.stopPropagation()
                                             const songs = await fetchPlaylistSongs(pl.id)
                                             playAll(songs, pl)
                                         }}
-                                        className="bg-sky-500 hover:bg-sky-400 text-white rounded-full p-2 shadow-lg transition-colors"
+                                        className={`p-1.5 transition-colors rounded ${isThisPlaying ? 'text-sky-500' : 'text-gray-400 hover:text-sky-500'}`}
                                         title={isThisPlaying ? 'pause' : 'play'}
                                     >
                                         {isThisPlaying ? <FaPause size={10} /> : <FaPlay size={10} />}
                                     </button>
-                                </div>
-                            </button>
-
-                            {/* Name row */}
-                            <div className="flex items-start gap-1 min-w-0 px-0.5">
-                                {renamingId === pl.id ? (
-                                    <form
-                                        onSubmit={e => { e.preventDefault(); handleRename(pl.id) }}
-                                        className="flex items-center gap-1 flex-1"
+                                    <button
+                                        ref={el => { menuBtnRefs.current[pl.id] = el }}
+                                        onClick={e => openMenu(pl.id, e)}
+                                        className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-1.5 rounded"
                                     >
-                                        <input
-                                            autoFocus
-                                            value={renameValue}
-                                            onChange={e => setRenameValue(e.target.value)}
-                                            className="flex-1 min-w-0 rounded bg-gray-100 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 focus:border-sky-500 px-2 py-0.5 text-sm outline-none"
-                                        />
-                                        <button type="submit" className="text-xs px-2 py-0.5 bg-sky-500 text-white rounded shrink-0">ok</button>
-                                        <button type="button" onClick={() => setRenamingId(null)} className="text-gray-400 hover:text-gray-600 shrink-0">
-                                            <FaTimes size={9} />
-                                        </button>
-                                    </form>
-                                ) : (
-                                    <>
-                                        <div className="flex-1 min-w-0">
-                                            <p className="text-sm font-medium truncate">{pl.name}</p>
-                                            <p className="text-xs text-gray-400">{pl.song_count} songs</p>
-                                        </div>
-                                        <button
-                                            ref={el => { menuBtnRefs.current[pl.id] = el }}
-                                            onClick={e => openMenu(pl.id, e)}
-                                            className="text-gray-300 hover:text-gray-500 dark:text-gray-600 dark:hover:text-gray-400 p-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                                        >
-                                            <FaEllipsisV size={11} />
-                                        </button>
-                                    </>
-                                )}
-                            </div>
+                                        <FaEllipsisV size={11} />
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     )
                 })}
             </div>
 
-            {/* Context menu */}
             {menuOpenId && (
                 <>
                     <div className="fixed inset-0 z-40" onClick={() => setMenuOpenId(null)} />
@@ -299,8 +347,10 @@ export default function PlaylistsView({
                     >
                         <button
                             onClick={() => {
+                                const pl = playlists.find(p => p.id === menuOpenId)
                                 setRenamingId(menuOpenId)
-                                setRenameValue(playlists.find(p => p.id === menuOpenId)?.name ?? '')
+                                setRenameValue(pl?.name ?? '')
+                                setRenameIcon(pl?.icon ?? 'music')
                                 setMenuOpenId(null)
                             }}
                             className="whitespace-nowrap block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700"
@@ -316,43 +366,6 @@ export default function PlaylistsView({
                     </div>
                 </>
             )}
-        </div>
-    )
-}
-
-function PlaylistMosaic({ playlistId }: { playlistId: string }) {
-    const [urls, setUrls] = useState<string[] | null>(null)
-
-    useEffect(() => {
-        fetchPlaylistSongs(playlistId).then(songs => {
-            const found = songs
-                .filter(s => s.properties?.artworkUrl100)
-                .slice(0, 4)
-                .map(s => artworkUrl(s.properties!.artworkUrl100, 200))
-            setUrls(found)
-        })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [playlistId])
-
-    if (!urls || urls.length === 0) {
-        return (
-            <div className="absolute inset-0 flex items-center justify-center">
-                <FaMusic size={24} className="text-gray-300 dark:text-gray-600" />
-            </div>
-        )
-    }
-
-    if (urls.length < 4) {
-        return <Image src={urls[0]} alt="" fill sizes="200px" className="object-cover" />
-    }
-
-    return (
-        <div className="absolute inset-0 grid grid-cols-2 grid-rows-2">
-            {urls.map((u, i) => (
-                <div key={i} className="relative overflow-hidden">
-                    <Image src={u} alt="" fill sizes="100px" className="object-cover" />
-                </div>
-            ))}
         </div>
     )
 }
