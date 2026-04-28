@@ -562,9 +562,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 </div>
             )}
             {current && p && (
-                <div data-testid="player-bar" className="fixed bottom-0 left-0 right-0 z-50 bg-white/90 dark:bg-gray-950/90 backdrop-blur-md border-t border-gray-100 dark:border-gray-800">
+                <>
+                    {/* Queue panel — mobile: full-width strip above bar; desktop: floating right panel */}
                     {showQueue && queue.length > 0 && (
-                        <div data-testid="player-queue-panel" className="border-b border-gray-100 dark:border-gray-800 max-h-56 overflow-y-auto">
+                        <div
+                            data-testid="player-queue-panel"
+                            className="fixed z-50 left-0 right-0 bottom-[88px] border-t border-gray-100 dark:border-gray-800 bg-white/95 dark:bg-gray-950/95 backdrop-blur-md max-h-56 overflow-y-auto
+                                       md:left-auto md:right-4 md:bottom-20 md:w-80 md:max-h-[min(480px,70vh)] md:rounded-xl md:border md:border-gray-200 md:dark:border-gray-700 md:shadow-2xl"
+                        >
                             {playContext && (
                                 <div className="px-4 py-1.5 border-b border-gray-100 dark:border-gray-800">
                                     <Link href={playContext.href} className="text-xs text-gray-400 hover:text-sky-500 transition-colors">
@@ -607,60 +612,94 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                         </div>
                     )}
 
-                    <div className="flex flex-col">
-                        <div className="flex items-center gap-3 px-4 pt-3 pb-1.5">
-                            {p.artworkUrl100 && (
-                                <Image src={artworkUrl(p.artworkUrl100, 200)} alt="" width={36} height={36} className="rounded shrink-0" />
-                            )}
-                            {playContext ? (
-                                <Link href={playContext.href} className="flex flex-col min-w-0 flex-1 group">
-                                    <span data-testid="player-track-name" className="text-xs font-medium truncate group-hover:text-sky-500 transition-colors">{p.trackName || 'Unknown title'}</span>
-                                    <span className="text-xs text-sky-500 truncate">{p.artistName || 'Unknown artist'}</span>
-                                    <span className="text-xs text-gray-400 truncate">from {playContext.label}</span>
-                                </Link>
-                            ) : (
-                                <div className="flex flex-col min-w-0 flex-1">
-                                    <span data-testid="player-track-name" className="text-xs font-medium truncate">{p.trackName || 'Unknown title'}</span>
-                                    <span className="text-xs text-sky-500 truncate">{p.artistName || 'Unknown artist'}</span>
-                                </div>
-                            )}
-                            <div className="flex items-center gap-3 shrink-0">
-                                <button data-testid="player-shuffle" onClick={toggleShuffle} className={`shrink-0 ${shuffle ? activeClass : idleClass}`}>
-                                    <FaRandom size={12} />
-                                </button>
-                                <button data-testid="player-prev" onClick={skipPrev} disabled={!hasQueue} className={`shrink-0 disabled:opacity-30 ${idleClass}`}>
-                                    <FaStepBackward size={12} />
-                                </button>
-                                <button data-testid="player-play-pause" onClick={isPlaying ? pause : resume} className={`shrink-0 ${idleClass}`}>
-                                    {isPlaying ? <FaPause size={14} /> : <FaPlay size={14} />}
-                                </button>
-                                <button data-testid="player-next" onClick={skipNext} disabled={!hasQueue} className={`shrink-0 disabled:opacity-30 ${idleClass}`}>
-                                    <FaStepForward size={12} />
-                                </button>
-                                <button data-testid="player-repeat" onClick={toggleRepeat} className={`shrink-0 relative ${repeat !== 'off' ? activeClass : idleClass}`}>
-                                    <FaRedo size={12} />
-                                    {repeat === 'one' && (
-                                        <span className="absolute -top-1.5 -right-1.5 text-[8px] font-bold leading-none">1</span>
+                    <div data-testid="player-bar" className="fixed bottom-0 left-0 right-0 z-50 bg-white/90 dark:bg-gray-950/90 backdrop-blur-md border-t border-gray-100 dark:border-gray-800">
+                        <div className="flex flex-col">
+                            {/* Mobile: single row. Desktop: three-column layout */}
+                            <div className="flex items-center gap-3 px-4 pt-3 pb-1.5 md:grid md:grid-cols-[1fr_auto_1fr]">
+                                {/* Left: artwork + track info */}
+                                <div className="flex items-center gap-3 min-w-0 flex-1 md:flex-initial">
+                                    {p.artworkUrl100 && (
+                                        <Image src={artworkUrl(p.artworkUrl100, 200)} alt="" width={36} height={36} className="rounded shrink-0" />
                                     )}
-                                </button>
-                                <button data-testid="player-queue-toggle" onClick={() => setShowQueue(v => !v)} className={`shrink-0 ${showQueue ? activeClass : idleClass}`}>
-                                    <FaList size={12} />
-                                </button>
-                                <div className="flex items-center gap-1.5 shrink-0">
-                                    <button onClick={() => setVolume(v => v > 0 ? 0 : 1)} className={idleClass}>
-                                        {volume === 0 ? <FaVolumeMute size={12} /> : <FaVolumeUp size={12} />}
+                                    {playContext ? (
+                                        <Link href={playContext.href} className="flex flex-col min-w-0 flex-1 group">
+                                            <span data-testid="player-track-name" className="text-xs font-medium truncate group-hover:text-sky-500 transition-colors">{p.trackName || 'Unknown title'}</span>
+                                            <span className="text-xs text-sky-500 truncate">{p.artistName || 'Unknown artist'}</span>
+                                            <span className="text-xs text-gray-400 truncate hidden md:block">from {playContext.label}</span>
+                                        </Link>
+                                    ) : (
+                                        <div className="flex flex-col min-w-0 flex-1">
+                                            <span data-testid="player-track-name" className="text-xs font-medium truncate">{p.trackName || 'Unknown title'}</span>
+                                            <span className="text-xs text-sky-500 truncate">{p.artistName || 'Unknown artist'}</span>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Center: transport (desktop only — on mobile lives in right section) */}
+                                <div className="hidden md:flex items-center gap-4">
+                                    <button data-testid="player-shuffle" onClick={toggleShuffle} className={`shrink-0 ${shuffle ? activeClass : idleClass}`}>
+                                        <FaRandom size={13} />
                                     </button>
-                                    <div className="hidden sm:block w-16">
-                                        <Slider value={volume} min={0} max={1} step={0.02} onChange={setVolume} label="volume" />
+                                    <button data-testid="player-prev" onClick={skipPrev} disabled={!hasQueue} className={`shrink-0 disabled:opacity-30 ${idleClass}`}>
+                                        <FaStepBackward size={13} />
+                                    </button>
+                                    <button data-testid="player-play-pause" onClick={isPlaying ? pause : resume} className={`shrink-0 ${idleClass}`}>
+                                        {isPlaying ? <FaPause size={18} /> : <FaPlay size={18} />}
+                                    </button>
+                                    <button data-testid="player-next" onClick={skipNext} disabled={!hasQueue} className={`shrink-0 disabled:opacity-30 ${idleClass}`}>
+                                        <FaStepForward size={13} />
+                                    </button>
+                                    <button data-testid="player-repeat" onClick={toggleRepeat} className={`shrink-0 relative ${repeat !== 'off' ? activeClass : idleClass}`}>
+                                        <FaRedo size={13} />
+                                        {repeat === 'one' && (
+                                            <span className="absolute -top-1.5 -right-1.5 text-[8px] font-bold leading-none">1</span>
+                                        )}
+                                    </button>
+                                </div>
+
+                                {/* Right: mobile has all controls; desktop has volume + queue toggle */}
+                                <div className="flex items-center gap-3 shrink-0 md:justify-end">
+                                    {/* Mobile-only transport */}
+                                    <div className="flex md:hidden items-center gap-3">
+                                        <button data-testid="player-shuffle" onClick={toggleShuffle} className={`shrink-0 ${shuffle ? activeClass : idleClass}`}>
+                                            <FaRandom size={12} />
+                                        </button>
+                                        <button data-testid="player-prev" onClick={skipPrev} disabled={!hasQueue} className={`shrink-0 disabled:opacity-30 ${idleClass}`}>
+                                            <FaStepBackward size={12} />
+                                        </button>
+                                        <button onClick={isPlaying ? pause : resume} className={`shrink-0 ${idleClass}`}>
+                                            {isPlaying ? <FaPause size={14} /> : <FaPlay size={14} />}
+                                        </button>
+                                        <button data-testid="player-next" onClick={skipNext} disabled={!hasQueue} className={`shrink-0 disabled:opacity-30 ${idleClass}`}>
+                                            <FaStepForward size={12} />
+                                        </button>
+                                        <button data-testid="player-repeat" onClick={toggleRepeat} className={`shrink-0 relative ${repeat !== 'off' ? activeClass : idleClass}`}>
+                                            <FaRedo size={12} />
+                                            {repeat === 'one' && (
+                                                <span className="absolute -top-1.5 -right-1.5 text-[8px] font-bold leading-none">1</span>
+                                            )}
+                                        </button>
+                                    </div>
+                                    {/* Queue toggle + volume (both breakpoints) */}
+                                    <button data-testid="player-queue-toggle" onClick={() => setShowQueue(v => !v)} className={`shrink-0 ${showQueue ? activeClass : idleClass}`}>
+                                        <FaList size={12} />
+                                    </button>
+                                    <div className="flex items-center gap-1.5 shrink-0">
+                                        <button onClick={() => setVolume(v => v > 0 ? 0 : 1)} className={idleClass}>
+                                            {volume === 0 ? <FaVolumeMute size={12} /> : <FaVolumeUp size={12} />}
+                                        </button>
+                                        <div className="hidden sm:block w-16">
+                                            <Slider value={volume} min={0} max={1} step={0.02} onChange={setVolume} label="volume" />
+                                        </div>
                                     </div>
                                 </div>
                             </div>
-                        </div>
-                        <div data-testid="player-progress" className="flex px-4 pb-3">
-                            <ProgressBar current={currentTime} duration={duration} onSeek={handleSeek} />
+                            <div data-testid="player-progress" className="flex px-4 pb-3">
+                                <ProgressBar current={currentTime} duration={duration} onSeek={handleSeek} />
+                            </div>
                         </div>
                     </div>
-                </div>
+                </>
             )}
         </PlayerContext.Provider>
     )
