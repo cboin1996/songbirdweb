@@ -67,7 +67,7 @@ function SongGrid({ songs, libraryIds, sortBy, showSource }: {
                         <Song
                             song={song}
                             selected={current?.uuid === s.uuid}
-                            onClick={() => play({ uuid: s.uuid, properties: s.properties! }, queue, { label: 'Explore', href: routes.explore })}
+                            onClick={() => play({ uuid: s.uuid, properties: s.properties! }, queue, { label: 'Explore', href: routes.explore, id: 'explore' })}
                             inLibrary={libraryIds.has(s.uuid)}
                             showSource={showSource}
                         />

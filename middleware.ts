@@ -34,12 +34,13 @@ export async function middleware(request: NextRequest) {
   const isLoginPage = request.nextUrl.pathname === routes.home
   const isSharePage = request.nextUrl.pathname.startsWith('/share/')
   const isOfflinePage = request.nextUrl.pathname === '/offline'
+  const isAuthApi = request.nextUrl.pathname.startsWith('/v1/auth/')
 
   const validToken = accessToken && !isExpired(accessToken.value)
 
   if (validToken && isLoginPage) return NextResponse.redirect(new URL(routes.download, request.url))
   if (validToken) return NextResponse.next()
-  if (isLoginPage || isSharePage || isOfflinePage) return NextResponse.next()
+  if (isLoginPage || isSharePage || isOfflinePage || isAuthApi) return NextResponse.next()
 
   if (refreshToken) {
     let newToken: string | null = null

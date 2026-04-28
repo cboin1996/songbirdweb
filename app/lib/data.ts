@@ -83,9 +83,9 @@ async function fetchData<T>(args: {
           const retryOptions = await buildFetchOptions(args.method, args.body)
           const retryResponse = await fetch(args.url, retryOptions)
           if (retryResponse.ok) {
-            if (responseType === ResponseTypes.json) return retryResponse.json() as T;
-            if (responseType === ResponseTypes.bytes) return retryResponse.bytes() as T;
-            if (responseType === ResponseTypes.blob) return retryResponse.blob() as T;
+            if (responseType === ResponseTypes.json) return await retryResponse.json() as T;
+            if (responseType === ResponseTypes.bytes) return await retryResponse.bytes() as T;
+            if (responseType === ResponseTypes.blob) return await retryResponse.blob() as T;
           }
         }
         redirectToLogin()
@@ -115,7 +115,7 @@ export async function fetchCurrentUser(): Promise<CurrentUser | undefined> {
   return fetchData<CurrentUser>({ url: `${API_V1}/auth/me`, method: 'GET' })
 }
 
-export async function login(username: string, password: string): Promise<CurrentUser | undefined> {
+export async function login(username: string, password: string): Promise<CurrentUser | 401 | 'error'> {
   try {
     const response = await fetch(`${API_V1}/auth/login`, {
       method: 'POST',
@@ -123,11 +123,11 @@ export async function login(username: string, password: string): Promise<Current
       body: JSON.stringify({ username, password }),
       credentials: 'include',
     });
-    if (!response.ok) return undefined;
-    return response.json();
-  } catch (error) {
-    console.error("Login error:", error);
-    return undefined;
+    if (response.status === 401) return 401;
+    if (!response.ok) return 'error';
+    return await response.json();
+  } catch {
+    return 'error';
   }
 }
 
@@ -528,6 +528,11 @@ export interface PlayerState {
   queue: string[]
   queue_index: number
   shuffle_order?: number[] | null
+  play_context?: string | null
+  shuffle_seed?: number | null
+  shuffle_position?: number
+  manual_next?: string[]
+  current_song_uuid?: string | null
 }
 
 export async function fetchPlayerState(): Promise<PlayerState | undefined> {
@@ -799,6 +804,22 @@ export async function removeSongFromPlaylist(playlistId: string, songUuid: strin
   } catch { return false }
 }
 
+export async function bulkRemoveSongsFromPlaylist(playlistId: string, songUuids: string[]): Promise<boolean> {
+  try {
+    const options = await buildFetchOptions('DELETE', { song_uuids: songUuids })
+    const response = await fetch(`${API_V1}/playlists/${playlistId}/songs/bulk`, options)
+    return response.ok
+  } catch { return false }
+}
+
+export async function reorderPlaylistSongs(playlistId: string, songUuids: string[]): Promise<boolean> {
+  try {
+    const options = await buildFetchOptions('PATCH', { song_uuids: songUuids })
+    const response = await fetch(`${API_V1}/playlists/${playlistId}/songs`, options)
+    return response.ok
+  } catch { return false }
+}
+
 export async function fetchServerOfflineSongs(): Promise<string[]> {
   return await fetchData<string[]>({ url: `${API_V1}/library/offline`, method: 'GET' }) ?? []
 }
@@ -835,8 +856,17 @@ export async function clearServerOfflineSongs(): Promise<void> {
   }
 }
 
-export async function publishEligibleSongs(): Promise<number> {
-  const result = await fetchData<{ published: number }>({ url: `${API_V1}/library/publish`, method: 'POST' })
+export interface EligibleSong {
+  uuid: string
+  properties: Properties | null
+}
+
+export async function fetchEligibleSongs(): Promise<EligibleSong[]> {
+  return await fetchData<EligibleSong[]>({ url: `${API_V1}/library/eligible`, method: 'GET' }) ?? []
+}
+
+export async function publishSongs(songIds: string[]): Promise<number> {
+  const result = await fetchData<{ published: number }>({ url: `${API_V1}/library/publish`, method: 'POST', body: { song_ids: songIds } })
   return result?.published ?? 0
 }
 

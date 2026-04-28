@@ -1,18 +1,18 @@
 'use client'
-import { useRef, useState } from 'react'
-import Image from 'next/image'
+import { useState } from 'react'
 import {
     Playlist, PlaylistSong,
     createPlaylist, renamePlaylist, deletePlaylist,
-    fetchPlaylistSongs, removeSongFromPlaylist,
-    songArtworkUrl,
+    fetchPlaylistSongs, bulkRemoveSongsFromPlaylist, reorderPlaylistSongs,
 } from '../lib/data'
 import { usePlayer } from '../components/player'
 import {
-    FaPlay, FaPause, FaPlus, FaTrash, FaTimes, FaChevronLeft, FaEllipsisV, FaMusic,
+    FaPlay, FaPause, FaPlus, FaTimes, FaMusic,
     FaHeadphones, FaHeart, FaStar, FaList, FaFire, FaBolt, FaGlobe, FaDrum, FaGuitar,
+    FaPencilAlt, FaTrash,
 } from 'react-icons/fa'
 import { routes } from '../lib/routes'
+import SongPickerModal, { PickerSong } from '../components/song-picker-modal'
 
 const PLAYLIST_ICONS: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
     music: FaMusic,
@@ -66,31 +66,34 @@ export default function PlaylistsView({
     playlists: Playlist[]
     onRefresh: () => void
 }) {
-    const { play, pause, isPlaying, current, playContext } = usePlayer()
-    const [activePlaylist, setActivePlaylist] = useState<Playlist | null>(null)
-    const [activeSongs, setActiveSongs] = useState<PlaylistSong[]>([])
-    const [loadingId, setLoadingId] = useState<string | null>(null)
+    const { play, pause, isPlaying, playContext } = usePlayer()
     const [newName, setNewName] = useState('')
     const [newIcon, setNewIcon] = useState('music')
     const [creating, setCreating] = useState(false)
-    const [renamingId, setRenamingId] = useState<string | null>(null)
+    const [loadingId, setLoadingId] = useState<string | null>(null)
+
+    // modal
+    const [modalSongs, setModalSongs] = useState<PickerSong[]>([])
+    const [modalPlaylist, setModalPlaylist] = useState<Playlist | null>(null)
+    const [modalLoading, setModalLoading] = useState(false)
+
+    // rename (inline in modal header)
+    const [renaming, setRenaming] = useState(false)
     const [renameValue, setRenameValue] = useState('')
     const [renameIcon, setRenameIcon] = useState('music')
-    const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
-    const [menuPos, setMenuPos] = useState({ top: 0, right: 0 })
-    const menuBtnRefs = useRef<Record<string, HTMLButtonElement | null>>({})
 
-    async function openPlaylist(pl: Playlist) {
+    async function openModal(pl: Playlist) {
         setLoadingId(pl.id)
         const songs = await fetchPlaylistSongs(pl.id)
-        setActivePlaylist(pl)
-        setActiveSongs(songs)
+        setModalPlaylist(pl)
+        setModalSongs(songs.map(s => ({ uuid: s.uuid, properties: s.properties, artwork_cached: s.artwork_cached })))
         setLoadingId(null)
     }
 
-    function closePlaylist() {
-        setActivePlaylist(null)
-        setActiveSongs([])
+    function closeModal() {
+        setModalPlaylist(null)
+        setModalSongs([])
+        setRenaming(false)
     }
 
     async function handleCreate(e: React.FormEvent) {
@@ -104,36 +107,38 @@ export default function PlaylistsView({
         onRefresh()
     }
 
-    async function handleRename(id: string) {
+    async function handleRename(e: React.FormEvent) {
+        e.preventDefault()
+        if (!modalPlaylist) return
         const name = renameValue.trim()
         if (!name) return
-        const updated = await renamePlaylist(id, name, renameIcon)
-        setRenamingId(null)
-        onRefresh()
-        if (activePlaylist?.id === id && updated) setActivePlaylist(updated)
-    }
-
-    async function handleDelete(id: string) {
-        await deletePlaylist(id)
-        if (activePlaylist?.id === id) closePlaylist()
+        const updated = await renamePlaylist(modalPlaylist.id, name, renameIcon)
+        if (updated) setModalPlaylist(updated)
+        setRenaming(false)
         onRefresh()
     }
 
-    async function handleRemoveSong(songUuid: string) {
-        if (!activePlaylist) return
-        await removeSongFromPlaylist(activePlaylist.id, songUuid)
-        setActiveSongs(prev => prev.filter(s => s.uuid !== songUuid))
+    async function handleDelete() {
+        if (!modalPlaylist) return
+        if (!confirm(`Delete "${modalPlaylist.name}"?`)) return
+        await deletePlaylist(modalPlaylist.id)
+        closeModal()
         onRefresh()
     }
 
-    function playFrom(song: PlaylistSong, songs: PlaylistSong[], pl: Playlist) {
-        const playable = songs.filter(s => s.properties)
-        if (!playable.length) return
-        play(
-            { uuid: song.uuid, properties: song.properties! },
-            playable.map(s => ({ uuid: s.uuid, properties: s.properties! })),
-            { label: `Playlist · ${pl.name}`, href: `${routes.library}?view=playlists`, id: pl.id }
-        )
+    async function handleRemove(idsToRemove: string[]) {
+        if (!modalPlaylist || !idsToRemove.length) return
+        setModalLoading(true)
+        await bulkRemoveSongsFromPlaylist(modalPlaylist.id, idsToRemove)
+        setModalSongs(prev => prev.filter(s => !idsToRemove.includes(s.uuid)))
+        setModalLoading(false)
+        onRefresh()
+    }
+
+    async function handleReorder(reordered: PickerSong[]) {
+        if (!modalPlaylist) return
+        setModalSongs(reordered)
+        await reorderPlaylistSongs(modalPlaylist.id, reordered.map(s => s.uuid))
     }
 
     function playAll(songs: PlaylistSong[], pl: Playlist) {
@@ -148,90 +153,57 @@ export default function PlaylistsView({
         )
     }
 
-    function openMenu(id: string, e: React.MouseEvent) {
-        e.stopPropagation()
-        const rect = menuBtnRefs.current[id]?.getBoundingClientRect()
-        if (rect) setMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right })
-        setMenuOpenId(o => o === id ? null : id)
-    }
-
-    // ── Detail view ──────────────────────────────────────────────────────────
-    if (activePlaylist) {
-        const isThisPlaying = playContext?.id === activePlaylist.id && isPlaying
-        return (
-            <div className="pb-8">
-                <div className="flex items-center gap-3 mb-4">
-                    <button
-                        onClick={closePlaylist}
-                        className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors p-1 -ml-1"
-                    >
-                        <FaChevronLeft size={13} />
-                    </button>
-                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${plBg(activePlaylist.id)}`}>
-                        <PlaylistIcon pl={activePlaylist} size={14} />
-                    </div>
-                    <h2 className="font-semibold text-base flex-1 min-w-0 truncate">{activePlaylist.name}</h2>
-                    <span className="text-xs text-gray-400 shrink-0">{activeSongs.length} songs</span>
-                    <button
-                        onClick={() => playAll(activeSongs, activePlaylist)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium bg-sky-500 text-white hover:bg-sky-400 transition-colors"
-                    >
-                        {isThisPlaying ? <FaPause size={9} /> : <FaPlay size={9} />}
-                        {isThisPlaying ? 'pause' : 'play all'}
-                    </button>
-                </div>
-
-                {activeSongs.length === 0 ? (
-                    <p className="text-gray-400 text-sm py-6 text-center">empty — add songs via the ⋮ menu on any song</p>
-                ) : (
-                    <div className="flex flex-col">
-                        {activeSongs.map((s, i) => {
-                            const art = songArtworkUrl(s.uuid, s.artwork_cached, s.properties?.artworkUrl100, 200)
-                            const isCurrentSong = current?.uuid === s.uuid
+    const modalTitleActions = modalPlaylist && (
+        <>
+            {renaming ? (
+                <form onSubmit={handleRename} className="flex items-center gap-1.5">
+                    <input
+                        autoFocus
+                        value={renameValue}
+                        onChange={e => setRenameValue(e.target.value)}
+                        className="w-32 rounded bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 focus:border-sky-500 px-2 py-0.5 text-xs outline-none"
+                    />
+                    <div className="flex gap-0.5">
+                        {ICON_KEYS.map(k => {
+                            const Icon = PLAYLIST_ICONS[k]
                             return (
-                                <div
-                                    key={s.uuid}
-                                    onClick={() => s.properties && playFrom(s, activeSongs, activePlaylist)}
-                                    className={`flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-900 transition-colors text-left group cursor-pointer${!s.properties ? ' opacity-50 cursor-default pointer-events-none' : ''}`}
-                                >
-                                    <span className="text-xs text-gray-300 dark:text-gray-600 w-5 text-right shrink-0 tabular-nums leading-none">
-                                        {isCurrentSong && isPlaying
-                                            ? <FaPlay size={8} className="text-sky-500 ml-auto" />
-                                            : i + 1}
-                                    </span>
-                                    {art ? (
-                                        <Image src={art} alt="" width={36} height={36} className="rounded shrink-0" unoptimized={s.artwork_cached} />
-                                    ) : (
-                                        <div className="w-9 h-9 rounded shrink-0 bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
-                                            <FaMusic size={10} className="text-gray-400" />
-                                        </div>
-                                    )}
-                                    <div className="flex-1 min-w-0">
-                                        <p className={`text-sm truncate ${isCurrentSong ? 'text-sky-500' : ''}`}>
-                                            {s.properties?.trackName ?? s.uuid.slice(0, 8)}
-                                        </p>
-                                        <p className="text-xs text-gray-400 truncate">{s.properties?.artistName}</p>
-                                    </div>
-                                    <button
-                                        onClick={e => { e.stopPropagation(); handleRemoveSong(s.uuid) }}
-                                        className="text-gray-200 hover:text-red-400 dark:text-gray-700 dark:hover:text-red-400 transition-colors shrink-0 opacity-0 group-hover:opacity-100 p-1"
-                                        title="remove from playlist"
-                                    >
-                                        <FaTrash size={10} />
-                                    </button>
-                                </div>
+                                <button key={k} type="button" onClick={() => setRenameIcon(k)}
+                                    className={`p-1 rounded transition-colors ${renameIcon === k ? 'bg-sky-500 text-white' : 'text-gray-400 hover:text-sky-500'}`}>
+                                    <Icon size={11} />
+                                </button>
                             )
                         })}
                     </div>
-                )}
-            </div>
-        )
-    }
+                    <button type="submit" className="text-xs px-2 py-0.5 bg-sky-500 text-white rounded shrink-0">save</button>
+                    <button type="button" onClick={() => setRenaming(false)} className="text-gray-400 hover:text-gray-600 p-1">
+                        <FaTimes size={10} />
+                    </button>
+                </form>
+            ) : (
+                <>
+                    <button
+                        onClick={() => { setRenameValue(modalPlaylist.name); setRenameIcon(modalPlaylist.icon ?? 'music'); setRenaming(true) }}
+                        className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-1"
+                        title="rename"
+                    >
+                        <FaPencilAlt size={11} />
+                    </button>
+                    <button
+                        onClick={handleDelete}
+                        className="text-gray-400 hover:text-red-400 p-1"
+                        title="delete playlist"
+                    >
+                        <FaTrash size={11} />
+                    </button>
+                </>
+            )}
+        </>
+    )
 
-    // ── List view ─────────────────────────────────────────────────────────────
     return (
         <div className="pb-8">
-            <div className="flex items-center gap-3 mb-4">
+            {/* create form */}
+            <div className="mb-4">
                 {creating ? (
                     <form onSubmit={handleCreate} className="flex flex-col gap-2">
                         <div className="flex items-center gap-2">
@@ -264,108 +236,58 @@ export default function PlaylistsView({
                 <p className="text-gray-400 text-sm py-4">no playlists yet</p>
             )}
 
-            <div className="flex flex-col gap-1">
+            {/* grid */}
+            <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-1">
                 {playlists.map(pl => {
                     const isThisPlaying = playContext?.id === pl.id && isPlaying
                     return (
-                        <div key={pl.id} className="group flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-900 transition-colors">
-                            {/* Icon */}
-                            <button
-                                onClick={() => openPlaylist(pl)}
-                                className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${plBg(pl.id)} ${loadingId === pl.id ? 'opacity-60' : ''}`}
-                            >
+                        <button
+                            key={pl.id}
+                            onClick={() => openModal(pl)}
+                            className="group flex flex-col gap-2 rounded-lg p-2 text-left transition-colors hover:bg-gray-100 dark:hover:bg-gray-900"
+                        >
+                            <div className={`relative w-full aspect-square rounded-lg flex items-center justify-center ${plBg(pl.id)} ${loadingId === pl.id ? 'opacity-60' : ''}`}>
                                 {loadingId === pl.id
-                                    ? <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                    : <PlaylistIcon pl={pl} size={16} />
+                                    ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                    : <PlaylistIcon pl={pl} size={32} />
                                 }
-                            </button>
-
-                            {/* Name / rename */}
-                            {renamingId === pl.id ? (
-                                <form
-                                    onSubmit={e => { e.preventDefault(); handleRename(pl.id) }}
-                                    className="flex-1 flex flex-col gap-1.5"
-                                >
-                                    <div className="flex items-center gap-2">
-                                        <input
-                                            autoFocus
-                                            value={renameValue}
-                                            onChange={e => setRenameValue(e.target.value)}
-                                            className="flex-1 min-w-0 rounded bg-gray-100 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 focus:border-sky-500 px-2 py-1 text-sm outline-none"
-                                        />
-                                        <button type="submit" className="text-xs px-2 py-1 bg-sky-500 text-white rounded shrink-0">save</button>
-                                        <button type="button" onClick={() => setRenamingId(null)} className="text-gray-400 hover:text-gray-600 shrink-0">
-                                            <FaTimes size={10} />
-                                        </button>
-                                    </div>
-                                    <IconPicker value={renameIcon} onChange={setRenameIcon} />
-                                </form>
-                            ) : (
-                                <button
-                                    onClick={() => openPlaylist(pl)}
-                                    className="flex-1 min-w-0 text-left"
-                                >
-                                    <p className="text-sm font-medium truncate">{pl.name}</p>
-                                    <p className="text-xs text-gray-400">{pl.song_count} songs</p>
-                                </button>
-                            )}
-
-                            {/* Actions */}
-                            {renamingId !== pl.id && (
-                                <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <button
+                                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-lg">
+                                    <div
+                                        role="button"
                                         onClick={async e => {
                                             e.stopPropagation()
                                             const songs = await fetchPlaylistSongs(pl.id)
                                             playAll(songs, pl)
                                         }}
-                                        className={`p-1.5 transition-colors rounded ${isThisPlaying ? 'text-sky-500' : 'text-gray-400 hover:text-sky-500'}`}
-                                        title={isThisPlaying ? 'pause' : 'play'}
+                                        className="bg-black/40 rounded-full p-3 cursor-pointer"
                                     >
-                                        {isThisPlaying ? <FaPause size={10} /> : <FaPlay size={10} />}
-                                    </button>
-                                    <button
-                                        ref={el => { menuBtnRefs.current[pl.id] = el }}
-                                        onClick={e => openMenu(pl.id, e)}
-                                        className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-1.5 rounded"
-                                    >
-                                        <FaEllipsisV size={11} />
-                                    </button>
+                                        {isThisPlaying ? <FaPause size={16} className="text-white" /> : <FaPlay size={16} className="text-white ml-0.5" />}
+                                    </div>
                                 </div>
-                            )}
-                        </div>
+                            </div>
+                            <div className="flex flex-col min-w-0">
+                                <p className="text-sm font-medium truncate">{pl.name}</p>
+                                <p className="text-xs text-gray-400">{pl.song_count} songs</p>
+                            </div>
+                        </button>
                     )
                 })}
             </div>
 
-            {menuOpenId && (
-                <>
-                    <div className="fixed inset-0 z-40" onClick={() => setMenuOpenId(null)} />
-                    <div
-                        className="fixed z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl py-1"
-                        style={{ top: menuPos.top, right: menuPos.right }}
-                    >
-                        <button
-                            onClick={() => {
-                                const pl = playlists.find(p => p.id === menuOpenId)
-                                setRenamingId(menuOpenId)
-                                setRenameValue(pl?.name ?? '')
-                                setRenameIcon(pl?.icon ?? 'music')
-                                setMenuOpenId(null)
-                            }}
-                            className="whitespace-nowrap block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700"
-                        >
-                            Rename
-                        </button>
-                        <button
-                            onClick={() => { handleDelete(menuOpenId); setMenuOpenId(null) }}
-                            className="whitespace-nowrap block w-full text-left px-3 py-2 text-sm text-red-500 hover:bg-gray-100 dark:hover:bg-gray-700"
-                        >
-                            Delete
-                        </button>
-                    </div>
-                </>
-            )}
+            <SongPickerModal
+                open={!!modalPlaylist}
+                onClose={closeModal}
+                title={modalPlaylist?.name ?? ''}
+                titleActions={modalTitleActions}
+                songs={modalSongs}
+                selectable
+                actionLabel="Remove"
+                actionLoading={modalLoading}
+                onConfirm={handleRemove}
+                reorderable
+                onReorder={handleReorder}
+                emptyState="no songs — add via ⋮ on any song"
+            />
         </div>
     )
 }

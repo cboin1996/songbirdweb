@@ -26,11 +26,9 @@ export default function Login() {
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault()
         setStatus(statuses.sending)
-        const user = await login(username, password)
-        if (user === undefined) {
-            setStatus(statuses.unauthorized)
-            return
-        }
+        const result = await login(username, password)
+        if (result === 401) { setStatus(statuses.unauthorized); return }
+        if (result === 'error') { setStatus(statuses.error); return }
         window.location.href = next ?? routes.download
     }
 

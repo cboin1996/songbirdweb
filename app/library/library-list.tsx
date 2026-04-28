@@ -2,14 +2,15 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import Image from "next/image"
 import { useRouter, useSearchParams } from "next/navigation"
-import { LibrarySong, Playlist, artworkUrl, songArtworkUrl, fetchLibrarySongs, fetchPlaylists, fetchPlaylistSongs, publishEligibleSongs, removeFromLibrary, downloadSongToFile, addSongToPlaylist, bulkRemoveFromLibrary, bulkAddSongsToPlaylist, syncOfflineSongs, addServerOfflineSong, removeServerOfflineSong, clearServerOfflineSongs } from "../lib/data"
+import { LibrarySong, Playlist, EligibleSong, artworkUrl, songArtworkUrl, fetchLibrarySongs, fetchPlaylists, fetchPlaylistSongs, fetchEligibleSongs, publishSongs, removeFromLibrary, downloadSongToFile, addSongToPlaylist, bulkRemoveFromLibrary, bulkAddSongsToPlaylist, syncOfflineSongs, addServerOfflineSong, removeServerOfflineSong, clearServerOfflineSongs } from "../lib/data"
+import SongPickerModal, { PickerSong } from "../components/song-picker-modal"
 import { cacheSong, uncacheSong, getCachedSongIds, cacheArtworkUrls } from "../lib/offline"
 import { useOnline } from "../lib/use-online"
 import Song from "../components/song"
 import { usePlayer } from "../components/player"
 import { routes } from "../lib/routes"
 import { EVENTS } from "../lib/events"
-import { FaPlay, FaCloudDownloadAlt } from "react-icons/fa"
+import { FaPlay, FaPause, FaCloudDownloadAlt, FaMusic } from "react-icons/fa"
 import PlaylistsView from "./playlists-view"
 import EditsBanner from "./edits-banner"
 
@@ -21,7 +22,7 @@ interface LibraryAlbum {
     collectionId: string
     collectionName: string
     artistName: string
-    artworkUrl100: string
+    artworkUrl100: string | undefined
     songs: LibrarySong[]
 }
 
@@ -42,19 +43,25 @@ function letterKey(str: string): string {
     return /[A-Z]/.test(first) ? first : '#'
 }
 
-function AlbumCard({ album, isCompact, onClick }: { album: LibraryAlbum; isCompact: boolean; onClick: () => void }) {
+function AlbumCard({ album, isCompact, isActive, isPlaying, onClick }: { album: LibraryAlbum; isCompact: boolean; isActive: boolean; isPlaying: boolean; onClick: () => void }) {
     if (isCompact) {
         return (
             <button
                 onClick={onClick}
                 className="flex items-center gap-3 w-full text-left rounded-md p-2 transition-colors hover:bg-gray-100 dark:hover:bg-gray-900"
             >
-                <Image src={artworkUrl(album.artworkUrl100, 200)} alt="" width={40} height={40} className="rounded shrink-0" />
+                {album.artworkUrl100
+                    ? <Image src={artworkUrl(album.artworkUrl100, 200)} alt="" width={40} height={40} className="rounded shrink-0" />
+                    : <div className="w-10 h-10 rounded shrink-0 bg-gray-100 dark:bg-gray-800 flex items-center justify-center"><FaMusic size={12} className="text-gray-400" /></div>
+                }
                 <div className="flex flex-col min-w-0 flex-1">
-                    <span className="text-sm font-medium truncate">{album.collectionName}</span>
+                    <span className={`text-sm font-medium truncate${isActive ? ' text-sky-500' : ''}`}>{album.collectionName}</span>
                     <span className="text-xs text-sky-500 truncate">{album.artistName} · {album.songs.length} songs</span>
                 </div>
-                <FaPlay size={10} className="text-gray-300 dark:text-gray-600 shrink-0 mr-1" />
+                {isActive && isPlaying
+                    ? <FaPause size={10} className="text-sky-500 shrink-0 mr-1" />
+                    : <FaPlay size={10} className="text-gray-300 dark:text-gray-600 shrink-0 mr-1" />
+                }
             </button>
         )
     }
@@ -64,21 +71,21 @@ function AlbumCard({ album, isCompact, onClick }: { album: LibraryAlbum; isCompa
             className="group flex flex-col gap-2 rounded-lg p-2 text-left transition-colors hover:bg-gray-100 dark:hover:bg-gray-900"
         >
             <div className="relative w-full aspect-square">
-                <Image
-                    src={artworkUrl(album.artworkUrl100, 600)}
-                    alt=""
-                    fill
-                    sizes="(max-width: 1024px) 16vw, (max-width: 1280px) 12vw, (max-width: 1536px) 10vw, 9vw"
-                    className="rounded-lg object-cover"
-                />
-                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                {album.artworkUrl100
+                    ? <Image src={artworkUrl(album.artworkUrl100, 600)} alt="" fill sizes="(max-width: 1024px) 16vw, (max-width: 1280px) 12vw, (max-width: 1536px) 10vw, 9vw" className="rounded-lg object-cover" />
+                    : <div className="w-full h-full rounded-lg bg-gray-100 dark:bg-gray-800 flex items-center justify-center"><FaMusic size={24} className="text-gray-400" /></div>
+                }
+                <div className={`absolute inset-0 flex items-center justify-center transition-opacity ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
                     <div className="bg-black/40 rounded-full p-3">
-                        <FaPlay size={16} className="text-white ml-0.5" />
+                        {isActive && isPlaying
+                            ? <FaPause size={16} className="text-white" />
+                            : <FaPlay size={16} className="text-white ml-0.5" />
+                        }
                     </div>
                 </div>
             </div>
             <div className="flex flex-col min-w-0">
-                <span className="text-sm font-medium truncate">{album.collectionName}</span>
+                <span className={`text-sm font-medium truncate${isActive ? ' text-sky-500' : ''}`}>{album.collectionName}</span>
                 <span className="text-xs text-sky-500 truncate">{album.artistName}</span>
                 <span className="text-xs text-gray-400">{album.songs.length} songs</span>
             </div>
@@ -92,7 +99,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     const router = useRouter()
     const searchParams = useSearchParams()
     const viewMode = (searchParams.get('view') as ViewMode | null) ?? 'songs'
-    const { play, current } = usePlayer()
+    const { play, current, isPlaying, playContext } = usePlayer()
     const sectionRefs = useRef<Record<string, HTMLElement | null>>({})
     const isDesktop = useIsDesktop()
     const [cachedIds, setCachedIds] = useState<Set<string>>(new Set())
@@ -102,14 +109,19 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     const [failedIds, setFailedIds] = useState<Set<string>>(new Set())
     const [syncPromptIds, setSyncPromptIds] = useState<string[]>([])
     const [playlists, setPlaylists] = useState<Playlist[]>([])
+    const [eligibleSongs, setEligibleSongs] = useState<EligibleSong[]>([])
+    const [publishModalOpen, setPublishModalOpen] = useState(false)
     const [publishing, setPublishing] = useState(false)
-    const [publishResult, setPublishResult] = useState<number | null>(null)
+    const [offlineSyncModalOpen, setOfflineSyncModalOpen] = useState(false)
     const [selectMode, setSelectMode] = useState(false)
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
     const [lastSelectedId, setLastSelectedId] = useState<string | null>(null)
     const [bulkLoading, setBulkLoading] = useState(false)
     const [bulkPlaylistPicking, setBulkPlaylistPicking] = useState(false)
     const [activeLetter, setActiveLetter] = useState<string | null>(null)
+    const [scrubLetter, setScrubLetter] = useState<string | null>(null)
+    const scrubbing = useRef(false)
+    const barRef = useRef<HTMLDivElement>(null)
     const listContainerRef = useRef<HTMLDivElement>(null)
     const dragState = useRef<{ startId: string; lastId: string; committed: boolean; startY: number; addMode: boolean } | null>(null)
     const selectedIdsRef = useRef(selectedIds)
@@ -177,13 +189,18 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         fetchPlaylists().then(setPlaylists)
     }
 
-    async function handlePublish() {
+    async function openPublishModal() {
+        const eligible = await fetchEligibleSongs()
+        setEligibleSongs(eligible)
+        setPublishModalOpen(true)
+    }
+
+    async function handlePublishConfirm(ids: string[]) {
         setPublishing(true)
-        const count = await publishEligibleSongs()
-        setPublishResult(count)
+        await publishSongs(ids)
         setPublishing(false)
+        setPublishModalOpen(false)
         await refreshSongs()
-        setTimeout(() => setPublishResult(null), 3000)
     }
 
     async function cacheSongsById(songList: LibrarySong[]) {
@@ -331,6 +348,44 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         sectionRefs.current[letter]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     }
 
+    function scrubTo(letter: string) {
+        if (viewMode === 'genres') {
+            const genre = [...genreGrouped.keys()].find(g => letterKey(g) === letter)
+            if (genre) sectionRefs.current[genre]?.scrollIntoView({ behavior: 'instant' as ScrollBehavior, block: 'start' })
+            return
+        }
+        sectionRefs.current[letter]?.scrollIntoView({ behavior: 'instant' as ScrollBehavior, block: 'start' })
+    }
+
+    function letterFromPointer(e: React.PointerEvent): string | null {
+        const bar = barRef.current
+        if (!bar) return null
+        const rect = bar.getBoundingClientRect()
+        const ratio = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height))
+        return ALPHABET[Math.floor(ratio * ALPHABET.length)] ?? null
+    }
+
+    function handleBarPointerDown(e: React.PointerEvent) {
+        e.preventDefault()
+        scrubbing.current = true
+        ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+        const letter = letterFromPointer(e)
+        if (letter && presentLetters.has(letter)) { setScrubLetter(letter); scrubTo(letter) }
+    }
+
+    function handleBarPointerMove(e: React.PointerEvent) {
+        if (!scrubbing.current) return
+        const letter = letterFromPointer(e)
+        if (letter && presentLetters.has(letter) && letter !== scrubLetter) { setScrubLetter(letter); scrubTo(letter) }
+    }
+
+    function handleBarPointerUp(e: React.PointerEvent) {
+        scrubbing.current = false
+        const letter = letterFromPointer(e)
+        if (letter && presentLetters.has(letter)) scrollTo(letter)
+        setScrubLetter(null)
+    }
+
     // restore letter position on mount
     useEffect(() => {
         const letter = searchParams.get('letter')
@@ -382,18 +437,27 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [viewMode, songGrouped, albumGrouped, genreGrouped])
 
+    const VIEW_CONTEXT: Record<ViewMode, { label: string; href: string }> = {
+        songs: { label: 'Library', href: routes.library },
+        artists: { label: 'Artists', href: `${routes.library}?view=artists` },
+        albums: { label: 'Albums', href: `${routes.library}?view=albums` },
+        genres: { label: 'Genres', href: `${routes.library}?view=genres` },
+        playlists: { label: 'Playlists', href: `${routes.library}?view=playlists` },
+    }
+
     function playAll() {
+        const ctx = { ...VIEW_CONTEXT[viewMode], id: viewMode === 'songs' ? 'library' : viewMode }
         if (viewMode === 'albums') {
             const allAlbumSongs = [...albumGrouped.values()].flat().flatMap(a => a.songs)
             const first = allAlbumSongs[0]
             if (!first?.properties) return
             const queue = allAlbumSongs.filter(s => s.properties).map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at }))
-            play({ uuid: first.uuid, properties: first.properties, last_position: first.last_position, last_played_at: first.last_played_at }, queue, { label: 'Library', href: routes.library })
+            play({ uuid: first.uuid, properties: first.properties, last_position: first.last_position, last_played_at: first.last_played_at }, queue, ctx)
         } else {
             const first = allSortedSongs[0]
             if (!first?.properties) return
             const queue = allSortedSongs.filter(s => s.properties).map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at }))
-            play({ uuid: first.uuid, properties: first.properties, last_position: first.last_position, last_played_at: first.last_played_at }, queue, { label: 'Library', href: routes.library })
+            play({ uuid: first.uuid, properties: first.properties, last_position: first.last_position, last_played_at: first.last_played_at }, queue, ctx)
         }
     }
 
@@ -401,7 +465,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         const first = album.songs[0]
         if (!first?.properties) return
         const queue = album.songs.filter(s => s.properties).map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at }))
-        play({ uuid: first.uuid, properties: first.properties, last_position: first.last_position, last_played_at: first.last_played_at }, queue, { label: album.collectionName, href: routes.library })
+        play({ uuid: first.uuid, properties: first.properties, last_position: first.last_position, last_played_at: first.last_played_at }, queue, { label: album.collectionName, href: `${routes.library}?view=albums`, id: `album:${album.collectionId}` })
     }
 
     function enterSelectMode(songId?: string) {
@@ -594,7 +658,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                 <div className="mb-3 px-3 py-2 rounded-lg bg-sky-50 dark:bg-sky-950/30 border border-sky-200 dark:border-sky-800 text-sky-700 dark:text-sky-400 text-xs flex items-center justify-between gap-3">
                     <span>{syncPromptIds.length} song{syncPromptIds.length !== 1 ? 's' : ''} saved offline on another device</span>
                     <div className="flex gap-2 shrink-0">
-                        <button onClick={downloadSyncSongs} className="font-medium underline underline-offset-2 hover:no-underline">Download</button>
+                        <button onClick={() => setOfflineSyncModalOpen(true)} className="font-medium underline underline-offset-2 hover:no-underline">View</button>
                         <button onClick={() => setSyncPromptIds([])} className="opacity-60 hover:opacity-100">Dismiss</button>
                     </div>
                 </div>
@@ -646,11 +710,11 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                 )}
                 {privateSongCount > 0 && viewMode !== 'playlists' && (
                     <button
-                        onClick={handlePublish}
-                        disabled={publishing || !online}
-                        className="flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors disabled:opacity-50 text-gray-400 hover:text-sky-500 border border-gray-200 dark:border-gray-800 hover:border-sky-500 transition-colors"
+                        onClick={openPublishModal}
+                        disabled={!online}
+                        className="flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors disabled:opacity-50 text-gray-400 hover:text-sky-500 border border-gray-200 dark:border-gray-800 hover:border-sky-500"
                     >
-                        {publishing ? 'publishing…' : publishResult !== null ? `published ${publishResult}` : `publish eligible (${privateSongCount})`}
+                        publish eligible ({privateSongCount})
                     </button>
                 )}
                 <div className="flex gap-1">
@@ -687,6 +751,8 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                     key={album.collectionId}
                                     album={album}
                                     isCompact={!isDesktop}
+                                    isActive={playContext?.id === `album:${album.collectionId}`}
+                                    isPlaying={isPlaying}
                                     onClick={() => playAlbum(album)}
                                 />
                             ))}
@@ -717,7 +783,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                         play(
                                             { uuid: song.uuid, properties: song.properties, last_position: song.last_position, last_played_at: song.last_played_at },
                                             queue,
-                                            { label: genre, href: routes.library }
+                                            { label: genre, href: `${routes.library}?view=genres`, id: `genre:${genre}` }
                                         )
                                     }}
                                     inLibrary={true}
@@ -765,7 +831,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                         play(
                                             { uuid: song.uuid, properties: song.properties, last_position: song.last_position, last_played_at: song.last_played_at },
                                             queue,
-                                            { label: 'Library', href: routes.library }
+                                            { ...VIEW_CONTEXT[viewMode], id: viewMode === 'songs' ? 'library' : viewMode }
                                         )
                                     }}
                                     inLibrary={true}
@@ -857,24 +923,74 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
             )}
 
             {/* A-Z index */}
-            {viewMode !== 'playlists' && <div className="fixed right-0 top-1/2 -translate-y-1/2 z-50 flex flex-col items-center py-2 touch-none select-none">
-                {ALPHABET.map(letter => (
-                    <button
-                        key={letter}
-                        onClick={() => scrollTo(letter)}
-                        disabled={!presentLetters.has(letter)}
-                        className={`text-[10px] font-semibold w-7 h-5 leading-none transition-colors ${
-                            letter === activeLetter
-                                ? 'text-gray-500 dark:text-gray-400'
-                                : presentLetters.has(letter)
-                                    ? 'text-sky-500 active:text-sky-300'
-                                    : 'text-gray-200 dark:text-gray-700 cursor-default'
-                        }`}
+            {viewMode !== 'playlists' && (
+                <div className="fixed right-0 top-1/2 -translate-y-1/2 z-50 flex items-center">
+                    {/* scrub bubble */}
+                    {scrubLetter && (
+                        <div className="mr-1 w-10 h-10 rounded-full bg-gray-800 dark:bg-gray-200 flex items-center justify-center shadow-lg pointer-events-none">
+                            <span className="text-lg font-bold text-white dark:text-gray-900 leading-none">{scrubLetter}</span>
+                        </div>
+                    )}
+                    <div
+                        ref={barRef}
+                        className="flex flex-col items-center py-2 touch-none select-none cursor-pointer"
+                        onPointerDown={handleBarPointerDown}
+                        onPointerMove={handleBarPointerMove}
+                        onPointerUp={handleBarPointerUp}
+                        onPointerCancel={() => { scrubbing.current = false; setScrubLetter(null) }}
                     >
-                        {letter}
-                    </button>
-                ))}
-            </div>}
+                        {ALPHABET.map(letter => (
+                            <span
+                                key={letter}
+                                className={`text-[10px] font-semibold w-7 h-5 flex items-center justify-center leading-none transition-colors ${
+                                    letter === (scrubLetter ?? activeLetter)
+                                        ? 'text-gray-500 dark:text-gray-400'
+                                        : presentLetters.has(letter)
+                                            ? 'text-sky-500'
+                                            : 'text-gray-200 dark:text-gray-700'
+                                }`}
+                            >
+                                {letter}
+                            </span>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* publish modal */}
+            <SongPickerModal
+                open={publishModalOpen}
+                onClose={() => setPublishModalOpen(false)}
+                title="Publish eligible songs"
+                songs={eligibleSongs.map(s => ({ uuid: s.uuid, properties: s.properties }))}
+                selectable
+                initialSelected={new Set(eligibleSongs.map(s => s.uuid))}
+                actionLabel="Publish"
+                actionLoading={publishing}
+                onConfirm={handlePublishConfirm}
+                emptyState="no eligible songs"
+            />
+
+            {/* offline sync modal */}
+            <SongPickerModal
+                open={offlineSyncModalOpen}
+                onClose={() => setOfflineSyncModalOpen(false)}
+                title="Songs saved offline on another device"
+                songs={syncPromptIds.flatMap(id => {
+                    const s = songs.find(s => s.uuid === id)
+                    return s ? [{ uuid: s.uuid, properties: s.properties, artwork_cached: s.artwork_cached } as PickerSong] : []
+                })}
+                selectable
+                initialSelected={new Set(syncPromptIds)}
+                actionLabel="Download"
+                onConfirm={async (ids) => {
+                    setOfflineSyncModalOpen(false)
+                    const toSync = songs.filter(s => ids.includes(s.uuid))
+                    await cacheSongsById(toSync)
+                    setSyncPromptIds(prev => prev.filter(id => !ids.includes(id)))
+                }}
+                emptyState="no songs to sync"
+            />
         </div>
     )
 }
