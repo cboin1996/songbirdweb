@@ -626,8 +626,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                     {showQueue && queue.length > 0 && (
                         <div
                             data-testid="player-queue-panel"
-                            className="fixed z-50 left-0 right-0 bottom-[88px] border-t border-gray-100 dark:border-gray-800 bg-white/95 dark:bg-gray-950/95 backdrop-blur-md max-h-56 overflow-y-auto
-                                       md:left-auto md:right-4 md:bottom-20 md:w-80 md:max-h-[min(480px,70vh)] md:rounded-xl md:border md:border-gray-200 md:dark:border-gray-700 md:shadow-2xl"
+                            className="fixed z-[60] left-0 right-0 bottom-[88px] border-t border-gray-100 dark:border-gray-800 bg-white/95 dark:bg-gray-950/95 backdrop-blur-md max-h-56 overflow-y-auto
+                                       md:left-auto md:right-4 md:bottom-24 md:w-80 md:max-h-[min(480px,70vh)] md:rounded-xl md:border md:border-gray-200 md:dark:border-gray-700 md:shadow-2xl"
                         >
                             {playContext && (
                                 <div className="px-4 py-1.5 border-b border-gray-100 dark:border-gray-800">

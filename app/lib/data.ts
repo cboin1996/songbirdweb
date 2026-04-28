@@ -284,6 +284,7 @@ export interface DownloadedSong {
   parentSongId?: string | null;
   rootSongId?: string | null;
   source?: string | null;
+  owner_id?: string | null;
 }
 
 export function artworkUrl(url: string, size: number): string {
@@ -293,7 +294,7 @@ export function artworkUrl(url: string, size: number): string {
 export function songArtworkUrl(songId: string | undefined, artworkCached: boolean | undefined, artworkUrl100: string | undefined, size: number): string | null {
   if (songId && artworkCached) {
     const sizeParam = size <= 300 ? 'thumb' : 'full'
-    return `${API_V1_PATH}/songs/${songId}/artwork?size=${sizeParam}`
+    return `${API_V1_PATH}/songs/${songId}/artwork/${sizeParam}`
   }
   return artworkUrl100 ? artworkUrl(artworkUrl100, size) : null
 }
@@ -323,6 +324,7 @@ export interface AlbumProps {
 
 interface DownloadedSongIds {
   song_ids: string[];
+  cached: boolean;
 }
 
 export async function downloadSongViaUrl(
@@ -388,6 +390,7 @@ interface IndexedProperties {
   properties: Properties;
   file_path: string;
   url: string;
+  owner_id: string | null;
 }
 
 export async function fetchPropertiesFromIndex(
@@ -399,7 +402,7 @@ export async function fetchPropertiesFromIndex(
     method: "GET",
   });
   if (result === undefined) return undefined;
-  return result.map(song => ({ songId: song.uuid, properties: song.properties }));
+  return result.map(song => ({ songId: song.uuid, properties: song.properties, owner_id: song.owner_id }));
 }
 
 interface TaggingResponse {

@@ -1,32 +1,23 @@
 'use client'
-import { useEffect, useState } from "react";
-import { DownloadedSong, downloadSongViaUrl, downloadSongToFile, fetchLibrary, tagSong } from "../lib/data";
+import { useEffect, useRef, useState } from "react";
+import { DownloadedSong, downloadSongViaUrl, downloadSongToFile, addToLibrary, fetchLibrary, tagSong } from "../lib/data";
 import { usePlayer } from "./player";
 import { routes } from "../lib/routes";
 import Song from "./song";
 import { useScrollRestoration } from "../lib/use-scroll-restoration";
-import Input from "../components/input"
-import Button from "../components/button"
-import { FaX } from "react-icons/fa6";
 import Spinner from "./spinner";
+import { FaX } from "react-icons/fa6";
 
 export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[] }) {
-    const statuses = {
-        paste: "enter a url",
-        downloading: "downloading",
-        tagging: "tagging",
-        taggingError: "tagging error, try again",
-        urlDownloadError: "download error, try again",
-        downloadFileError: "download error, try again",
-        noSongSelected: "select a song first",
-    }
-
     const noActiveIndex = -1
     const [songs, setSongs] = useState<DownloadedSong[]>(initialSongs)
     const [libraryIds, setLibraryIds] = useState<Set<string>>(new Set())
     const [activeIndex, setActiveIndex] = useState(noActiveIndex)
-    const [status, setStatus] = useState("")
     const [text, setText] = useState('')
+    const [status, setStatus] = useState<'idle' | 'downloading' | 'tagging' | 'ready' | 'saving' | 'error'>('idle')
+    const [errorMsg, setErrorMsg] = useState('')
+    const [readySong, setReadySong] = useState<DownloadedSong | null>(null)
+    const inputRef = useRef<HTMLInputElement>(null)
     const { play, current } = usePlayer()
     useScrollRestoration()
 
@@ -34,54 +25,70 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
         fetchLibrary().then(entries => setLibraryIds(new Set(entries.map(e => e.song_id))))
     }, [])
 
+    useEffect(() => {
+        if (activeIndex !== noActiveIndex && status === 'idle') {
+            setTimeout(() => inputRef.current?.focus(), 50)
+        }
+    }, [activeIndex, status])
+
     const downloaded = songs.filter(s => s.songId !== undefined)
     const fromItunes = songs.filter(s => s.songId === undefined)
     const activeSong = activeIndex !== noActiveIndex ? songs[activeIndex] : undefined
-    const displayDownloadInput = activeSong !== undefined
-    const isDownloading = status === statuses.downloading || status === statuses.tagging
+    const isDownloading = status === 'downloading' || status === 'tagging' || status === 'saving'
 
-    async function triggerFileDownload(song: DownloadedSong) {
-        if (!song.songId) { setStatus(statuses.downloadFileError); return }
-        const ok = await downloadSongToFile(song.songId, song.properties.trackName, song.properties.artistName)
-        if (!ok) { setStatus(statuses.downloadFileError); return }
-        setText("")
+    function dismiss() {
         setActiveIndex(noActiveIndex)
+        setText('')
+        setStatus('idle')
+        setErrorMsg('')
+        setReadySong(null)
     }
 
-    async function handleSongSelection() {
-        const song = songs[activeIndex]
-        if (!song.songId) { setStatus(statuses.paste); return }
-        triggerFileDownload(song)
-    }
-
-    async function handleSongDownload(e: React.ChangeEvent<HTMLFormElement>) {
-        e.preventDefault()
-        if (activeIndex === noActiveIndex) {
-            setStatus(statuses.noSongSelected)
-            return
+    async function handleAddToLibrary() {
+        if (!readySong?.songId) return
+        setStatus('saving')
+        const ok = await addToLibrary(readySong.songId)
+        if (ok) {
+            setLibraryIds(prev => new Set([...prev, readySong.songId!]))
+            dismiss()
+        } else {
+            setStatus('error')
+            setErrorMsg('could not add to library')
         }
+    }
+
+    async function handleDeviceDownload() {
+        if (!readySong?.songId) return
+        setStatus('saving')
+        const ok = await downloadSongToFile(readySong.songId, readySong.properties.trackName, readySong.properties.artistName)
+        if (ok) dismiss()
+        else { setStatus('error'); setErrorMsg('file download failed') }
+    }
+
+    async function handleSongDownload(e: React.FormEvent) {
+        e.preventDefault()
         const song = songs[activeIndex]
-        setStatus(statuses.downloading)
+        if (!song || !text.trim()) return
+        setStatus('downloading')
+        setErrorMsg('')
         const result = await downloadSongViaUrl(text)
-        if (result === undefined || result.song_ids.length === 0) {
-            setStatus(statuses.urlDownloadError)
-            return
+        if (!result || result.song_ids.length === 0) {
+            setStatus('error'); setErrorMsg('download failed'); return
         }
-        setStatus(statuses.tagging)
         const songId = result.song_ids[0]
-        const tagged = await tagSong(songId, song.properties)
-        if (tagged === undefined) {
-            setStatus(statuses.taggingError)
+        if (result.cached) {
+            const existing = songs.find(s => s.songId === songId) ?? { ...song, songId }
+            setReadySong(existing)
+            setStatus('ready')
             return
         }
-        const downloaded = { ...song, songId }
-        setSongs(prev => prev.map((s, i) => i === activeIndex ? downloaded : s))
-        triggerFileDownload(downloaded)
-    }
-
-    function resetText(e: React.MouseEvent) {
-        e.preventDefault()
-        setText("")
+        setStatus('tagging')
+        const tagged = await tagSong(songId, song.properties)
+        if (!tagged) { setStatus('error'); setErrorMsg('tagging failed'); return }
+        const updated = { ...song, songId }
+        setSongs(prev => prev.map((s, i) => i === activeIndex ? updated : s))
+        setReadySong(updated)
+        setStatus('ready')
     }
 
     function renderSection(sectionSongs: DownloadedSong[], label: string) {
@@ -103,10 +110,13 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
                                         play({ uuid: song.songId, properties: song.properties }, q, { label: 'Downloads', href: routes.downloadSong })
                                     } else {
                                         setActiveIndex(globalIndex)
-                                        setStatus(statuses.paste)
+                                        setStatus('idle')
+                                        setErrorMsg('')
+                                        setReadySong(null)
                                     }
                                 }}
                                 inLibrary={song.songId ? libraryIds.has(song.songId) : false}
+                                isPrivate={!!song.owner_id}
                                 showSource={true}
                             />
                         )
@@ -117,32 +127,7 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
     }
 
     return (
-        <div>
-            {displayDownloadInput && (
-                <div>
-                    <form className="flex flex-row gap-2" onSubmit={handleSongDownload}>
-                        <Input
-                            placeholder={`${activeSong.properties.trackName} - ${activeSong.properties.artistName}`}
-                            disabled={isDownloading}
-                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setText(e.target.value)}
-                            value={text}
-                            type="url"
-                            classAttrs="md:w-96 w-80"
-                        />
-                        <button onClick={resetText} type="button">
-                            <FaX className="-mx-8 text-gray-700 hover:bg-gray-500 rounded-lg" />
-                        </button>
-                        <Button disabled={isDownloading || text === ""} text="download" />
-                    </form>
-                    <div className="flex flex-row gap-2 items-center">
-                        <p>{status}</p>
-                        {isDownloading && <Spinner />}
-                        {status === statuses.downloadFileError && (
-                            <Button text="retry" onClick={handleSongSelection} disabled={isDownloading} />
-                        )}
-                    </div>
-                </div>
-            )}
+        <div className={activeSong ? 'pb-24' : ''}>
             {songs.length === 0
                 ? <p>no songs found.</p>
                 : <>
@@ -150,6 +135,76 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
                     {renderSection(fromItunes, "matches")}
                 </>
             }
+
+            {activeSong && (
+                <div className={`fixed left-0 right-0 z-[55] bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 shadow-2xl ${current ? 'bottom-[84px]' : 'bottom-0'}`}>
+                    {status === 'ready' ? (
+                        <div className="flex items-center gap-3 px-4 py-3">
+                            <button type="button" onClick={dismiss} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 shrink-0 transition-colors">
+                                <FaX size={11} />
+                            </button>
+                            <div className="min-w-0 flex-1">
+                                <p className="text-sm font-medium truncate">{activeSong.properties.trackName}</p>
+                                <p className="text-xs text-gray-400">ready — what would you like to do?</p>
+                            </div>
+                            <button
+                                onClick={handleAddToLibrary}
+                                className="text-sm px-3 py-1.5 bg-sky-500 text-white rounded-lg hover:bg-sky-600 transition-colors shrink-0"
+                            >
+                                add to library
+                            </button>
+                            <button
+                                onClick={handleDeviceDownload}
+                                className="text-sm px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors shrink-0"
+                            >
+                                download file
+                            </button>
+                        </div>
+                    ) : (
+                        <form onSubmit={handleSongDownload} className="flex items-center gap-3 px-4 py-3">
+                            <button type="button" onClick={dismiss} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 shrink-0 transition-colors">
+                                <FaX size={11} />
+                            </button>
+                            <div className="min-w-0 hidden sm:block shrink-0 w-40">
+                                <p className="text-sm font-medium truncate">{activeSong.properties.trackName}</p>
+                                <p className="text-xs text-gray-400 truncate">{activeSong.properties.artistName}</p>
+                            </div>
+                            <input
+                                ref={inputRef}
+                                type="url"
+                                placeholder="paste audio url…"
+                                value={text}
+                                disabled={isDownloading}
+                                onChange={e => { setText(e.target.value); if (status === 'error') { setStatus('idle'); setErrorMsg('') } }}
+                                className="flex-1 text-sm border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-1.5 bg-transparent focus:outline-none focus:ring-1 focus:ring-sky-500 min-w-0 disabled:opacity-50"
+                            />
+                            {isDownloading ? (
+                                <div className="flex items-center gap-2 shrink-0">
+                                    <Spinner />
+                                    <span className="text-xs text-gray-400">
+                                        {status === 'tagging' ? 'tagging…' : status === 'saving' ? 'saving…' : 'downloading…'}
+                                    </span>
+                                </div>
+                            ) : status === 'error' ? (
+                                <div className="flex items-center gap-2 shrink-0">
+                                    <span className="text-xs text-red-500">{errorMsg}</span>
+                                    <button type="submit" className="text-xs px-3 py-1.5 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors">
+                                        retry
+                                    </button>
+                                </div>
+                            ) : (
+                                <button
+                                    type="submit"
+                                    disabled={!text}
+                                    className="text-sm px-3 py-1.5 bg-sky-500 text-white rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-sky-600 transition-colors shrink-0"
+                                >
+                                    download
+                                </button>
+                            )}
+                        </form>
+                    )}
+                </div>
+            )}
         </div>
     )
 }

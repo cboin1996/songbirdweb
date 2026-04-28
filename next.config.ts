@@ -7,8 +7,7 @@ const nextConfig: NextConfig = {
   },
   images: {
     localPatterns: [
-      { pathname: "/v1/**", search: "?size=thumb" },
-      { pathname: "/v1/**", search: "?size=full" },
+      { pathname: "/v1/**" },
     ],
     remotePatterns: [
       { protocol: "https", hostname: "**.mzstatic.com" },

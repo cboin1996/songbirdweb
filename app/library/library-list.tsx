@@ -68,7 +68,7 @@ function AlbumCard({ album, isCompact, onClick }: { album: LibraryAlbum; isCompa
                     src={artworkUrl(album.artworkUrl100, 600)}
                     alt=""
                     fill
-                    sizes="(max-width: 1024px) 50vw, (max-width: 1536px) 33vw, 25vw"
+                    sizes="(max-width: 1024px) 16vw, (max-width: 1280px) 12vw, (max-width: 1536px) 10vw, 9vw"
                     className="rounded-lg object-cover"
                 />
                 <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
@@ -109,6 +109,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     const [lastSelectedId, setLastSelectedId] = useState<string | null>(null)
     const [bulkLoading, setBulkLoading] = useState(false)
     const [bulkPlaylistPicking, setBulkPlaylistPicking] = useState(false)
+    const [activeLetter, setActiveLetter] = useState<string | null>(null)
     const listContainerRef = useRef<HTMLDivElement>(null)
     const dragState = useRef<{ startId: string; lastId: string; committed: boolean; startY: number; addMode: boolean } | null>(null)
     const selectedIdsRef = useRef(selectedIds)
@@ -342,7 +343,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
-    // update URL letter as user scrolls through sections
+    // update URL letter + active sidebar highlight as user scrolls through sections
     useEffect(() => {
         if (viewMode === 'playlists') return
         const entries = Object.entries(sectionRefs.current).filter(([, el]) => el != null)
@@ -355,6 +356,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                     if (!key) continue
                     if (rafId) cancelAnimationFrame(rafId)
                     rafId = requestAnimationFrame(() => {
+                        setActiveLetter(key)
                         const p = new URLSearchParams(window.location.search)
                         if (p.get('letter') === key) return
                         p.set('letter', key)
@@ -364,7 +366,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
             }
         }, { rootMargin: '-20% 0px -70% 0px' })
         entries.forEach(([, el]) => el && obs.observe(el))
-        return () => { obs.disconnect(); if (rafId) cancelAnimationFrame(rafId) }
+        return () => { obs.disconnect(); if (rafId) cancelAnimationFrame(rafId); setActiveLetter(null) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [viewMode, songGrouped, albumGrouped, genreGrouped])
 
@@ -665,7 +667,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                             <span className="text-xs font-bold text-sky-500 tracking-widest">{letter}</span>
                         </div>
                         <div className={isDesktop
-                            ? "grid grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-2 md:gap-4 mb-4"
+                            ? "grid grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 2xl:grid-cols-9 gap-2 mb-4"
                             : "flex flex-col mb-4"
                         }>
                             {albums.map(album => (
@@ -850,9 +852,11 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                         onClick={() => scrollTo(letter)}
                         disabled={!presentLetters.has(letter)}
                         className={`text-[10px] font-semibold w-7 h-5 leading-none transition-colors ${
-                            presentLetters.has(letter)
-                                ? 'text-sky-500 active:text-sky-300'
-                                : 'text-gray-200 dark:text-gray-700 cursor-default'
+                            letter === activeLetter
+                                ? 'text-gray-500 dark:text-gray-400'
+                                : presentLetters.has(letter)
+                                    ? 'text-sky-500 active:text-sky-300'
+                                    : 'text-gray-200 dark:text-gray-700 cursor-default'
                         }`}
                     >
                         {letter}
