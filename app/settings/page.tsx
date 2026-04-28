@@ -147,6 +147,8 @@ export default function Page() {
                         />
                         <Button
                             text="update password"
+                            type="submit"
+                            variant="primary"
                             disabled={!currentPassword || !newPassword || !confirmPassword}
                         />
                         {error && <p className="text-red-500 text-sm">{error}</p>}

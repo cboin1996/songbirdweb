@@ -11,3 +11,7 @@ export const routes = {
     settings: '/settings',
     info: '/info',
 } as const
+
+export function editSongRoute(songId: string) {
+    return `/songs/${songId}/edit`
+}

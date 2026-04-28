@@ -11,7 +11,7 @@ import { FaPlay, FaPause, FaTimes, FaUndo, FaRedo, FaTrash, FaCut } from 'react-
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { usePlayer } from './player'
-import { routes } from '../lib/routes'
+import { routes, editSongRoute } from '../lib/routes'
 
 import { snap as _snap } from '../lib/snap'
 import ScrubInput from './scrub-input'
@@ -1826,7 +1826,7 @@ export default function EditorModal({
     await addToLibrary(restoredId)
     setRestoring(false)
     router.refresh()
-    router.replace(`/songs/${restoredId}/edit`)
+    router.replace(editSongRoute(restoredId))
   }
 
   async function handleRevertLastSave() {
@@ -1837,7 +1837,7 @@ export default function EditorModal({
     await addToLibrary(parentSongId)
     setRestoring(false)
     router.refresh()
-    router.replace(`/songs/${parentSongId}/edit`)
+    router.replace(editSongRoute(parentSongId))
   }
 
   async function handleSave() {
@@ -1865,7 +1865,7 @@ export default function EditorModal({
         await deleteEditDraft(activeSongIdRef.current)
         const landId = (!overwrite && result.result_song_id) ? result.result_song_id : activeSongIdRef.current
         router.refresh()
-        router.replace(`/songs/${landId}/edit`)
+        router.replace(editSongRoute(landId))
       }
       if (result.status === 'failed') {
         clearInterval(pollIntervalRef.current!)
@@ -2252,8 +2252,7 @@ export default function EditorModal({
         </div>
 
         {/* audio tab */}
-        {tab === 'audio' && (
-          <div className="p-4 flex flex-col gap-4">
+        <div className={`p-4 flex flex-col gap-4 ${tab !== 'audio' ? 'hidden' : ''}`}>
 
             {/* original waveform */}
             <div
@@ -2634,11 +2633,9 @@ export default function EditorModal({
               </div>
             </div>
           </div>
-        )}
 
         {/* properties tab */}
-        {tab === 'properties' && (
-          <div className="p-4 flex flex-col gap-3">
+        <div className={`p-4 flex flex-col gap-3 ${tab !== 'properties' ? 'hidden' : ''}`}>
             {(
               [
                 ['trackName', 'Track name'],
@@ -2732,7 +2729,6 @@ export default function EditorModal({
               {propStatus === 'error' && <span className="text-red-400 text-xs">save failed</span>}
             </div>
           </div>
-        )}
 
       {/* unified region context menu — trim = add/paste/select-all; cut/fade = copy/cut/paste/remove */}
       {regionContextMenu && (

@@ -454,21 +454,21 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
             const allAlbumSongs = [...albumGrouped.values()].flat().flatMap(a => a.songs)
             const first = allAlbumSongs[0]
             if (!first?.properties) return
-            const queue = allAlbumSongs.filter(s => s.properties).map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at }))
-            play({ uuid: first.uuid, properties: first.properties, last_position: first.last_position, last_played_at: first.last_played_at }, queue, ctx)
+            const queue = allAlbumSongs.filter(s => s.properties).map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached }))
+            play({ uuid: first.uuid, properties: first.properties, last_position: first.last_position, last_played_at: first.last_played_at, artwork_cached: first.artwork_cached }, queue, ctx)
         } else {
             const first = allSortedSongs[0]
             if (!first?.properties) return
-            const queue = allSortedSongs.filter(s => s.properties).map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at }))
-            play({ uuid: first.uuid, properties: first.properties, last_position: first.last_position, last_played_at: first.last_played_at }, queue, ctx)
+            const queue = allSortedSongs.filter(s => s.properties).map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached }))
+            play({ uuid: first.uuid, properties: first.properties, last_position: first.last_position, last_played_at: first.last_played_at, artwork_cached: first.artwork_cached }, queue, ctx)
         }
     }
 
     function playAlbum(album: LibraryAlbum) {
         const first = album.songs[0]
         if (!first?.properties) return
-        const queue = album.songs.filter(s => s.properties).map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at }))
-        play({ uuid: first.uuid, properties: first.properties, last_position: first.last_position, last_played_at: first.last_played_at }, queue, { label: album.collectionName, href: `${routes.library}?view=albums`, id: `album:${album.collectionId}` })
+        const queue = album.songs.filter(s => s.properties).map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached }))
+        play({ uuid: first.uuid, properties: first.properties, last_position: first.last_position, last_played_at: first.last_played_at, artwork_cached: first.artwork_cached }, queue, { label: album.collectionName, href: `${routes.library}?view=albums`, id: `album:${album.collectionId}` })
     }
 
     function enterSelectMode(songId?: string) {
@@ -782,9 +782,9 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                         if (!song.properties) return
                                         const queue = group
                                             .filter(s => s.properties)
-                                            .map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at }))
+                                            .map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached }))
                                         play(
-                                            { uuid: song.uuid, properties: song.properties, last_position: song.last_position, last_played_at: song.last_played_at },
+                                            { uuid: song.uuid, properties: song.properties, last_position: song.last_position, last_played_at: song.last_played_at, artwork_cached: song.artwork_cached },
                                             queue,
                                             { label: genre, href: `${routes.library}?view=genres`, id: `genre:${genre}` }
                                         )
@@ -830,9 +830,9 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                         }
                                         const queue = allSortedSongs
                                             .filter(s => s.properties)
-                                            .map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at }))
+                                            .map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached }))
                                         play(
-                                            { uuid: song.uuid, properties: song.properties, last_position: song.last_position, last_played_at: song.last_played_at },
+                                            { uuid: song.uuid, properties: song.properties, last_position: song.last_position, last_played_at: song.last_played_at, artwork_cached: song.artwork_cached },
                                             queue,
                                             { ...VIEW_CONTEXT[viewMode], id: viewMode === 'songs' ? 'library' : viewMode }
                                         )
@@ -965,7 +965,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                 open={publishModalOpen}
                 onClose={() => setPublishModalOpen(false)}
                 title="Publish songs"
-                songs={eligibleSongs.map(s => ({ uuid: s.uuid, properties: s.properties }))}
+                songs={eligibleSongs.map(s => ({ uuid: s.uuid, properties: s.properties, artwork_cached: s.artwork_cached }))}
                 selectable
                 initialSelected={new Set(eligibleSongs.filter(s => s.eligible).map(s => s.uuid))}
                 actionLabel="Publish"

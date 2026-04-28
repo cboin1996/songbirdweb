@@ -3,6 +3,7 @@ import { useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react
 import Link from 'next/link'
 import { ImportJobResult, listImportJobs, pollImportJob } from '../lib/data'
 import { routes } from '../lib/routes'
+import SearchInput from './search-input'
 
 const PAGE_SIZE = 20
 const POLL_INTERVAL_MS = 3000
@@ -23,13 +24,14 @@ export default function ImportJobsTable({
   const [jobs, setJobs] = useState<ImportJobResult[]>(initialJobs)
   const [total, setTotal] = useState(initialTotal)
   const [filter, setFilter] = useState('')
+  const [page, setPage] = useState(0)
+  const [loading, setLoading] = useState(false)
+  const intervalsRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map())
 
   useEffect(() => {
     setJobs(initialJobs)
     setTotal(initialTotal)
   }, [initialJobs, initialTotal])
-  const [page, setPage] = useState(0)
-  const intervalsRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map())
 
   useImperativeHandle(tableRef, () => ({
     addJob(job: ImportJobResult, replaceId?: string) {
@@ -77,10 +79,12 @@ export default function ImportJobsTable({
   }, [])
 
   async function goToPage(p: number) {
+    setLoading(true)
     const data = await listImportJobs(PAGE_SIZE, p * PAGE_SIZE)
     setJobs(data.jobs)
     setTotal(data.total)
     setPage(p)
+    setLoading(false)
   }
 
   const filtered = useMemo(() => {
@@ -94,32 +98,49 @@ export default function ImportJobsTable({
   }, [jobs, filter])
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
-  const visible = filtered
-  const [loading, setLoading] = useState(false)
-
-  async function goToPageWithLoading(p: number) {
-    setLoading(true)
-    await goToPage(p)
-    setLoading(false)
-  }
 
   function statusBadge(job: ImportJobResult) {
-    if (job.status === 'done') return <span className="text-green-500">{job.status}</span>
-    if (job.status === 'failed') return <span className="text-red-500">{job.status}</span>
-    if (job.status === 'duplicate') return <span className="text-amber-400">{job.status}</span>
-    return <span className="text-sky-400">{job.status}</span>
+    switch (job.status) {
+      case 'done':
+        return <span className="text-green-500">done</span>
+      case 'failed':
+        return <span className="text-red-500">failed</span>
+      case 'duplicate':
+        return <span className="text-amber-500">duplicate</span>
+      case 'processing':
+        return <span className="text-sky-500 animate-pulse">importing…</span>
+      default:
+        return <span className="text-gray-400">queued</span>
+    }
+  }
+
+  function infoCell(job: ImportJobResult) {
+    if (job.status === 'failed' && job.error)
+      return <span className="text-red-400 text-xs">{job.error}</span>
+    if (job.status === 'duplicate' && job.duplicate_of)
+      return (
+        <Link href={`${routes.library}?song=${job.duplicate_of}`} className="text-amber-500 text-xs hover:underline">
+          view existing
+        </Link>
+      )
+    if (job.status === 'done' && job.song_id)
+      return (
+        <Link href={`${routes.library}?song=${job.song_id}`} className="text-sky-500 text-xs hover:underline">
+          view in library
+        </Link>
+      )
+    return null
   }
 
   return (
     <div className="w-full flex flex-col gap-3">
       <div className="flex items-center justify-between gap-3">
         <span className="text-gray-400 text-sm font-medium uppercase tracking-wide">Import history</span>
-        <input
-          type="text"
+        <SearchInput
           value={filter}
-          onChange={e => { setFilter(e.target.value) }}
+          onChange={setFilter}
           placeholder="filter by name or status"
-          className="rounded-md border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:border-sky-500 focus:outline-none"
+          className="w-48"
         />
       </div>
 
@@ -128,64 +149,48 @@ export default function ImportJobsTable({
       )}
 
       {jobs.length > 0 && (
-      <div className={`overflow-x-auto ${loading ? 'opacity-50' : ''}`}>
-        <table className="w-full text-sm border-collapse">
-          <thead>
-            <tr className="text-left text-gray-400 border-b border-gray-700">
-              <th className="pb-2 pr-4 font-medium">date</th>
-              <th className="pb-2 pr-4 font-medium">track</th>
-              <th className="pb-2 pr-4 font-medium">status</th>
-              <th className="pb-2 font-medium">info</th>
-            </tr>
-          </thead>
-          <tbody>
-            {visible.map(job => (
-              <tr key={job.job_id} className="border-b border-gray-800">
-                <td className="py-2 pr-4 text-gray-400 whitespace-nowrap">
-                  {job.created_at ? new Date(job.created_at).toLocaleString() : '—'}
-                </td>
-                <td className="py-2 pr-4 text-white max-w-xs truncate">
-                  {job.song_id ? (
-                    <Link
-                      href={`${routes.library}?song=${job.song_id}`}
-                      className="text-sky-500 hover:underline truncate"
-                    >
-                      {job.track_name ?? job.filename ?? job.job_id}
-                    </Link>
-                  ) : (
-                    <span className="truncate">{job.track_name ?? job.filename ?? job.job_id}</span>
-                  )}
-                </td>
-                <td className="py-2 pr-4">{statusBadge(job)}</td>
-                <td className="py-2">
-                  {job.status === 'failed' && job.error && (
-                    <span className="text-red-400 text-xs">{job.error}</span>
-                  )}
-                  {job.status === 'duplicate' && job.duplicate_of && (
-                    <span className="text-amber-400 text-xs">dup of {job.duplicate_of}</span>
-                  )}
-                </td>
+        <div className={`overflow-x-auto ${loading ? 'opacity-50' : ''}`}>
+          <table className="w-full text-sm border-collapse">
+            <thead>
+              <tr className="text-left text-gray-400 border-b border-gray-200 dark:border-gray-700">
+                <th className="pb-2 pr-4 font-medium">date</th>
+                <th className="pb-2 pr-4 font-medium">file</th>
+                <th className="pb-2 pr-4 font-medium">status</th>
+                <th className="pb-2 font-medium">info</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {filtered.map(job => (
+                <tr key={job.job_id} className="border-b border-gray-100 dark:border-gray-800">
+                  <td className="py-2 pr-4 text-gray-400 whitespace-nowrap text-xs">
+                    {job.created_at ? new Date(job.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
+                  </td>
+                  <td className="py-2 pr-4 max-w-xs truncate">
+                    {job.track_name ?? job.filename ?? <span className="text-gray-400 font-mono text-xs">{job.job_id.slice(0, 8)}…</span>}
+                  </td>
+                  <td className="py-2 pr-4">{statusBadge(job)}</td>
+                  <td className="py-2">{infoCell(job)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {totalPages > 1 && (
         <div className="flex items-center gap-2 self-end text-sm">
           <button
-            onClick={() => goToPageWithLoading(Math.max(0, page - 1))}
+            onClick={() => goToPage(Math.max(0, page - 1))}
             disabled={page === 0 || loading}
-            className="px-3 py-1 rounded-md border border-gray-700 text-gray-400 disabled:opacity-30 hover:border-sky-500"
+            className="px-3 py-1 rounded-md border border-gray-200 dark:border-gray-700 text-gray-400 disabled:opacity-30 hover:border-sky-500"
           >
             prev
           </button>
           <span className="text-gray-400">{page + 1} / {totalPages}</span>
           <button
-            onClick={() => goToPageWithLoading(Math.min(totalPages - 1, page + 1))}
-            disabled={page === totalPages - 1 || loading}
-            className="px-3 py-1 rounded-md border border-gray-700 text-gray-400 disabled:opacity-30 hover:border-sky-500"
+            onClick={() => goToPage(Math.min(totalPages - 1, page + 1))}
+            disabled={page >= totalPages - 1 || loading}
+            className="px-3 py-1 rounded-md border border-gray-200 dark:border-gray-700 text-gray-400 disabled:opacity-30 hover:border-sky-500"
           >
             next
           </button>

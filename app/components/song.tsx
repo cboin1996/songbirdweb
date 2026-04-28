@@ -7,6 +7,7 @@ import { cacheSong, uncacheSong } from "../lib/offline";
 import { FaBookmark, FaRegBookmark, FaEllipsisV, FaLock, FaCloudDownloadAlt } from "react-icons/fa";
 import Image from "next/image";
 import { usePlayer } from "./player";
+import { editSongRoute } from "../lib/routes";
 import { useUser } from "../lib/user-context";
 import { useOnline } from "../lib/use-online";
 import CommunityBadge from "./community-badge";
@@ -34,6 +35,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
     const online = useOnline()
     const router = useRouter()
     const [inLibrary, setInLibrary] = useState(initialInLibrary)
+    useEffect(() => { setInLibrary(initialInLibrary) }, [initialInLibrary])
     const [libraryPending, setLibraryPending] = useState(false)
     const [libraryError, setLibraryError] = useState(false)
     const [downloadError, setDownloadError] = useState(false)
@@ -151,7 +153,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
     }
 
     function openEditor() {
-        router.push(`/songs/${song.songId}/edit`)
+        router.push(editSongRoute(song.songId!))
     }
 
     function openKebabAt(rect: DOMRect) {

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { UserInfo, PerUser, updateUser, deleteUser, registerUser } from "../lib/data";
 import Button from "../components/button";
 import Input from "../components/input";
+import SearchInput from "../components/search-input";
 
 const USER_PAGE_SIZE = 20
 
@@ -67,12 +68,11 @@ export default function UserTable({ initialUsers, perUser }: Props) {
             {/* ── Users ── */}
             <section className="flex flex-col gap-4">
                 <p className="text-gray-400 text-sm font-medium uppercase tracking-wide">users</p>
-                <input
-                    type="text"
-                    placeholder="filter by username, email, role…"
+                <SearchInput
                     value={search}
-                    onChange={e => handleSearchChange(e.target.value)}
-                    className="w-full max-w-sm rounded-md border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:border-sky-500 focus:outline-none"
+                    onChange={handleSearchChange}
+                    placeholder="filter by username, email, role…"
+                    className="w-full max-w-sm"
                 />
                 <div className="overflow-x-auto">
                     <table className="text-sm w-full">
@@ -94,7 +94,7 @@ export default function UserTable({ initialUsers, perUser }: Props) {
                             ) : pagedUsers.map(user => {
                                 const s = statsMap[user.id]
                                 return (
-                                    <tr key={user.id} className="border-t border-gray-800 align-middle">
+                                    <tr key={user.id} className="border-t border-gray-200 dark:border-gray-800 align-middle">
                                         <td className="pr-4 py-2">
                                             <div className="flex flex-col">
                                                 <span className="font-medium">{user.username}</span>
@@ -135,7 +135,7 @@ export default function UserTable({ initialUsers, perUser }: Props) {
                         <button
                             onClick={() => setUserPage(p => Math.max(0, p - 1))}
                             disabled={userPage === 0}
-                            className="px-3 py-1 rounded-md border border-gray-700 text-gray-400 disabled:opacity-30 hover:border-sky-500 hover:text-white"
+                            className="px-3 py-1 rounded-md border border-gray-200 dark:border-gray-700 text-gray-400 disabled:opacity-30 hover:border-sky-500 hover:text-gray-900 dark:hover:text-white"
                         >
                             prev
                         </button>
@@ -143,7 +143,7 @@ export default function UserTable({ initialUsers, perUser }: Props) {
                         <button
                             onClick={() => setUserPage(p => Math.min(userTotalPages - 1, p + 1))}
                             disabled={userPage >= userTotalPages - 1}
-                            className="px-3 py-1 rounded-md border border-gray-700 text-gray-400 disabled:opacity-30 hover:border-sky-500 hover:text-white"
+                            className="px-3 py-1 rounded-md border border-gray-200 dark:border-gray-700 text-gray-400 disabled:opacity-30 hover:border-sky-500 hover:text-gray-900 dark:hover:text-white"
                         >
                             next
                         </button>

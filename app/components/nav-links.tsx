@@ -6,7 +6,7 @@ import { FaBars, FaTimes } from "react-icons/fa";
 import { routes } from "../lib/routes";
 import { useOnline } from "../lib/use-online";
 
-const OFFLINE_SUPPORTED = new Set([routes.library, routes.settings])
+const OFFLINE_SUPPORTED = new Set<string>([routes.library, routes.settings])
 
 export default function NavLinks({ isAdmin }: { isAdmin: boolean }) {
     const [open, setOpen] = useState(false)

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { AdminStats, EditJobSummary, ErrorLogEntry, fetchAdminEditJobs, fetchAdminErrors } from "../lib/data"
+import SearchInput from "../components/search-input"
 
 function formatBytes(bytes: number): string {
     if (bytes < 1024) return `${bytes} B`
@@ -105,7 +106,7 @@ export default function SystemStats({ stats }: { stats: AdminStats | undefined }
                 </div>
                 {stats.disk_total > 0 && (
                     <div className="w-full max-w-sm">
-                        <div className="h-2 rounded-full bg-gray-800 overflow-hidden">
+                        <div className="h-2 rounded-full bg-gray-200 dark:bg-gray-800 overflow-hidden">
                             <div
                                 className="h-full rounded-full bg-sky-500"
                                 style={{ width: `${Math.round((stats.disk_bytes / stats.disk_total) * 100)}%` }}
@@ -147,7 +148,7 @@ export default function SystemStats({ stats }: { stats: AdminStats | undefined }
                             </thead>
                             <tbody>
                                 {stats.plays_by_day.map(row => (
-                                    <tr key={row.date} className="border-t border-gray-800">
+                                    <tr key={row.date} className="border-t border-gray-200 dark:border-gray-800">
                                         <td className="pr-4 py-1 font-mono text-xs">{row.date}</td>
                                         <td className="pr-4 py-1">{row.plays}</td>
                                         <td className="py-1">{row.downloads}</td>
@@ -164,12 +165,11 @@ export default function SystemStats({ stats }: { stats: AdminStats | undefined }
             {(stats.top_songs ?? []).length > 0 && (
                 <section className="flex flex-col gap-4">
                     <p className="text-gray-400 text-sm font-medium uppercase tracking-wide">top songs</p>
-                    <input
-                        type="text"
-                        placeholder="filter by title, artist…"
+                    <SearchInput
                         value={topSongsFilter}
-                        onChange={e => { setTopSongsFilter(e.target.value); setTopSongsPage(0) }}
-                        className="w-full max-w-sm rounded-md border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:border-sky-500 focus:outline-none"
+                        onChange={v => { setTopSongsFilter(v); setTopSongsPage(0) }}
+                        placeholder="filter by title, artist…"
+                        className="w-full max-w-sm"
                     />
                     <div className="overflow-x-auto">
                         <table className="text-sm w-full">
@@ -185,7 +185,7 @@ export default function SystemStats({ stats }: { stats: AdminStats | undefined }
                                 {pagedTopSongs.length === 0 ? (
                                     <tr><td colSpan={4} className="py-2 text-gray-500">no results</td></tr>
                                 ) : pagedTopSongs.map((song, i) => (
-                                    <tr key={song.song_id} className="border-t border-gray-800">
+                                    <tr key={song.song_id} className="border-t border-gray-200 dark:border-gray-800">
                                         <td className="pr-4 py-1 text-gray-500">{topSongsPage * TOP_SONGS_PAGE_SIZE + i + 1}</td>
                                         <td className="pr-4 py-1">{song.title}</td>
                                         <td className="pr-4 py-1 text-gray-400">{song.artist}</td>
@@ -200,7 +200,7 @@ export default function SystemStats({ stats }: { stats: AdminStats | undefined }
                             <button
                                 onClick={() => setTopSongsPage(p => Math.max(0, p - 1))}
                                 disabled={topSongsPage === 0}
-                                className="px-3 py-1 rounded-md border border-gray-700 text-gray-400 disabled:opacity-30 hover:border-sky-500 hover:text-white"
+                                className="px-3 py-1 rounded-md border border-gray-200 dark:border-gray-700 text-gray-400 disabled:opacity-30 hover:border-sky-500 hover:text-gray-900 dark:hover:text-white"
                             >
                                 prev
                             </button>
@@ -208,7 +208,7 @@ export default function SystemStats({ stats }: { stats: AdminStats | undefined }
                             <button
                                 onClick={() => setTopSongsPage(p => Math.min(topSongsTotalPages - 1, p + 1))}
                                 disabled={topSongsPage >= topSongsTotalPages - 1}
-                                className="px-3 py-1 rounded-md border border-gray-700 text-gray-400 disabled:opacity-30 hover:border-sky-500 hover:text-white"
+                                className="px-3 py-1 rounded-md border border-gray-200 dark:border-gray-700 text-gray-400 disabled:opacity-30 hover:border-sky-500 hover:text-gray-900 dark:hover:text-white"
                             >
                                 next
                             </button>
@@ -227,12 +227,11 @@ export default function SystemStats({ stats }: { stats: AdminStats | undefined }
 
                 {jobTotal > 0 && (
                     <div className="flex flex-col gap-2">
-                        <input
-                            type="text"
-                            placeholder="filter by status, id, user, error, date…"
+                        <SearchInput
                             value={jobFilter}
-                            onChange={e => setJobFilter(e.target.value)}
-                            className="w-full max-w-sm rounded-md border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:border-sky-500 focus:outline-none"
+                            onChange={setJobFilter}
+                            placeholder="filter by status, id, user, error, date…"
+                            className="w-full max-w-sm"
                         />
                         <div className="overflow-x-auto">
                             <table className="text-sm w-full">
@@ -249,7 +248,7 @@ export default function SystemStats({ stats }: { stats: AdminStats | undefined }
                                     {filteredJobs.length === 0 ? (
                                         <tr><td colSpan={5} className="py-2 text-gray-500">no results</td></tr>
                                     ) : filteredJobs.map(job => (
-                                        <tr key={job.job_id} className="border-t border-gray-800">
+                                        <tr key={job.job_id} className="border-t border-gray-200 dark:border-gray-800">
                                             <td className="pr-4 py-1 font-mono text-xs text-gray-500">{job.job_id.slice(0, 8)}…</td>
                                             <td className="pr-4 py-1 font-mono text-xs">{fmt(job.created_at)}</td>
                                             <td className="pr-4 py-1 font-mono text-xs text-gray-400">{job.user_id.slice(0, 8)}…</td>
@@ -272,7 +271,7 @@ export default function SystemStats({ stats }: { stats: AdminStats | undefined }
                                 <button
                                     onClick={() => handleJobPageChange(Math.max(0, jobPage - 1))}
                                     disabled={jobPage === 0}
-                                    className="px-3 py-1 rounded-md border border-gray-700 text-gray-400 disabled:opacity-30 hover:border-sky-500 hover:text-white"
+                                    className="px-3 py-1 rounded-md border border-gray-200 dark:border-gray-700 text-gray-400 disabled:opacity-30 hover:border-sky-500 hover:text-gray-900 dark:hover:text-white"
                                 >
                                     prev
                                 </button>
@@ -280,7 +279,7 @@ export default function SystemStats({ stats }: { stats: AdminStats | undefined }
                                 <button
                                     onClick={() => handleJobPageChange(Math.min(jobTotalPages - 1, jobPage + 1))}
                                     disabled={jobPage >= jobTotalPages - 1}
-                                    className="px-3 py-1 rounded-md border border-gray-700 text-gray-400 disabled:opacity-30 hover:border-sky-500 hover:text-white"
+                                    className="px-3 py-1 rounded-md border border-gray-200 dark:border-gray-700 text-gray-400 disabled:opacity-30 hover:border-sky-500 hover:text-gray-900 dark:hover:text-white"
                                 >
                                     next
                                 </button>
@@ -295,20 +294,19 @@ export default function SystemStats({ stats }: { stats: AdminStats | undefined }
             {errorTotal > 0 && (
                 <section className="flex flex-col gap-4">
                     <p className="text-gray-400 text-sm font-medium uppercase tracking-wide">errors</p>
-                    <input
-                        type="text"
-                        placeholder="filter by message, path, method, status, user, date…"
+                    <SearchInput
                         value={errorFilter}
-                        onChange={e => setErrorFilter(e.target.value)}
-                        className="w-full max-w-sm rounded-md border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:border-sky-500 focus:outline-none"
+                        onChange={setErrorFilter}
+                        placeholder="filter by message, path, method, status, user, date…"
+                        className="w-full max-w-sm"
                     />
                     <div className="flex flex-col gap-1">
                         {filteredErrors.length === 0 ? (
                             <p className="text-gray-500 text-sm">no results</p>
                         ) : filteredErrors.map(e => (
-                            <div key={e.id} className="rounded-lg border border-gray-800 text-sm">
+                            <div key={e.id} className="rounded-lg border border-gray-200 dark:border-gray-800 text-sm">
                                 <button
-                                    className="w-full flex items-center gap-4 p-2 text-left hover:bg-gray-900 rounded-lg"
+                                    className="w-full flex items-center gap-4 p-2 text-left hover:bg-gray-100 dark:hover:bg-gray-900 rounded-lg"
                                     onClick={() => setExpandedError(expandedError === e.id ? null : e.id)}
                                 >
                                     <span className="font-mono text-xs text-gray-500 shrink-0">{fmt(e.timestamp)}</span>
@@ -321,7 +319,7 @@ export default function SystemStats({ stats }: { stats: AdminStats | undefined }
                                     <span className="truncate text-xs">{e.message}</span>
                                 </button>
                                 {expandedError === e.id && (
-                                    <div className="border-t border-gray-800 p-2 flex flex-col gap-1">
+                                    <div className="border-t border-gray-200 dark:border-gray-800 p-2 flex flex-col gap-1">
                                         {e.user_id && (
                                             <p className="text-xs text-gray-400">user: <span className="font-mono">{e.user_id}</span></p>
                                         )}
@@ -341,7 +339,7 @@ export default function SystemStats({ stats }: { stats: AdminStats | undefined }
                             <button
                                 onClick={() => handleErrorPageChange(Math.max(0, errorPage - 1))}
                                 disabled={errorPage === 0}
-                                className="px-3 py-1 rounded-md border border-gray-700 text-gray-400 disabled:opacity-30 hover:border-sky-500 hover:text-white"
+                                className="px-3 py-1 rounded-md border border-gray-200 dark:border-gray-700 text-gray-400 disabled:opacity-30 hover:border-sky-500 hover:text-gray-900 dark:hover:text-white"
                             >
                                 prev
                             </button>
@@ -349,7 +347,7 @@ export default function SystemStats({ stats }: { stats: AdminStats | undefined }
                             <button
                                 onClick={() => handleErrorPageChange(Math.min(totalPages - 1, errorPage + 1))}
                                 disabled={errorPage >= totalPages - 1}
-                                className="px-3 py-1 rounded-md border border-gray-700 text-gray-400 disabled:opacity-30 hover:border-sky-500 hover:text-white"
+                                className="px-3 py-1 rounded-md border border-gray-200 dark:border-gray-700 text-gray-400 disabled:opacity-30 hover:border-sky-500 hover:text-gray-900 dark:hover:text-white"
                             >
                                 next
                             </button>

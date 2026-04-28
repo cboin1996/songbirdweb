@@ -14,6 +14,24 @@ const WINDOWS: { value: ExploreWindow; label: string }[] = [
     { value: 'all', label: 'all time' },
 ]
 
+function useIsDesktop() {
+    const [isDesktop, setIsDesktop] = useState(false)
+    useEffect(() => {
+        const mq = window.matchMedia('(min-width: 768px)')
+        setIsDesktop(mq.matches)
+        const handler = (e: MediaQueryListEvent) => setIsDesktop(e.matches)
+        mq.addEventListener('change', handler)
+        return () => mq.removeEventListener('change', handler)
+    }, [])
+    return isDesktop
+}
+
+type ViewFilter = 'everyone' | 'you'
+const VIEWS: { value: ViewFilter; label: string }[] = [
+    { value: 'everyone', label: 'everyone' },
+    { value: 'you', label: 'you' },
+]
+
 type SortBy = 'plays' | 'downloads' | 'saves' | 'recent' | 'recently_played'
 const SORTS: { value: SortBy; label: string }[] = [
     { value: 'plays', label: 'most played' },
@@ -55,10 +73,14 @@ function SongGrid({ songs, libraryIds, sortBy, showSource }: {
     showSource?: boolean
 }) {
     const { play, current } = usePlayer()
+    const isDesktop = useIsDesktop()
     if (songs.length === 0) return <p className="text-gray-400 text-sm py-4">no data yet</p>
     const queue = songs.filter(s => s.properties).map(s => ({ uuid: s.uuid, properties: s.properties! }))
     return (
-        <div className="grid 2xl:grid-cols-4 xl:grid-cols-3 lg:grid-cols-2 gap-2 md:gap-8 rounded-2xl justify-items-stretch">
+        <div className={isDesktop
+            ? "grid grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-2 md:gap-6"
+            : "flex flex-col"
+        }>
             {songs.map(s => {
                 if (!s.properties) return null
                 const song = { songId: s.uuid, properties: s.properties, source: ('source' in s ? s.source : undefined) ?? undefined }
@@ -71,6 +93,7 @@ function SongGrid({ songs, libraryIds, sortBy, showSource }: {
                             onClick={() => play({ uuid: s.uuid, properties: s.properties! }, queue, { label: 'Explore', href: routes.explore, id: 'explore' })}
                             inLibrary={libraryIds.has(s.uuid)}
                             showSource={showSource}
+                            compact={!isDesktop}
                         />
                         {stat && <span className="text-xs text-gray-400 px-1">{stat}</span>}
                     </div>
@@ -85,6 +108,7 @@ export default function ExploreClient({ data, window }: { data: ExploreData | un
     const searchParams = useSearchParams()
     const initialSort = (searchParams.get('sort') as SortBy | null) ?? 'plays'
     const [sortBy, setSortBy] = useState<SortBy>(initialSort)
+    const [viewFilter, setViewFilter] = useState<ViewFilter>('everyone')
     const [libraryIds, setLibraryIds] = useState<Set<string>>(new Set())
     const [search, setSearch] = useState(searchParams.get('q') ?? '')
     useScrollRestoration()
@@ -94,14 +118,14 @@ export default function ExploreClient({ data, window }: { data: ExploreData | un
     }, [])
 
     function setWindow(w: ExploreWindow) {
-        router.push(`/explore?window=${w}&sort=${sortBy}`)
+        router.push(`${routes.explore}?window=${w}&sort=${sortBy}`)
     }
 
     function changeSortBy(s: SortBy) {
         setSortBy(s)
         const params = new URLSearchParams(searchParams.toString())
         params.set('sort', s)
-        router.replace(`/explore?${params.toString()}`)
+        router.replace(`${routes.explore}?${params.toString()}`)
     }
 
     function changeSearch(q: string) {
@@ -112,18 +136,23 @@ export default function ExploreClient({ data, window }: { data: ExploreData | un
         } else {
             params.delete('q')
         }
-        router.replace(`/explore?${params.toString()}`)
+        router.replace(`${routes.explore}?${params.toString()}`)
     }
 
-    const rawMainList: AnyItem[] = data
-        ? sortBy === 'plays' ? data.most_played
+    const rawList: AnyItem[] = data
+        ? viewFilter === 'you'
+            ? sortBy === 'plays' ? data.your_most_played
+            : sortBy === 'downloads' ? data.your_most_downloaded
+            : sortBy === 'recently_played' ? data.your_recently_played
+            : data.your_recently_saved
+        : sortBy === 'plays' ? data.most_played
         : sortBy === 'downloads' ? data.most_downloaded
         : sortBy === 'saves' ? data.most_libraryed
         : sortBy === 'recently_played' ? data.your_recently_played
         : data.recently_added
         : []
 
-    const mainList = rawMainList.filter(s => matchesSearch(s, search))
+    const mainList = rawList.filter(s => matchesSearch(s, search))
 
     const windowLabel = WINDOWS.find(w => w.value === window)?.label
     const sortLabel = SORTS.find(s => s.value === sortBy)?.label
@@ -137,76 +166,62 @@ export default function ExploreClient({ data, window }: { data: ExploreData | un
                     placeholder="search by track or artist…"
                     className="w-full md:w-80"
                 />
-                <div className="flex flex-wrap gap-3 items-center justify-between">
-                    <div className="flex gap-1">
-                        {WINDOWS.map(w => (
-                            <button
-                                key={w.value}
-                                onClick={() => setWindow(w.value)}
-                                className={`px-3 py-1 rounded-full text-sm transition-colors ${
-                                    window === w.value
-                                        ? 'bg-sky-500 text-white'
-                                        : 'text-gray-400 hover:text-sky-500'
-                                }`}
-                            >
-                                {w.label}
-                            </button>
-                        ))}
-                    </div>
-                    <div className="flex gap-1">
-                        {SORTS.map(s => (
-                            <button
-                                key={s.value}
-                                onClick={() => changeSortBy(s.value)}
-                                className={`px-3 py-1 rounded-full text-sm transition-colors ${
-                                    sortBy === s.value ? 'bg-sky-500 text-white' : 'text-gray-400 hover:text-sky-500'
-                                }`}
-                            >
-                                {s.label}
-                            </button>
-                        ))}
-                    </div>
+                <div className="flex flex-wrap gap-2">
+                    {VIEWS.map(v => (
+                        <button
+                            key={v.value}
+                            onClick={() => setViewFilter(v.value)}
+                            className={`px-3 py-1 rounded-full text-sm transition-colors ${
+                                viewFilter === v.value
+                                    ? 'bg-sky-500 text-white'
+                                    : 'text-gray-400 hover:text-sky-500'
+                            }`}
+                        >
+                            {v.label}
+                        </button>
+                    ))}
+                    <span className="text-gray-200 dark:text-gray-700 self-center px-1">·</span>
+                    {WINDOWS.map(w => (
+                        <button
+                            key={w.value}
+                            onClick={() => setWindow(w.value)}
+                            className={`px-3 py-1 rounded-full text-sm transition-colors ${
+                                window === w.value
+                                    ? 'bg-sky-500 text-white'
+                                    : 'text-gray-400 hover:text-sky-500'
+                            }`}
+                        >
+                            {w.label}
+                        </button>
+                    ))}
+                    <span className="text-gray-200 dark:text-gray-700 self-center px-1">·</span>
+                    {SORTS.map(s => (
+                        <button
+                            key={s.value}
+                            onClick={() => changeSortBy(s.value)}
+                            className={`px-3 py-1 rounded-full text-sm transition-colors ${
+                                sortBy === s.value ? 'bg-sky-500 text-white' : 'text-gray-400 hover:text-sky-500'
+                            }`}
+                        >
+                            {s.label}
+                        </button>
+                    ))}
                 </div>
             </div>
 
             {!data ? (
                 <p className="text-gray-400 text-sm">failed to load</p>
-            ) : (() => {
-                const rawYourList: AnyItem[] | null =
-                    sortBy === 'plays' ? data.your_most_played :
-                    sortBy === 'downloads' ? data.your_most_downloaded :
-                    sortBy === 'saves' ? data.your_recently_saved :
-                    sortBy === 'recent' ? data.your_recently_saved :
-                    null
-                const yourList = rawYourList ? rawYourList.filter(s => matchesSearch(s, search)) : null
-                const noResults = search && mainList.length === 0 && (!yourList || yourList.length === 0)
-                return (
-                    <div className="flex flex-col gap-10">
-                        {noResults ? (
-                            <p className="text-gray-400 text-sm">no results for &lsquo;{search}&rsquo;</p>
-                        ) : (
-                            <>
-                                <div>
-                                    <h2 className="text-sm font-medium text-gray-400 mb-4">
-                                        {sortLabel}
-                                        <span className="ml-1 text-gray-300 dark:text-gray-600">· {windowLabel}</span>
-                                    </h2>
-                                    <SongGrid songs={mainList} libraryIds={libraryIds} sortBy={sortBy} showSource={true} />
-                                </div>
-                                {yourList && (
-                                    <div>
-                                        <h2 className="text-sm font-medium text-gray-400 mb-4">
-                                            your {sortLabel}
-                                            <span className="ml-1 text-gray-300 dark:text-gray-600">· {windowLabel}</span>
-                                        </h2>
-                                        <SongGrid songs={yourList} libraryIds={libraryIds} sortBy={sortBy} showSource={true} />
-                                    </div>
-                                )}
-                            </>
-                        )}
-                    </div>
-                )
-            })()}
+            ) : mainList.length === 0 && search ? (
+                <p className="text-gray-400 text-sm">no results for &lsquo;{search}&rsquo;</p>
+            ) : (
+                <div>
+                    <h2 className="text-sm font-medium text-gray-400 mb-4">
+                        {viewFilter === 'you' ? `your ${sortLabel}` : sortLabel}
+                        <span className="ml-1 text-gray-300 dark:text-gray-600">· {windowLabel}</span>
+                    </h2>
+                    <SongGrid songs={mainList} libraryIds={libraryIds} sortBy={sortBy} showSource={viewFilter === 'everyone'} />
+                </div>
+            )}
         </div>
     )
 }

@@ -20,6 +20,7 @@ export default function SearchInput({ value, onChange, placeholder = 'search…'
                 type="text"
                 value={value}
                 onChange={e => onChange(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Escape' && value) { onChange(''); e.preventDefault() } }}
                 placeholder={placeholder}
                 className="w-full pl-8 pr-8 py-1.5 rounded-lg text-sm bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200 placeholder-gray-400 outline-none focus:ring-2 focus:ring-sky-500"
             />

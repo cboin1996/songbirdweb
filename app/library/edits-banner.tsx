@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { DraftSummary, deleteEditDraft, fetchDrafts } from '../lib/data'
+import { editSongRoute } from '../lib/routes'
 import { EVENTS } from '../lib/events'
 import { FaChevronDown, FaTimes } from 'react-icons/fa'
 
@@ -50,7 +51,7 @@ export default function EditsBanner() {
 
   function handleOpen(songId: string) {
     setOpen(false)
-    router.push(`/songs/${songId}/edit`)
+    router.push(editSongRoute(songId))
   }
 
   return (

@@ -158,6 +158,7 @@ export interface PlayableSong {
   properties: Properties
   last_position?: number
   last_played_at?: string | null
+  artwork_cached?: boolean
 }
 
 export interface LibrarySong {
@@ -391,6 +392,7 @@ interface IndexedProperties {
   file_path: string;
   url: string;
   owner_id: string | null;
+  source: string | null;
 }
 
 export async function fetchPropertiesFromIndex(
@@ -402,7 +404,7 @@ export async function fetchPropertiesFromIndex(
     method: "GET",
   });
   if (result === undefined) return undefined;
-  return result.map(song => ({ songId: song.uuid, properties: song.properties, owner_id: song.owner_id }));
+  return result.map(song => ({ songId: song.uuid, properties: song.properties, owner_id: song.owner_id, source: song.source }));
 }
 
 interface TaggingResponse {
@@ -859,6 +861,7 @@ export interface EligibleSong {
   properties: Properties | null
   eligible: boolean
   missing_fields: string[]
+  artwork_cached: boolean
 }
 
 export async function fetchEligibleSongs(): Promise<EligibleSong[]> {

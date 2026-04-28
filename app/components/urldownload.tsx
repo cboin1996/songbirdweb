@@ -3,6 +3,9 @@ import { useState, useEffect } from "react";
 import { downloadSongViaUrl, downloadSongToFile, addToLibrary, Properties } from "../lib/data";
 import Spinner from "./spinner";
 import Image from "next/image";
+import Link from "next/link";
+import { routes } from "../lib/routes";
+import { FaCheckCircle } from "react-icons/fa";
 
 export default function DownloadViaUrl({ query }: { query: string }) {
     type Status = 'idle' | 'downloading' | 'ready' | 'saving' | 'done' | 'error'
@@ -11,6 +14,7 @@ export default function DownloadViaUrl({ query }: { query: string }) {
     const [songId, setSongId] = useState<string | null>(null)
     const [properties, setProperties] = useState<Properties | null>(null)
     const [artworkCached, setArtworkCached] = useState(false)
+    const [doneAction, setDoneAction] = useState<'library' | 'file' | null>(null)
 
     useEffect(() => {
         if (!query) return
@@ -37,7 +41,7 @@ export default function DownloadViaUrl({ query }: { query: string }) {
         if (!songId) return
         setStatus('saving')
         const ok = await addToLibrary(songId)
-        if (ok) setStatus('done')
+        if (ok) { setDoneAction('library'); setStatus('done') }
         else { setStatus('error'); setErrorMsg('could not add to library') }
     }
 
@@ -49,7 +53,7 @@ export default function DownloadViaUrl({ query }: { query: string }) {
             properties?.trackName ?? songId,
             properties?.artistName ?? ''
         )
-        if (ok) setStatus('done')
+        if (ok) { setDoneAction('file'); setStatus('done') }
         else { setStatus('error'); setErrorMsg('file download failed') }
     }
 
@@ -74,7 +78,30 @@ export default function DownloadViaUrl({ query }: { query: string }) {
     }
 
     if (status === 'done') {
-        return <p className="text-sm text-gray-400">done</p>
+        return (
+            <div className="flex items-center gap-3 py-3">
+                {artworkCached && songId
+                    ? <Image src={`/v1/songs/${songId}/artwork/thumb`} alt="" width={48} height={48} className="rounded shrink-0" unoptimized />
+                    : <div className="w-12 h-12 rounded bg-gray-100 dark:bg-gray-800 shrink-0" />
+                }
+                <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium truncate">{properties?.trackName ?? 'unknown track'}</p>
+                    <p className="text-xs text-gray-400 truncate">{properties?.artistName ?? 'unknown artist'}</p>
+                    <p className="text-xs text-green-500 mt-1 flex items-center gap-1">
+                        <FaCheckCircle size={11} />
+                        {doneAction === 'library' ? 'added to library' : 'file downloaded'}
+                    </p>
+                </div>
+                {doneAction === 'library' && songId && (
+                    <Link
+                        href={`${routes.library}?song=${songId}`}
+                        className="text-sm px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-sky-500 hover:text-sky-500 transition-colors shrink-0"
+                    >
+                        view in library
+                    </Link>
+                )}
+            </div>
+        )
     }
 
     if (status === 'error') {

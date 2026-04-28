@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { AlbumProps, DownloadedSong, downloadSongViaUrl, fetchSong, tagSong } from "../lib/data";
 import Album from "./album";
 import { useRouter, useSearchParams } from "next/navigation";
+import { routes } from "../lib/routes";
 import { useScrollRestoration } from "../lib/use-scroll-restoration";
 
 export default function Albums({ albums }: { albums: AlbumProps[] }) {
@@ -24,7 +25,7 @@ export default function Albums({ albums }: { albums: AlbumProps[] }) {
         params.set('lookup', "true")
         params.set('mode', "song")
         params.set('limit', activeAlbum.trackCount.toString())
-        router.push(`/download/song?${params.toString()}`)
+        router.push(`${routes.downloadSong}?${params.toString()}`)
     }
 
     useEffect(() => {

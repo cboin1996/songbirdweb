@@ -6,7 +6,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { FaPause, FaPlay, FaStepBackward, FaStepForward, FaRandom, FaRedo, FaList, FaTimes, FaVolumeUp, FaVolumeMute, FaBars, FaMusic } from "react-icons/fa"
 import Spinner from "./spinner"
-import { DOWNLOAD_URL, PlayableSong, artworkUrl, fetchLibrarySongs, fetchPlayerState, recordPlay, savePlayerState, updatePosition } from "../lib/data"
+import { DOWNLOAD_URL, PlayableSong, artworkUrl, songArtworkUrl, fetchLibrarySongs, fetchPlayerState, recordPlay, savePlayerState, updatePosition } from "../lib/data"
 import { getSongFile } from "../lib/offline"
 import Slider from "./slider"
 
@@ -789,10 +789,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                                         <FaBars size={11} />
                                                     </span>
                                                     <button onClick={() => { if (isActive) { isPlaying ? pause() : audioRef.current?.play() } else { playAt(qi) } }} className="flex items-center gap-3 flex-1 text-left min-w-0">
-                                                        {sp?.artworkUrl100
-                                                            ? <Image src={artworkUrl(sp.artworkUrl100, 200)} alt="" width={36} height={36} className="rounded shrink-0 object-cover" />
-                                                            : <div className="w-9 h-9 rounded shrink-0 bg-gray-100 dark:bg-gray-800 flex items-center justify-center"><FaMusic size={11} className="text-gray-400" /></div>
-                                                        }
+                                                        {(() => { const a = songArtworkUrl(song.uuid, song.artwork_cached, sp?.artworkUrl100, 200); return a ? <Image src={a} alt="" width={36} height={36} className="rounded shrink-0 object-cover" /> : <div className="w-9 h-9 rounded shrink-0 bg-gray-100 dark:bg-gray-800 flex items-center justify-center"><FaMusic size={11} className="text-gray-400" /></div> })()}
                                                         <div className="flex-1 min-w-0">
                                                             <p className={`text-sm font-medium truncate ${isActive ? 'text-sky-500' : ''}`}>{sp?.trackName ?? '—'}</p>
                                                             <p className="text-xs text-gray-400 truncate">{sp?.artistName ?? '—'}</p>
@@ -817,9 +814,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                             <div className="flex items-center gap-3 px-4 pt-3 pb-1.5 md:grid md:grid-cols-[1fr_auto_1fr]">
                                 {/* Left: artwork + track info */}
                                 <div className="flex items-center gap-3 min-w-0 flex-1 md:flex-initial">
-                                    {p.artworkUrl100 && (
-                                        <Image src={artworkUrl(p.artworkUrl100, 200)} alt="" width={36} height={36} className="rounded shrink-0" />
-                                    )}
+                                    {(() => { const a = songArtworkUrl(current?.uuid, current?.artwork_cached, p.artworkUrl100, 200); return a ? <Image src={a} alt="" width={36} height={36} className="rounded shrink-0" /> : null })()}
                                     {playContext ? (
                                         <Link href={playContext.href} className="flex flex-col min-w-0 flex-1 group">
                                             <span data-testid="player-track-name" className="text-xs font-medium truncate group-hover:text-sky-500 transition-colors">{p.trackName || 'Unknown title'}</span>
