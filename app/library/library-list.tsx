@@ -95,6 +95,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     const sectionRefs = useRef<Record<string, HTMLElement | null>>({})
     const isDesktop = useIsDesktop()
     const [cachedIds, setCachedIds] = useState<Set<string>>(new Set())
+    const [offlineReady, setOfflineReady] = useState(false)
     const [savingAll, setSavingAll] = useState(false)
     const [saveAllProgress, setSaveAllProgress] = useState({ done: 0, total: 0 })
     const [playlists, setPlaylists] = useState<Playlist[]>([])
@@ -118,16 +119,14 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     const playlistStubs = useMemo(() => playlists.map(p => ({ id: p.id, name: p.name })), [playlists])
 
     useEffect(() => {
-        getCachedSongIds().then(ids => {
+        getCachedSongIds().then(async ids => {
             setCachedIds(ids)
-            // if server gave us nothing (offline page load), hydrate from IndexedDB cache
-            // filter to only OPFS-cached songs so the list is playable
             if (!online || songs.length === 0) {
-                fetchLibrarySongs().then(cached => {
-                    const playable = online ? cached : cached.filter(s => ids.has(s.uuid))
-                    if (playable.length > 0) setSongs(playable)
-                })
+                const cached = await fetchLibrarySongs()
+                const playable = cached.filter(s => ids.has(s.uuid))
+                if (playable.length > 0) setSongs(playable)
             }
+            setOfflineReady(true)
         })
         fetchPlaylists().then(setPlaylists)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -510,6 +509,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         setBulkLoading(false)
     }
 
+    if (!offlineReady && displaySongs.length === 0) return null
     if (displaySongs.length === 0 && !online) {
         return <p className="text-gray-400 text-sm py-4">no songs saved offline — save songs while online to listen offline</p>
     }
