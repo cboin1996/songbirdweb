@@ -368,6 +368,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 repeat: repeatRef.current,
                 queue: queueRef.current.map(s => s.uuid),
                 queue_index: queueIndexRef.current,
+                shuffle_order: shuffleRef.current ? shuffleOrderRef.current : null,
             }
             try { localStorage.setItem('playerState', JSON.stringify(state)) } catch {}
             savePlayerState(state)
@@ -544,7 +545,16 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 queueRef.current = restoredQueue
                 queueIndexRef.current = safeIndex
                 setQueue(restoredQueue)
-                if (state?.shuffle) generateShuffleOrder(safeIndex)
+                if (state?.shuffle) {
+                    const savedOrder = state.shuffle_order
+                    if (savedOrder && savedOrder.length === restoredQueue.length) {
+                        shuffleOrderRef.current = savedOrder
+                        shufflePosRef.current = Math.max(0, savedOrder.indexOf(safeIndex))
+                        setShuffleOrder([...savedOrder])
+                    } else {
+                        generateShuffleOrder(safeIndex)
+                    }
+                }
                 setCurrent(song)
                 const audio = audioRef.current
                 if (audio) {

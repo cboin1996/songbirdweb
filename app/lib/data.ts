@@ -515,6 +515,7 @@ export interface PlayerState {
   repeat: 'off' | 'one' | 'all'
   queue: string[]
   queue_index: number
+  shuffle_order?: number[] | null
 }
 
 export async function fetchPlayerState(): Promise<PlayerState | undefined> {
