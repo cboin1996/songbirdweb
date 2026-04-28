@@ -204,6 +204,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         const idx = Math.max(0, q.findIndex(s => s.uuid === song.uuid))
         queueRef.current = q
         queueIndexRef.current = idx
+        manualNextRef.current = []
         setQueue(q)
         loadSong(song)
         if (context !== undefined) setPlayContext(context)
@@ -212,7 +213,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     function insertNext(song: PlayableSong) {
         const q = [...queueRef.current]
-        q.splice(queueIndexRef.current + 1, 0, song)
+        const insertAt = queueIndexRef.current + 1 + manualNextRef.current.length
+        q.splice(insertAt, 0, song)
         queueRef.current = q
         manualNextRef.current.push(song)
         setQueue([...q])
