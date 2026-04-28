@@ -9,6 +9,7 @@ export default async function EditPage({ params }: { params: Promise<{ id: strin
     if (!song || !song.properties) notFound()
     return (
         <EditorModal
+            key={id}
             songId={id}
             properties={song.properties}
             artworkCached={song.artwork_cached}

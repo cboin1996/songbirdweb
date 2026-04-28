@@ -1821,6 +1821,7 @@ export default function EditorModal({
     await removeFromLibrary(activeSongId)
     await addToLibrary(restoredId)
     setRestoring(false)
+    router.refresh()
     router.replace(`/songs/${restoredId}/edit`)
   }
 
@@ -1831,6 +1832,7 @@ export default function EditorModal({
     await removeFromLibrary(activeSongId)
     await addToLibrary(parentSongId)
     setRestoring(false)
+    router.refresh()
     router.replace(`/songs/${parentSongId}/edit`)
   }
 
@@ -1858,6 +1860,7 @@ export default function EditorModal({
         setJobStatus('done')
         await deleteEditDraft(activeSongIdRef.current)
         const landId = (!overwrite && result.result_song_id) ? result.result_song_id : activeSongIdRef.current
+        router.refresh()
         router.replace(`/songs/${landId}/edit`)
       }
       if (result.status === 'failed') {
