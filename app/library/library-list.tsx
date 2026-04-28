@@ -553,10 +553,11 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                     <button
                         onClick={saveAllOffline}
                         disabled={savingAll || !online}
-                        className="flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors disabled:opacity-50 text-gray-400 hover:text-sky-500 border border-gray-200 dark:border-gray-800 hover:border-sky-500 transition-colors"
+                        title={!online ? 'go online to save songs for offline listening' : 'save all songs for offline listening'}
+                        className="flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-gray-400 hover:text-sky-500 border border-gray-200 dark:border-gray-800 hover:border-sky-500"
                     >
                         <FaCloudDownloadAlt size={12} />
-                        {savingAll ? `${saveAllProgress.done}/${saveAllProgress.total}` : 'save all offline'}
+                        {savingAll ? `saving ${saveAllProgress.done}/${saveAllProgress.total}…` : !online ? 'offline' : 'save all offline'}
                     </button>
                 )}
                 {privateSongCount > 0 && viewMode !== 'playlists' && (
