@@ -110,12 +110,27 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     const selectedIdsRef = useRef(selectedIds)
     useEffect(() => { selectedIdsRef.current = selectedIds }, [selectedIds])
 
-    const privateSongCount = useMemo(() => songs.filter(s => s.owner_id !== null).length, [songs])
+    const displaySongs = useMemo(
+        () => online ? songs : songs.filter(s => cachedIds.has(s.uuid)),
+        [songs, cachedIds, online]
+    )
+    const privateSongCount = useMemo(() => displaySongs.filter(s => s.owner_id !== null).length, [displaySongs])
     const playlistStubs = useMemo(() => playlists.map(p => ({ id: p.id, name: p.name })), [playlists])
 
     useEffect(() => {
-        getCachedSongIds().then(setCachedIds)
+        getCachedSongIds().then(ids => {
+            setCachedIds(ids)
+            // if server gave us nothing (offline page load), hydrate from IndexedDB cache
+            // filter to only OPFS-cached songs so the list is playable
+            if (!online || songs.length === 0) {
+                fetchLibrarySongs().then(cached => {
+                    const playable = online ? cached : cached.filter(s => ids.has(s.uuid))
+                    if (playable.length > 0) setSongs(playable)
+                })
+            }
+        })
         fetchPlaylists().then(setPlaylists)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
     function changeViewMode(v: ViewMode) {
@@ -142,7 +157,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     }
 
     async function saveAllOffline() {
-        const uncached = songs.filter(s => s.properties && !cachedIds.has(s.uuid))
+        const uncached = displaySongs.filter(s => s.properties && !cachedIds.has(s.uuid))
         if (!uncached.length) return
         setSavingAll(true)
         setSaveAllProgress({ done: 0, total: uncached.length })
@@ -159,7 +174,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     // songs + artists: grouped by first letter
     const songGrouped = useMemo(() => {
         if (viewMode !== 'songs' && viewMode !== 'artists') return new Map<string, LibrarySong[]>()
-        const valid = songs.filter(s => s.properties)
+        const valid = displaySongs.filter(s => s.properties)
         const sorted = [...valid].sort((a, b) => {
             const pa = a.properties!, pb = b.properties!
             if (viewMode === 'songs') return pa.trackName.localeCompare(pb.trackName)
@@ -173,12 +188,12 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
             map.get(key)!.push(song)
         }
         return map
-    }, [songs, viewMode])
+    }, [displaySongs, viewMode])
 
     // genres: grouped by full genre name, sorted genre-then-track
     const genreGrouped = useMemo(() => {
         if (viewMode !== 'genres') return new Map<string, LibrarySong[]>()
-        const valid = songs.filter(s => s.properties)
+        const valid = displaySongs.filter(s => s.properties)
         const sorted = [...valid].sort((a, b) => {
             const pa = a.properties!, pb = b.properties!
             return (pa.primaryGenreName ?? '').localeCompare(pb.primaryGenreName ?? '') || pa.trackName.localeCompare(pb.trackName)
@@ -190,12 +205,12 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
             map.get(genre)!.push(song)
         }
         return map
-    }, [songs, viewMode])
+    }, [displaySongs, viewMode])
 
     const albumGrouped = useMemo(() => {
         if (viewMode !== 'albums') return new Map<string, LibraryAlbum[]>()
         const albumMap = new Map<string, LibraryAlbum>()
-        for (const song of songs) {
+        for (const song of displaySongs) {
             const p = song.properties
             if (!p) continue
             const id = p.collectionId
@@ -223,7 +238,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
             grouped.get(key)!.push(album)
         }
         return grouped
-    }, [songs, viewMode])
+    }, [displaySongs, viewMode])
 
     // A-Z index: for genres, letters map to first char of genre names
     const presentLetters = useMemo(() => {
@@ -495,12 +510,20 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         setBulkLoading(false)
     }
 
-    if (songs.length === 0) {
+    if (displaySongs.length === 0 && !online) {
+        return <p className="text-gray-400 text-sm py-4">no songs saved offline — save songs while online to listen offline</p>
+    }
+    if (displaySongs.length === 0) {
         return <p className="text-gray-400 text-sm py-4">library is empty</p>
     }
 
     return (
         <div ref={listContainerRef} className={`relative pr-7${selectMode ? ' select-none' : ''}`}>
+            {!online && (
+                <div className="mb-3 px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-400 text-xs">
+                    Offline — showing {displaySongs.length} saved song{displaySongs.length !== 1 ? 's' : ''}
+                </div>
+            )}
             {/* Fixed Select button */}
             {viewMode === 'songs' && (
                 <button
