@@ -150,14 +150,32 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const manualNextRef = useRef<PlayableSong[]>([])
     const shuffleRef = useRef(false)
     const repeatRef = useRef<RepeatMode>('off')
+    // pre-computed shuffle order: indices into queueRef, in the order they'll be played
+    const [shuffleOrder, setShuffleOrder] = useState<number[]>([])
+    const shuffleOrderRef = useRef<number[]>([])
+    const shufflePosRef = useRef(0)
     const [toast, setToast] = useState<string | null>(null)
     const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const dragFromRef = useRef<number | null>(null)
+    const touchDragRef = useRef<{ fromIdx: number; startY: number; rowHeight: number } | null>(null)
 
     function showToast(msg: string) {
         if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
         setToast(msg)
         toastTimerRef.current = setTimeout(() => setToast(null), 2500)
+    }
+
+    function generateShuffleOrder(currentIdx = queueIndexRef.current) {
+        const q = queueRef.current
+        const rest = q.map((_, i) => i).filter(i => i !== currentIdx)
+        for (let i = rest.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [rest[i], rest[j]] = [rest[j], rest[i]]
+        }
+        const order = currentIdx >= 0 ? [currentIdx, ...rest] : rest
+        shuffleOrderRef.current = order
+        shufflePosRef.current = 0
+        setShuffleOrder([...order])
     }
 
     const savePosition = useCallback((song: PlayableSong, time: number) => {
@@ -217,6 +235,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         queueIndexRef.current = idx
         manualNextRef.current = []
         setQueue(q)
+        if (shuffleRef.current) generateShuffleOrder(idx)
         loadSong(song)
         if (context !== undefined) setPlayContext(context)
         scheduleSave()
@@ -241,6 +260,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         queueRef.current = q
         if (index <= currentIdx) queueIndexRef.current = Math.max(-1, currentIdx - 1)
         setQueue([...q])
+        if (shuffleRef.current) generateShuffleOrder()
         scheduleSave()
     }
 
@@ -257,6 +277,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         queueRef.current = q
         queueIndexRef.current = newIdx
         setQueue([...q])
+        if (shuffleRef.current) generateShuffleOrder()
         scheduleSave()
     }
 
@@ -290,10 +311,18 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 manualNextRef.current.shift()
                 nextIdx = idx + 1
                 if (nextIdx >= q.length) return
+                // advance shuffle position to wherever this manually-queued song lands
+                const pos = shuffleOrderRef.current.indexOf(nextIdx)
+                if (pos >= 0) shufflePosRef.current = pos
             } else {
-                const others = q.map((_, i) => i).filter(i => i !== idx)
-                if (others.length === 0) return
-                nextIdx = others[Math.floor(Math.random() * others.length)]
+                const nextPos = shufflePosRef.current + 1
+                if (nextPos >= shuffleOrderRef.current.length) {
+                    if (repeatRef.current === 'all') { generateShuffleOrder(idx); nextIdx = shuffleOrderRef.current[1] ?? idx; shufflePosRef.current = 1 }
+                    else return
+                } else {
+                    shufflePosRef.current = nextPos
+                    nextIdx = shuffleOrderRef.current[nextPos]
+                }
             }
         } else {
             nextIdx = idx + 1
@@ -316,10 +345,18 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             return
         }
         const idx = queueIndexRef.current
-        if (idx <= 0) return
-        const prevIdx = idx - 1
-        queueIndexRef.current = prevIdx
-        loadSong(queueRef.current[prevIdx], true)
+        if (shuffleRef.current) {
+            const prevPos = shufflePosRef.current - 1
+            if (prevPos < 0) return
+            shufflePosRef.current = prevPos
+            const prevIdx = shuffleOrderRef.current[prevPos]
+            queueIndexRef.current = prevIdx
+            loadSong(queueRef.current[prevIdx], true)
+        } else {
+            if (idx <= 0) return
+            queueIndexRef.current = idx - 1
+            loadSong(queueRef.current[idx - 1], true)
+        }
         scheduleSave()
     }, [])
 
@@ -341,6 +378,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setShuffle(prev => {
             const next = !prev
             shuffleRef.current = next
+            if (next) generateShuffleOrder()
+            else { shuffleOrderRef.current = []; shufflePosRef.current = 0; setShuffleOrder([]) }
             scheduleSave()
             return next
         })
@@ -505,6 +544,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 queueRef.current = restoredQueue
                 queueIndexRef.current = safeIndex
                 setQueue(restoredQueue)
+                if (state?.shuffle) generateShuffleOrder(safeIndex)
                 setCurrent(song)
                 const audio = audioRef.current
                 if (audio) {
@@ -586,23 +626,45 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                     </Link>
                                 </div>
                             )}
-                            {queue.map((song, i) => {
+                            {(shuffle && shuffleOrder.length === queue.length
+                                ? shuffleOrder.map(qi => ({ song: queue[qi], qi }))
+                                : queue.map((song, qi) => ({ song, qi }))
+                            ).map(({ song, qi }, displayIdx) => {
                                 const isActive = song.uuid === current.uuid
                                 const sp = song.properties
                                 return (
                                     <div
-                                        key={`${song.uuid}-${i}`}
+                                        key={`${song.uuid}-${qi}`}
+                                        data-qi={qi}
                                         draggable
-                                        onDragStart={() => { dragFromRef.current = i }}
+                                        onDragStart={() => { dragFromRef.current = qi }}
                                         onDragOver={e => e.preventDefault()}
-                                        onDrop={e => { e.preventDefault(); if (dragFromRef.current !== null) { reorderQueue(dragFromRef.current, i); dragFromRef.current = null } }}
+                                        onDrop={e => { e.preventDefault(); if (dragFromRef.current !== null) { reorderQueue(dragFromRef.current, qi); dragFromRef.current = null } }}
                                         onDragEnd={() => { dragFromRef.current = null }}
                                         className={`flex items-center gap-2 px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-900 transition-colors ${isActive ? 'bg-gray-50 dark:bg-gray-900' : ''}`}
                                     >
-                                        <span className="text-gray-300 dark:text-gray-600 cursor-grab active:cursor-grabbing shrink-0">
+                                        <span
+                                            className="text-gray-300 dark:text-gray-600 cursor-grab active:cursor-grabbing shrink-0 touch-none"
+                                            onTouchStart={e => {
+                                                const row = (e.currentTarget as HTMLElement).closest('[data-qi]') as HTMLElement
+                                                touchDragRef.current = { fromIdx: qi, startY: e.touches[0].clientY, rowHeight: row?.offsetHeight ?? 44 }
+                                            }}
+                                            onTouchMove={e => {
+                                                if (!touchDragRef.current) return
+                                                e.preventDefault()
+                                                const dy = e.touches[0].clientY - touchDragRef.current.startY
+                                                const delta = Math.round(dy / touchDragRef.current.rowHeight)
+                                                const toIdx = Math.max(0, Math.min(queue.length - 1, touchDragRef.current.fromIdx + delta))
+                                                if (toIdx !== touchDragRef.current.fromIdx) {
+                                                    reorderQueue(touchDragRef.current.fromIdx, toIdx)
+                                                    touchDragRef.current = { ...touchDragRef.current, fromIdx: toIdx, startY: e.touches[0].clientY }
+                                                }
+                                            }}
+                                            onTouchEnd={() => { touchDragRef.current = null }}
+                                        >
                                             <FaBars size={10} />
                                         </span>
-                                        <button onClick={() => playAt(i)} className="flex items-center gap-3 flex-1 text-left min-w-0">
+                                        <button onClick={() => playAt(qi)} className="flex items-center gap-3 flex-1 text-left min-w-0">
                                             {sp?.artworkUrl100 && (
                                                 <Image src={artworkUrl(sp.artworkUrl100, 200)} alt="" width={28} height={28} className="rounded shrink-0" />
                                             )}
@@ -612,7 +674,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                             </div>
                                             {isActive && <FaPlay size={8} className="text-sky-500 shrink-0" />}
                                         </button>
-                                        <button onClick={() => removeFromQueue(i)} className="shrink-0 text-gray-300 dark:text-gray-600 hover:text-red-400 transition-colors">
+                                        <button onClick={() => removeFromQueue(qi)} className="shrink-0 text-gray-300 dark:text-gray-600 hover:text-red-400 transition-colors">
                                             <FaTimes size={10} />
                                         </button>
                                     </div>
