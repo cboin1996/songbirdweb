@@ -326,12 +326,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     function scheduleSave() {
         if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
         saveTimerRef.current = setTimeout(() => {
-            savePlayerState({
+            const state = {
                 shuffle: shuffleRef.current,
                 repeat: repeatRef.current,
                 queue: queueRef.current.map(s => s.uuid),
                 queue_index: queueIndexRef.current,
-            })
+            }
+            try { localStorage.setItem('playerState', JSON.stringify(state)) } catch {}
+            savePlayerState(state)
         }, 2000)
     }
 
@@ -474,8 +476,15 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     }, [current, skipPrev, skipNext, savePosition])
 
     useEffect(() => {
-        Promise.all([fetchPlayerState(), fetchLibrarySongs()]).then(async ([state, libSongs]) => {
+        Promise.all([fetchPlayerState(), fetchLibrarySongs()]).then(async ([serverState, libSongs]) => {
             const libMap = new Map(libSongs.map(s => [s.uuid, s]))
+
+            let localState: typeof serverState | undefined
+            try {
+                const raw = localStorage.getItem('playerState')
+                if (raw) localState = JSON.parse(raw)
+            } catch {}
+            const state = serverState ?? localState
 
             if (state) {
                 setShuffle(state.shuffle)
