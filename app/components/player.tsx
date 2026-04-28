@@ -145,6 +145,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     // refs mirror state so stable callbacks always see latest values
     const queueRef = useRef<PlayableSong[]>([])
     const queueIndexRef = useRef(-1)
+    const manualNextRef = useRef<PlayableSong[]>([])
     const shuffleRef = useRef(false)
     const repeatRef = useRef<RepeatMode>('off')
 
@@ -213,6 +214,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         const q = [...queueRef.current]
         q.splice(queueIndexRef.current + 1, 0, song)
         queueRef.current = q
+        manualNextRef.current.push(song)
         setQueue([...q])
         scheduleSave()
     }
@@ -253,9 +255,15 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         if (q.length === 0) return
         let nextIdx: number
         if (shuffleRef.current) {
-            const others = q.map((_, i) => i).filter(i => i !== idx)
-            if (others.length === 0) return
-            nextIdx = others[Math.floor(Math.random() * others.length)]
+            if (manualNextRef.current.length > 0) {
+                manualNextRef.current.shift()
+                nextIdx = idx + 1
+                if (nextIdx >= q.length) return
+            } else {
+                const others = q.map((_, i) => i).filter(i => i !== idx)
+                if (others.length === 0) return
+                nextIdx = others[Math.floor(Math.random() * others.length)]
+            }
         } else {
             nextIdx = idx + 1
             if (nextIdx >= q.length) {

@@ -137,18 +137,33 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
         router.push(`/songs/${song.songId}/edit`)
     }
 
+    function openKebabAt(rect: DOMRect) {
+        const menuWidth = 155
+        const rightEdge = window.innerWidth - rect.right
+        setKebabPos({
+            top: rect.bottom + 4,
+            right: Math.max(0, Math.min(rightEdge, window.innerWidth - menuWidth - 4)),
+        })
+        setKebabOpen(o => !o)
+    }
+
     function openKebab(e: React.MouseEvent | React.TouchEvent) {
         e.stopPropagation()
         const rect = kebabRef.current?.getBoundingClientRect()
-        if (rect) {
-            const menuWidth = 155
-            const rightEdge = window.innerWidth - rect.right
-            setKebabPos({
-                top: rect.bottom + 4,
-                right: Math.max(0, Math.min(rightEdge, window.innerWidth - menuWidth - 4)),
-            })
-        }
-        setKebabOpen(o => !o)
+        if (rect) openKebabAt(rect)
+    }
+
+    function handleContextMenu(e: React.MouseEvent) {
+        if (!song.songId) return
+        e.preventDefault()
+        e.stopPropagation()
+        const menuWidth = 155
+        const rightEdge = window.innerWidth - e.clientX
+        setKebabPos({
+            top: e.clientY + 4,
+            right: Math.max(0, Math.min(rightEdge, window.innerWidth - menuWidth - 4)),
+        })
+        setKebabOpen(true)
     }
 
     const kebabDropdown = kebabOpen && typeof document !== 'undefined' ? createPortal(
@@ -280,6 +295,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                 <div
                     data-testid="song-card"
                     onClick={e => handleCardClick(e)}
+                    onContextMenu={handleContextMenu}
                     role="button"
                     tabIndex={0}
                     onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && handleCardClick()}
@@ -322,6 +338,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
             <div
                 data-testid="song-card"
                 onClick={e => handleCardClick(e)}
+                onContextMenu={handleContextMenu}
                 role="button"
                 tabIndex={0}
                 onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && handleCardClick()}
