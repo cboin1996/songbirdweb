@@ -1,4 +1,4 @@
-import { BASE_URL } from './data'
+import { DOWNLOAD_URL } from './data'
 
 const AUDIO_DIR = 'audio'
 
@@ -40,7 +40,7 @@ export async function cacheSong(
     const fileHandle = await dir.getFileHandle(`${songId}.mp3`, { create: true })
     const writable = await fileHandle.createWritable()
 
-    const res = await fetch(`${BASE_URL}/download/${songId}`, { credentials: 'include' })
+    const res = await fetch(`${DOWNLOAD_URL}/${songId}`, { credentials: 'include' })
     if (!res.ok) {
         await writable.close()
         throw new Error(`fetch failed: ${res.status}`)
