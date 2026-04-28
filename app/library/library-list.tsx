@@ -125,9 +125,16 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         return () => window.removeEventListener(EVENTS.offlineCleared, handler)
     }, [])
 
+    const supersededIds = useMemo(
+        () => new Set(songs.map(s => s.parent_song_id).filter(Boolean) as string[]),
+        [songs]
+    )
     const displaySongs = useMemo(
-        () => online ? songs : songs.filter(s => cachedIds.has(s.uuid)),
-        [songs, cachedIds, online]
+        () => {
+            const base = online ? songs : songs.filter(s => cachedIds.has(s.uuid))
+            return base.filter(s => !supersededIds.has(s.uuid))
+        },
+        [songs, cachedIds, online, supersededIds]
     )
     const privateSongCount = useMemo(() => displaySongs.filter(s => s.owner_id !== null).length, [displaySongs])
     const playlistStubs = useMemo(() => playlists.map(p => ({ id: p.id, name: p.name })), [playlists])

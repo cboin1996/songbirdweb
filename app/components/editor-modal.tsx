@@ -11,6 +11,7 @@ import { FaPlay, FaPause, FaTimes, FaUndo, FaRedo, FaTrash, FaCut } from 'react-
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { usePlayer } from './player'
+import { routes } from '../lib/routes'
 
 import { snap as _snap } from '../lib/snap'
 import ScrubInput from './scrub-input'
@@ -428,6 +429,9 @@ export default function EditorModal({
 
   // focus modal on mount so Space key is captured
   useEffect(() => { modalRef.current?.focus() }, [])
+
+  // pause global player when editor opens
+  useEffect(() => { pausePlayer() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // stop editor audio when global player starts
   useEffect(() => {
@@ -1884,7 +1888,11 @@ export default function EditorModal({
   }
 
   function handleClose() {
-    if (paramsChanged(params) && jobStatus !== 'done' && !localStorage.getItem(DRAFT_SKIP_KEY)) {
+    if (jobStatus === 'done') {
+      router.push(`${routes.library}?song=${activeSongId}`)
+      return
+    }
+    if (paramsChanged(params) && !localStorage.getItem(DRAFT_SKIP_KEY)) {
       setCloseConfirm(true)
       closeTimerRef.current = setTimeout(() => {
         setCloseConfirm(false)

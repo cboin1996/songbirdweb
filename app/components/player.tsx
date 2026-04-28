@@ -2,6 +2,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import Image from "next/image"
 import Link from "next/link"
+import { usePathname } from "next/navigation"
 import { FaPause, FaPlay, FaStepBackward, FaStepForward, FaRandom, FaRedo, FaList, FaTimes, FaVolumeUp, FaVolumeMute, FaBars } from "react-icons/fa"
 import Spinner from "./spinner"
 import { DOWNLOAD_URL, PlayableSong, artworkUrl, fetchLibrarySongs, fetchPlayerState, recordPlay, savePlayerState, updatePosition } from "../lib/data"
@@ -628,6 +629,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const hasQueue = queue.length > 1
     const activeClass = 'text-sky-500'
     const idleClass = 'text-gray-400 hover:text-sky-500 transition-colors'
+    const pathname = usePathname()
+    const isEditorPage = /^\/songs\/[^/]+\/edit/.test(pathname)
 
     const contextValue = useMemo(() => ({
         current, isPlaying, queue, shuffle, repeat, playContext,
@@ -644,7 +647,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                     {toast}
                 </div>
             )}
-            {current && p && (
+            {current && p && !isEditorPage && (
                 <>
                     {/* Queue panel — mobile: full-width strip above bar; desktop: floating right panel */}
                     {showQueue && queue.length > 0 && (
