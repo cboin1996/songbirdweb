@@ -232,13 +232,11 @@ export interface ExploreData {
   most_played: SongWithCount[]
   most_downloaded: SongWithCount[]
   most_libraryed: SongWithCount[]
-  recently_added: { uuid: string; url: string; properties: Properties | null; added_at?: string; source?: string | null }[]
+  recently_added: { uuid: string; url: string; properties: Properties | null; added_at: string; source?: string | null }[]
   your_most_played: SongWithCount[]
   your_most_downloaded: SongWithCount[]
   your_recently_saved: RecentlySavedSong[]
   your_recently_played: RecentlyPlayedSong[]
-  community_recent: { uuid: string; url: string; properties: Properties | null; source?: string | null }[]
-  community_popular: SongWithCount[]
 }
 
 export async function fetchExplore(window: ExploreWindow = 'week'): Promise<ExploreData | undefined> {
@@ -859,6 +857,8 @@ export async function clearServerOfflineSongs(): Promise<void> {
 export interface EligibleSong {
   uuid: string
   properties: Properties | null
+  eligible: boolean
+  missing_fields: string[]
 }
 
 export async function fetchEligibleSongs(): Promise<EligibleSong[]> {

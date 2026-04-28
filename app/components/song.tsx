@@ -48,6 +48,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
     const [addedToPlaylist, setAddedToPlaylist] = useState<string | null>(null)
     const kebabRef = useRef<HTMLButtonElement>(null)
     const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const kebabJustClosed = useRef(false)
     const { play, pause, resume, current, isPlaying, insertNext } = usePlayer()
     const isCurrentSong = current?.uuid === song.songId
     const [artworkFailed, setArtworkFailed] = useState(false)
@@ -75,7 +76,14 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
         setLibraryPending(false)
     }
 
+    function closeKebab() {
+        setKebabOpen(false)
+        kebabJustClosed.current = true
+        setTimeout(() => { kebabJustClosed.current = false }, 400)
+    }
+
     function handleCardClick(e?: React.MouseEvent) {
+        if (kebabJustClosed.current) return
         if (selectMode) {
             if (song.songId && onSelect) onSelect(song.songId, e?.shiftKey)
             return
@@ -184,21 +192,21 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                 style={{ top: kebabPos.top, right: kebabPos.right }}
                 onClick={e => e.stopPropagation()}
             >
-                <button onClick={() => { setKebabOpen(false); handleDownload() }}
+                <button onClick={() => { closeKebab(); handleDownload() }}
                     disabled={!online}
                     className="whitespace-nowrap block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation">
                     Download
                 </button>
-                <button onClick={() => { setKebabOpen(false); insertNext({ uuid: song.songId!, properties: song.properties }) }}
+                <button onClick={() => { closeKebab(); insertNext({ uuid: song.songId!, properties: song.properties }) }}
                     className="whitespace-nowrap block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 touch-manipulation">
                     Play next
                 </button>
-                <button onClick={() => { setKebabOpen(false); handleShare() }}
+                <button onClick={() => { closeKebab(); handleShare() }}
                     disabled={!online}
                     className="whitespace-nowrap block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation">
                     {copied ? 'Link copied!' : 'Copy share link'}
                 </button>
-                <button onClick={() => { setKebabOpen(false); handleOfflineToggle() }}
+                <button onClick={() => { closeKebab(); handleOfflineToggle() }}
                     disabled={offlinePending || (!online && !offlineCached)}
                     className="whitespace-nowrap block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation">
                     {offlinePending
@@ -225,7 +233,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                                             const ok = await addSongToPlaylist(pl.id, song.songId)
                                             if (ok) { setAddedToPlaylist(pl.name); setTimeout(() => setAddedToPlaylist(null), 2000); onPlaylistAdd?.() }
                                             setPlaylistPickerOpen(false)
-                                            setKebabOpen(false)
+                                            closeKebab()
                                         }}
                                         className="whitespace-nowrap block w-full text-left pl-5 pr-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 overflow-hidden text-ellipsis text-gray-500 dark:text-gray-400 max-w-[200px]"
                                     >
@@ -237,7 +245,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                     </>
                 )}
                 <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
-                <button onClick={() => { setKebabOpen(false); openEditor() }}
+                <button onClick={() => { closeKebab(); openEditor() }}
                     disabled={!online}
                     className="whitespace-nowrap block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation">
                     Edit

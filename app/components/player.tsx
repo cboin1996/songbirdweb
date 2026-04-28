@@ -203,10 +203,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         const seed = existingSeed ?? (Math.random() * 0xFFFFFFFF | 0)
         shuffleSeedRef.current = seed
         const q = queueRef.current
-        const order = seededShuffle(q.map((_, i) => i), seed)
+        // Always pin currentIdx first so the queue display starts at the selected song
+        const rest = seededShuffle(q.map((_, i) => i).filter(i => i !== currentIdx), seed)
+        const order = currentIdx >= 0 ? [currentIdx, ...rest] : rest
         shuffleOrderRef.current = order
-        const pos = order.indexOf(currentIdx)
-        shufflePosRef.current = pos >= 0 ? pos : 0
+        shufflePosRef.current = 0
         setShuffleOrder([...order])
     }
 
@@ -610,9 +611,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                     const seed = (state as { shuffle_seed?: number | null }).shuffle_seed
                     const savedPos = (state as { shuffle_position?: number }).shuffle_position ?? 0
                     if (seed != null) {
-                        // Restore deterministic shuffle from seed — no pinning, pure seed order
+                        // Restore shuffle: pin safeIndex first, seed the rest (matches generateShuffleOrder)
                         shuffleSeedRef.current = seed
-                        const order = seededShuffle(restoredQueue.map((_, i) => i), seed)
+                        const rest = seededShuffle(restoredQueue.map((_, i) => i).filter(i => i !== safeIndex), seed)
+                        const order = [safeIndex, ...rest]
                         shuffleOrderRef.current = order
                         shufflePosRef.current = Math.max(0, Math.min(savedPos, order.length - 1))
                         setShuffleOrder([...order])
@@ -692,7 +694,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         const idx = queueDisplayItems.findIndex(({ song }) => song.uuid === current.uuid)
         if (idx >= 0) queueContainerRef.current.scrollTop = Math.max(0, idx * QUEUE_ROW_H - 88)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [showQueue])
+    }, [showQueue, current?.uuid])
 
     const p = current?.properties
     const hasQueue = queue.length > 1

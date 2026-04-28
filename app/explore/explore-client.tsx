@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
+import SearchInput from "../components/search-input"
 import { ExploreData, ExploreWindow, SongWithCount, RecentlyPlayedSong, RecentlySavedSong, fetchLibrary } from "../lib/data"
 import { routes } from "../lib/routes"
 import { usePlayer } from "../components/player"
@@ -22,7 +23,7 @@ const SORTS: { value: SortBy; label: string }[] = [
     { value: 'recently_played', label: 'recently played' },
 ]
 
-type AnyItem = SongWithCount | RecentlyPlayedSong | RecentlySavedSong | { uuid: string; url?: string; properties: ExploreData['recently_added'][0]['properties']; source?: string | null }
+type AnyItem = SongWithCount | RecentlyPlayedSong | RecentlySavedSong | ExploreData['recently_added'][0]
 
 function matchesSearch(item: AnyItem, query: string): boolean {
     if (!query) return true
@@ -39,10 +40,10 @@ function itemStat(item: AnyItem, sortBy: SortBy): string | null {
         return `played ${item.count}×`
     }
     if ('added_at' in item && typeof (item as { added_at: string }).added_at === 'string') {
-        return `added ${new Date((item as { added_at: string }).added_at).toLocaleDateString()}`
+        return `added ${new Date((item as { added_at: string }).added_at).toLocaleDateString('en-US')}`
     }
     if ('last_played_at' in item && typeof (item as RecentlyPlayedSong).last_played_at === 'string') {
-        return `played ${new Date((item as RecentlyPlayedSong).last_played_at).toLocaleDateString()}`
+        return `played ${new Date((item as RecentlyPlayedSong).last_played_at).toLocaleDateString('en-US')}`
     }
     return null
 }
@@ -114,8 +115,6 @@ export default function ExploreClient({ data, window }: { data: ExploreData | un
         router.replace(`/explore?${params.toString()}`)
     }
 
-    const recentSelected = sortBy === 'recent' || sortBy === 'recently_played'
-
     const rawMainList: AnyItem[] = data
         ? sortBy === 'plays' ? data.most_played
         : sortBy === 'downloads' ? data.most_downloaded
@@ -132,12 +131,11 @@ export default function ExploreClient({ data, window }: { data: ExploreData | un
     return (
         <div className="flex flex-col gap-6">
             <div className="sticky top-11 z-40 bg-white/90 dark:bg-gray-950/90 backdrop-blur-md py-3 flex flex-col gap-3 border-b border-gray-100 dark:border-gray-800">
-                <input
-                    type="text"
-                    placeholder="search by track or artist…"
+                <SearchInput
                     value={search}
-                    onChange={e => changeSearch(e.target.value)}
-                    className="w-full md:w-80 px-3 py-1.5 rounded-lg text-sm bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200 placeholder-gray-400 outline-none focus:ring-2 focus:ring-sky-500"
+                    onChange={changeSearch}
+                    placeholder="search by track or artist…"
+                    className="w-full md:w-80"
                 />
                 <div className="flex flex-wrap gap-3 items-center justify-between">
                     <div className="flex gap-1">
@@ -145,9 +143,8 @@ export default function ExploreClient({ data, window }: { data: ExploreData | un
                             <button
                                 key={w.value}
                                 onClick={() => setWindow(w.value)}
-                                disabled={recentSelected}
-                                className={`px-3 py-1 rounded-full text-sm transition-colors disabled:opacity-30 ${
-                                    window === w.value && !recentSelected
+                                className={`px-3 py-1 rounded-full text-sm transition-colors ${
+                                    window === w.value
                                         ? 'bg-sky-500 text-white'
                                         : 'text-gray-400 hover:text-sky-500'
                                 }`}
@@ -180,10 +177,8 @@ export default function ExploreClient({ data, window }: { data: ExploreData | un
                     sortBy === 'downloads' ? data.your_most_downloaded :
                     sortBy === 'saves' ? data.your_recently_saved :
                     sortBy === 'recent' ? data.your_recently_saved :
-                    sortBy === 'recently_played' ? data.your_recently_played :
                     null
                 const yourList = rawYourList ? rawYourList.filter(s => matchesSearch(s, search)) : null
-                const showWindow = !recentSelected
                 const noResults = search && mainList.length === 0 && (!yourList || yourList.length === 0)
                 return (
                     <div className="flex flex-col gap-10">
@@ -194,7 +189,7 @@ export default function ExploreClient({ data, window }: { data: ExploreData | un
                                 <div>
                                     <h2 className="text-sm font-medium text-gray-400 mb-4">
                                         {sortLabel}
-                                        {!recentSelected && <span className="ml-1 text-gray-300 dark:text-gray-600">· {windowLabel}</span>}
+                                        <span className="ml-1 text-gray-300 dark:text-gray-600">· {windowLabel}</span>
                                     </h2>
                                     <SongGrid songs={mainList} libraryIds={libraryIds} sortBy={sortBy} showSource={true} />
                                 </div>
@@ -202,24 +197,9 @@ export default function ExploreClient({ data, window }: { data: ExploreData | un
                                     <div>
                                         <h2 className="text-sm font-medium text-gray-400 mb-4">
                                             your {sortLabel}
-                                            {showWindow && <span className="ml-1 text-gray-300 dark:text-gray-600">· {windowLabel}</span>}
+                                            <span className="ml-1 text-gray-300 dark:text-gray-600">· {windowLabel}</span>
                                         </h2>
                                         <SongGrid songs={yourList} libraryIds={libraryIds} sortBy={sortBy} showSource={true} />
-                                    </div>
-                                )}
-                                {data && data.community_popular.length > 0 && (
-                                    <div>
-                                        <h2 className="text-sm font-medium text-gray-400 mb-4">
-                                            from the community
-                                            {!recentSelected && <span className="ml-1 text-gray-300 dark:text-gray-600">· {windowLabel}</span>}
-                                        </h2>
-                                        <SongGrid songs={data.community_popular.filter(s => matchesSearch(s, search))} libraryIds={libraryIds} sortBy={sortBy} showSource={true} />
-                                    </div>
-                                )}
-                                {data && data.community_recent.length > 0 && (
-                                    <div>
-                                        <h2 className="text-sm font-medium text-gray-400 mb-4">recently added by the community</h2>
-                                        <SongGrid songs={data.community_recent.filter(s => matchesSearch(s, search))} libraryIds={libraryIds} sortBy={sortBy} showSource={true} />
                                     </div>
                                 )}
                             </>

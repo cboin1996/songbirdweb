@@ -29,6 +29,8 @@ interface SongPickerModalProps {
     reorderable?: boolean
     onReorder?(songs: PickerSong[]): void
     emptyState?: string
+    // ineligible rows (uuid → list of missing field labels)
+    disabledItems?: Record<string, string[]>
 }
 
 const ROW_H = 52
@@ -38,6 +40,7 @@ export default function SongPickerModal({
     selectable = false, initialSelected, actionLabel, actionLoading, onConfirm,
     reorderable = false, onReorder,
     emptyState = 'no songs',
+    disabledItems,
 }: SongPickerModalProps) {
     const allIds = songs.map(s => s.uuid)
     const { selected, toggle, selectAll, clearAll, setAll, startDrag, continueDrag, endDrag } = useMultiSelect(allIds)
@@ -156,16 +159,18 @@ export default function SongPickerModal({
                                                 : null
                                         const isSelected = selected.has(song.uuid)
                                         const isDropTarget = dropTarget === absIdx
+                                        const missingFields = disabledItems?.[song.uuid]
+                                        const isDisabled = missingFields !== undefined
 
                                         return (
                                             <div
                                                 key={song.uuid}
-                                                data-picker-id={song.uuid}
+                                                data-picker-id={isDisabled ? undefined : song.uuid}
                                                 data-reorder-idx={absIdx}
                                                 style={{ height: ROW_H }}
                                                 className={`flex items-center gap-3 px-4 border-t-2 transition-colors ${
                                                     isDropTarget ? 'border-sky-500' : 'border-transparent'
-                                                } ${isSelected ? 'bg-sky-50 dark:bg-sky-950/30' : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'}`}
+                                                } ${isDisabled ? 'opacity-40' : isSelected ? 'bg-sky-50 dark:bg-sky-950/30' : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'}`}
                                             >
                                                 {/* reorder handle */}
                                                 {reorderable && (
@@ -179,17 +184,19 @@ export default function SongPickerModal({
 
                                                 {/* checkbox */}
                                                 {selectable && (
-                                                    <button
-                                                        onPointerDown={(e) => { e.preventDefault(); startDrag(song.uuid) }}
-                                                        onClick={(e) => toggle(song.uuid, e.shiftKey)}
-                                                        className={`shrink-0 w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
-                                                            isSelected
-                                                                ? 'bg-sky-500 border-sky-500'
-                                                                : 'border-gray-300 dark:border-gray-600 hover:border-sky-400'
+                                                    <div
+                                                        className={`shrink-0 w-5 h-5 rounded border-2 flex items-center justify-center ${
+                                                            isDisabled
+                                                                ? 'border-gray-200 dark:border-gray-700 cursor-not-allowed'
+                                                                : isSelected
+                                                                    ? 'bg-sky-500 border-sky-500 cursor-pointer'
+                                                                    : 'border-gray-300 dark:border-gray-600 hover:border-sky-400 cursor-pointer'
                                                         }`}
+                                                        onPointerDown={isDisabled ? undefined : (e) => { e.preventDefault(); startDrag(song.uuid) }}
+                                                        onClick={isDisabled ? undefined : (e) => toggle(song.uuid, e.shiftKey)}
                                                     >
-                                                        {isSelected && <FaCheck size={9} className="text-white" />}
-                                                    </button>
+                                                        {isSelected && !isDisabled && <FaCheck size={9} className="text-white" />}
+                                                    </div>
                                                 )}
 
                                                 {/* artwork */}
@@ -203,7 +210,10 @@ export default function SongPickerModal({
                                                 {/* text */}
                                                 <div className="flex-1 min-w-0">
                                                     <p className="text-sm font-medium truncate">{sp?.trackName ?? '—'}</p>
-                                                    <p className="text-xs text-gray-400 truncate">{sp?.artistName ?? '—'}</p>
+                                                    {isDisabled
+                                                        ? <p className="text-xs text-amber-500 truncate">missing: {missingFields.join(', ')}</p>
+                                                        : <p className="text-xs text-gray-400 truncate">{sp?.artistName ?? '—'}</p>
+                                                    }
                                                 </div>
                                             </div>
                                         )

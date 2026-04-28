@@ -148,11 +148,12 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         },
         [songs, cachedIds, online, supersededIds]
     )
-    const privateSongCount = useMemo(() => displaySongs.filter(s => s.owner_id !== null).length, [displaySongs])
+    const [eligibleCount, setEligibleCount] = useState(0)
     const playlistStubs = useMemo(() => playlists.map(p => ({ id: p.id, name: p.name })), [playlists])
 
     useEffect(() => {
         if (navigator.onLine) refreshSongs()
+        if (navigator.onLine) fetchEligibleSongs().then(e => setEligibleCount(e.filter(s => s.eligible).length))
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
@@ -190,8 +191,9 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     }
 
     async function openPublishModal() {
-        const eligible = await fetchEligibleSongs()
-        setEligibleSongs(eligible)
+        const all = await fetchEligibleSongs()
+        setEligibleSongs(all)
+        setEligibleCount(all.filter(s => s.eligible).length)
         setPublishModalOpen(true)
     }
 
@@ -201,6 +203,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         setPublishing(false)
         setPublishModalOpen(false)
         await refreshSongs()
+        fetchEligibleSongs().then(e => setEligibleCount(e.filter(s => s.eligible).length))
     }
 
     async function cacheSongsById(songList: LibrarySong[]) {
@@ -708,13 +711,13 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                         {savingAll ? `saving ${saveAllProgress.done}/${saveAllProgress.total}…` : !online ? 'offline' : 'save all offline'}
                     </button>
                 )}
-                {privateSongCount > 0 && viewMode !== 'playlists' && (
+                {eligibleCount > 0 && viewMode !== 'playlists' && (
                     <button
                         onClick={openPublishModal}
                         disabled={!online}
                         className="flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors disabled:opacity-50 text-gray-400 hover:text-sky-500 border border-gray-200 dark:border-gray-800 hover:border-sky-500"
                     >
-                        publish eligible ({privateSongCount})
+                        publish eligible ({eligibleCount})
                     </button>
                 )}
                 <div className="flex gap-1">
@@ -961,14 +964,15 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
             <SongPickerModal
                 open={publishModalOpen}
                 onClose={() => setPublishModalOpen(false)}
-                title="Publish eligible songs"
+                title="Publish songs"
                 songs={eligibleSongs.map(s => ({ uuid: s.uuid, properties: s.properties }))}
                 selectable
-                initialSelected={new Set(eligibleSongs.map(s => s.uuid))}
+                initialSelected={new Set(eligibleSongs.filter(s => s.eligible).map(s => s.uuid))}
                 actionLabel="Publish"
                 actionLoading={publishing}
                 onConfirm={handlePublishConfirm}
-                emptyState="no eligible songs"
+                emptyState="no private songs"
+                disabledItems={Object.fromEntries(eligibleSongs.filter(s => !s.eligible).map(s => [s.uuid, s.missing_fields]))}
             />
 
             {/* offline sync modal */}
