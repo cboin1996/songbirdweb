@@ -2,7 +2,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import Image from "next/image"
 import Link from "next/link"
-import { FaPause, FaPlay, FaStepBackward, FaStepForward, FaRandom, FaRedo, FaList, FaTimes, FaVolumeUp, FaVolumeMute } from "react-icons/fa"
+import { FaPause, FaPlay, FaStepBackward, FaStepForward, FaRandom, FaRedo, FaList, FaTimes, FaVolumeUp, FaVolumeMute, FaBars } from "react-icons/fa"
 import { DOWNLOAD_URL, PlayableSong, artworkUrl, fetchLibrarySongs, fetchPlayerState, recordPlay, savePlayerState, updatePosition } from "../lib/data"
 import { getSongFile } from "../lib/offline"
 import Slider from "./slider"
@@ -26,6 +26,7 @@ interface PlayerContextValue {
     toggleRepeat: () => void
     insertNext: (song: PlayableSong) => void
     removeFromQueue: (index: number) => void
+    reorderQueue: (fromIdx: number, toIdx: number) => void
 }
 
 const PlayerContext = createContext<PlayerContextValue>({
@@ -44,6 +45,7 @@ const PlayerContext = createContext<PlayerContextValue>({
     toggleRepeat: () => {},
     insertNext: () => {},
     removeFromQueue: () => {},
+    reorderQueue: () => {},
 })
 
 export function usePlayer() {
@@ -148,6 +150,15 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const manualNextRef = useRef<PlayableSong[]>([])
     const shuffleRef = useRef(false)
     const repeatRef = useRef<RepeatMode>('off')
+    const [toast, setToast] = useState<string | null>(null)
+    const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const dragFromRef = useRef<number | null>(null)
+
+    function showToast(msg: string) {
+        if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+        setToast(msg)
+        toastTimerRef.current = setTimeout(() => setToast(null), 2500)
+    }
 
     const savePosition = useCallback((song: PlayableSong, time: number) => {
         updatePosition(song.uuid, time)
@@ -219,6 +230,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         manualNextRef.current.push(song)
         setQueue([...q])
         scheduleSave()
+        const afterName = queueRef.current[queueIndexRef.current]?.properties?.trackName
+        showToast(afterName ? `Playing after ${afterName}` : 'Added to queue')
     }
 
     function removeFromQueue(index: number) {
@@ -227,6 +240,22 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         q.splice(index, 1)
         queueRef.current = q
         if (index <= currentIdx) queueIndexRef.current = Math.max(-1, currentIdx - 1)
+        setQueue([...q])
+        scheduleSave()
+    }
+
+    function reorderQueue(fromIdx: number, toIdx: number) {
+        if (fromIdx === toIdx) return
+        const q = [...queueRef.current]
+        const [item] = q.splice(fromIdx, 1)
+        q.splice(toIdx, 0, item)
+        const currentIdx = queueIndexRef.current
+        let newIdx = currentIdx
+        if (fromIdx === currentIdx) newIdx = toIdx
+        else if (fromIdx < currentIdx && toIdx >= currentIdx) newIdx = currentIdx - 1
+        else if (fromIdx > currentIdx && toIdx <= currentIdx) newIdx = currentIdx + 1
+        queueRef.current = q
+        queueIndexRef.current = newIdx
         setQueue([...q])
         scheduleSave()
     }
@@ -519,7 +548,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     const contextValue = useMemo(() => ({
         current, isPlaying, queue, shuffle, repeat, playContext,
-        play, pause, resume, skipNext, skipPrev, toggleShuffle, toggleRepeat, insertNext, removeFromQueue,
+        play, pause, resume, skipNext, skipPrev, toggleShuffle, toggleRepeat, insertNext, removeFromQueue, reorderQueue,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }), [current, isPlaying, queue, shuffle, repeat, playContext])
 
@@ -527,6 +556,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         <PlayerContext.Provider value={contextValue}>
             <audio ref={audioRef} />
             {children}
+            {toast && (
+                <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[60] px-4 py-2 rounded-full bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-xs font-medium shadow-lg pointer-events-none whitespace-nowrap">
+                    {toast}
+                </div>
+            )}
             {current && p && (
                 <div data-testid="player-bar" className="fixed bottom-0 left-0 right-0 z-50 bg-white/90 dark:bg-gray-950/90 backdrop-blur-md border-t border-gray-100 dark:border-gray-800">
                     {showQueue && queue.length > 0 && (
@@ -544,8 +578,16 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                 return (
                                     <div
                                         key={`${song.uuid}-${i}`}
-                                        className={`flex items-center gap-3 px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-900 transition-colors ${isActive ? 'bg-gray-50 dark:bg-gray-900' : ''}`}
+                                        draggable
+                                        onDragStart={() => { dragFromRef.current = i }}
+                                        onDragOver={e => e.preventDefault()}
+                                        onDrop={e => { e.preventDefault(); if (dragFromRef.current !== null) { reorderQueue(dragFromRef.current, i); dragFromRef.current = null } }}
+                                        onDragEnd={() => { dragFromRef.current = null }}
+                                        className={`flex items-center gap-2 px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-900 transition-colors ${isActive ? 'bg-gray-50 dark:bg-gray-900' : ''}`}
                                     >
+                                        <span className="text-gray-300 dark:text-gray-600 cursor-grab active:cursor-grabbing shrink-0">
+                                            <FaBars size={10} />
+                                        </span>
                                         <button onClick={() => playAt(i)} className="flex items-center gap-3 flex-1 text-left min-w-0">
                                             {sp?.artworkUrl100 && (
                                                 <Image src={artworkUrl(sp.artworkUrl100, 200)} alt="" width={28} height={28} className="rounded shrink-0" />
