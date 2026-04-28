@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import Image from "next/image"
 import { useRouter, useSearchParams } from "next/navigation"
-import { LibrarySong, Playlist, artworkUrl, fetchLibrarySongs, fetchPlaylists, publishEligibleSongs, removeFromLibrary, downloadSongToFile } from "../lib/data"
+import { LibrarySong, Playlist, artworkUrl, fetchLibrarySongs, fetchPlaylists, publishEligibleSongs, removeFromLibrary, downloadSongToFile, addSongToPlaylist, bulkRemoveFromLibrary, bulkAddSongsToPlaylist } from "../lib/data"
 import { cacheSong, getCachedSongIds } from "../lib/offline"
 import { useOnline } from "../lib/use-online"
 import Song from "../components/song"
@@ -90,13 +90,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     const [songs, setSongs] = useState(initialSongs)
     const router = useRouter()
     const searchParams = useSearchParams()
-    const initialView = (searchParams.get('view') as ViewMode | null) ?? 'songs'
-    const [viewMode, setViewMode] = useState<ViewMode>(initialView)
-
-    useEffect(() => {
-        const v = (searchParams.get('view') as ViewMode | null) ?? 'songs'
-        setViewMode(v)
-    }, [searchParams])
+    const viewMode = (searchParams.get('view') as ViewMode | null) ?? 'songs'
     const { play, current } = usePlayer()
     const sectionRefs = useRef<Record<string, HTMLElement | null>>({})
     const isDesktop = useIsDesktop()
@@ -110,6 +104,11 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
     const [lastSelectedId, setLastSelectedId] = useState<string | null>(null)
     const [bulkLoading, setBulkLoading] = useState(false)
+    const [bulkPlaylistPicking, setBulkPlaylistPicking] = useState(false)
+    const listContainerRef = useRef<HTMLDivElement>(null)
+    const dragState = useRef<{ startId: string; lastId: string; committed: boolean; startY: number; addMode: boolean } | null>(null)
+    const selectedIdsRef = useRef(selectedIds)
+    useEffect(() => { selectedIdsRef.current = selectedIds }, [selectedIds])
 
     const privateSongCount = useMemo(() => songs.filter(s => s.owner_id !== null).length, [songs])
     const playlistStubs = useMemo(() => playlists.map(p => ({ id: p.id, name: p.name })), [playlists])
@@ -121,7 +120,6 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
 
     function changeViewMode(v: ViewMode) {
         if (v !== 'songs' && selectMode) exitSelectMode()
-        setViewMode(v)
         router.replace(`${routes.library}?view=${v}`, { scroll: false })
     }
 
@@ -335,7 +333,88 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         setSelectMode(false)
         setSelectedIds(new Set())
         setLastSelectedId(null)
+        setBulkPlaylistPicking(false)
     }
+
+    useEffect(() => {
+        if (!selectMode) return
+        function onKeyDown(e: KeyboardEvent) {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+                e.preventDefault()
+                const allIds = [...songGrouped.values()].flat().map(s => s.uuid)
+                setSelectedIds(new Set(allIds))
+            } else if (e.key === 'Escape') {
+                exitSelectMode()
+            }
+        }
+        window.addEventListener('keydown', onKeyDown)
+        return () => window.removeEventListener('keydown', onKeyDown)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectMode, songGrouped])
+
+    useEffect(() => {
+        const container = listContainerRef.current
+        if (!container || !selectMode) return
+
+        const allIds = [...songGrouped.values()].flat().map(s => s.uuid)
+
+        function songIdAt(x: number, y: number): string | null {
+            const el = document.elementFromPoint(x, y)
+            return el?.closest<HTMLElement>('[data-song-id]')?.dataset.songId ?? null
+        }
+
+        function applyRange(fromId: string, toId: string, addMode: boolean) {
+            const from = allIds.indexOf(fromId)
+            const to = allIds.indexOf(toId)
+            if (from === -1 || to === -1) return
+            const [lo, hi] = from < to ? [from, to] : [to, from]
+            setSelectedIds(prev => {
+                const next = new Set(prev)
+                for (let i = lo; i <= hi; i++) addMode ? next.add(allIds[i]) : next.delete(allIds[i])
+                return next
+            })
+        }
+
+        function onTouchStart(e: TouchEvent) {
+            const t = e.touches[0]
+            const id = songIdAt(t.clientX, t.clientY)
+            if (!id) return
+            dragState.current = { startId: id, lastId: id, committed: false, startY: t.clientY, addMode: !selectedIdsRef.current.has(id) }
+        }
+
+        function onTouchMove(e: TouchEvent) {
+            const state = dragState.current
+            if (!state) return
+            const t = e.touches[0]
+            if (!state.committed) {
+                if (Math.abs(t.clientY - state.startY) < 8) return
+                state.committed = true
+                applyRange(state.startId, state.startId, state.addMode)
+                setLastSelectedId(state.startId)
+            }
+            e.preventDefault()
+            const id = songIdAt(t.clientX, t.clientY)
+            if (id && id !== state.lastId) {
+                applyRange(state.startId, id, state.addMode)
+                state.lastId = id
+                setLastSelectedId(id)
+            }
+        }
+
+        function onTouchEnd() {
+            dragState.current = null
+        }
+
+        container.addEventListener('touchstart', onTouchStart, { passive: true })
+        container.addEventListener('touchmove', onTouchMove, { passive: false })
+        container.addEventListener('touchend', onTouchEnd, { passive: true })
+        return () => {
+            container.removeEventListener('touchstart', onTouchStart)
+            container.removeEventListener('touchmove', onTouchMove)
+            container.removeEventListener('touchend', onTouchEnd)
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectMode, songGrouped])
 
     function handleSelect(songId: string, shiftKey = false) {
         setSelectedIds(prev => {
@@ -347,7 +426,9 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                 const toIdx = ids.indexOf(songId)
                 if (fromIdx !== -1 && toIdx !== -1) {
                     const [lo, hi] = fromIdx < toIdx ? [fromIdx, toIdx] : [toIdx, fromIdx]
-                    for (let i = lo; i <= hi; i++) next.add(ids[i])
+                    const range = ids.slice(lo, hi + 1)
+                    const allSelected = range.every(id => prev.has(id))
+                    for (const id of range) allSelected ? next.delete(id) : next.add(id)
                 }
             } else {
                 if (next.has(songId)) next.delete(songId)
@@ -358,9 +439,10 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         setLastSelectedId(songId)
     }
 
-    async function bulkRemoveFromLibrary() {
+    async function handleBulkRemoveFromLibrary() {
         setBulkLoading(true)
-        await Promise.all([...selectedIds].map(id => removeFromLibrary(id)))
+        const ids = [...selectedIds]
+        await bulkRemoveFromLibrary(ids)
         setSongs(prev => prev.filter(s => !selectedIds.has(s.uuid)))
         exitSelectMode()
         setBulkLoading(false)
@@ -392,14 +474,36 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         setBulkLoading(false)
     }
 
+    async function bulkAddToPlaylist(playlistId: string) {
+        setBulkLoading(true)
+        setBulkPlaylistPicking(false)
+        await bulkAddSongsToPlaylist(playlistId, [...selectedIds])
+        await refreshPlaylists()
+        exitSelectMode()
+        setBulkLoading(false)
+    }
+
     if (songs.length === 0) {
         return <p className="text-gray-400 text-sm py-4">library is empty</p>
     }
 
     return (
-        <div className="relative pr-7">
-            {/* Sticky toolbar */}
-            <div className="sticky top-11 z-40 bg-white/90 dark:bg-gray-950/90 backdrop-blur-md py-3 flex flex-wrap gap-3 items-center border-b border-gray-100 dark:border-gray-800 mb-2">
+        <div ref={listContainerRef} className={`relative pr-7${selectMode ? ' select-none' : ''}`}>
+            {/* Fixed Select button */}
+            {viewMode === 'songs' && (
+                <button
+                    onClick={selectMode ? exitSelectMode : () => enterSelectMode()}
+                    className={`fixed top-14 right-4 z-40 flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors border ${selectMode ? 'bg-sky-500 text-white border-sky-500' : 'bg-white/90 dark:bg-gray-950/90 backdrop-blur-md text-gray-400 hover:text-sky-500 border-gray-200 dark:border-gray-800 hover:border-sky-500'}`}
+                >
+                    {selectMode
+                        ? selectedIds.size > 0
+                            ? `${selectedIds.size} selected`
+                            : 'Cancel'
+                        : 'Select'}
+                </button>
+            )}
+            {/* Toolbar */}
+            <div className="flex flex-wrap gap-3 items-center mb-2 py-1">
                 {viewMode !== 'playlists' && (
                     <button
                         onClick={playAll}
@@ -418,18 +522,6 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                     >
                         <FaCloudDownloadAlt size={12} />
                         {savingAll ? `${saveAllProgress.done}/${saveAllProgress.total}` : 'save all offline'}
-                    </button>
-                )}
-                {viewMode === 'songs' && (
-                    <button
-                        onClick={selectMode ? exitSelectMode : () => enterSelectMode()}
-                        className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors border ${selectMode ? 'bg-sky-500 text-white border-sky-500' : 'text-gray-400 hover:text-sky-500 border-gray-200 dark:border-gray-800 hover:border-sky-500'}`}
-                    >
-                        {selectMode
-                            ? selectedIds.size > 0
-                                ? `${selectedIds.size} selected`
-                                : 'Cancel'
-                            : 'Select'}
                     </button>
                 )}
                 {privateSongCount > 0 && viewMode !== 'playlists' && (
@@ -571,7 +663,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                     onPlaylistAdd={refreshPlaylists}
                                     selectMode={selectMode}
                                     isSelected={selectedIds.has(song.uuid)}
-                                    onSelect={(id) => handleSelect(id)}
+                                    onSelect={(id, shiftKey) => handleSelect(id, shiftKey)}
                                     onLongPress={(id) => { if (!selectMode) enterSelectMode(id) }}
                                 />
                                 </div>
@@ -590,7 +682,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                         ) : (
                             <>
                                 <button
-                                    onClick={bulkRemoveFromLibrary}
+                                    onClick={handleBulkRemoveFromLibrary}
                                     className="px-4 py-2 rounded-xl text-sm font-medium bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 active:bg-red-200 touch-manipulation min-h-[44px]"
                                 >
                                     Remove
@@ -607,6 +699,29 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                 >
                                     Download
                                 </button>
+                                {playlists.length > 0 && (
+                                    <div className="relative">
+                                        <button
+                                            onClick={() => setBulkPlaylistPicking(p => !p)}
+                                            className="px-4 py-2 rounded-xl text-sm font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 active:bg-gray-300 touch-manipulation min-h-[44px]"
+                                        >
+                                            + Playlist
+                                        </button>
+                                        {bulkPlaylistPicking && (
+                                            <div className="absolute bottom-full mb-2 right-0 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl overflow-hidden min-w-[160px]">
+                                                {playlists.map(pl => (
+                                                    <button
+                                                        key={pl.id}
+                                                        onClick={() => bulkAddToPlaylist(pl.id)}
+                                                        className="w-full text-left px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 active:bg-gray-200 touch-manipulation"
+                                                    >
+                                                        {pl.name}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                             </>
                         )}
                     </div>

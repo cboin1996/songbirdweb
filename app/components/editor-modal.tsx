@@ -7,7 +7,7 @@ import {
   pollEditJob, Properties, saveEditDraft, songArtworkUrl, tagSong, artworkUrl,
   addToLibrary, removeFromLibrary, uploadSongArtwork, API_V1,
 } from '../lib/data'
-import { FaPlay, FaPause, FaTimes, FaUndo, FaRedo, FaTrash, FaSync, FaCut } from 'react-icons/fa'
+import { FaPlay, FaPause, FaTimes, FaUndo, FaRedo, FaTrash, FaCut } from 'react-icons/fa'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { usePlayer } from './player'
@@ -68,6 +68,31 @@ function stripClientIds(params: EditParams): EditParams {
 const DRAFT_EXPIRY_DAYS = 30
 const MAX_FADE_DUR = 15
 const MIN_REGION_DUR = 0.5
+const DEFAULT_FADE_DUR = 10
+const OBSTACLE_GAP = 0.1
+const DRAFT_SKIP_KEY = 'sb-skip-draft-banner'
+const BAR_W = 2, BAR_GAP = 1, BAR_R = 2
+
+const DB_AXIS = [0, -6, -12] as const
+function DbfsAxis() {
+  return (
+    <div className="relative w-12 shrink-0 mt-5 min-h-[80px] select-none pointer-events-none">
+      {DB_AXIS.map(db => {
+        const pct = (1 - Math.pow(10, db / 20)) / 2 * 100
+        return (
+          <div
+            key={db}
+            className="absolute right-0 flex items-center gap-1"
+            style={{ top: `${pct}%`, transform: db === 0 ? 'none' : 'translateY(-50%)' }}
+          >
+            <span className="text-[11px] font-mono text-gray-400 dark:text-gray-500 tabular-nums leading-none">{db}</span>
+            <div className="w-2 h-px bg-slate-500/30 dark:bg-slate-400/20" />
+          </div>
+        )
+      })}
+    </div>
+  )
+}
 
 interface Props {
   songId: string
@@ -107,15 +132,16 @@ export default function EditorModal({
   const regionsRef = useRef<ReturnType<typeof RegionsPlugin.create> | null>(null)
   const [wsReady, setWsReady] = useState(false)
   const wsReadyRef = useRef(false)
+  const [wsLoadError, setWsLoadError] = useState(false)
   const [wfPlaying, setWfPlaying] = useState(false)
-  const [looping, setLooping] = useState(false)
-  const loopingRef = useRef(false)
+
   const trimParamsRef = useRef({ trim_start: 0, trim_end: null as number | null })
 
   // --- original waveform ---
   const origWaveRef = useRef<HTMLDivElement>(null)
   const wsOrigRef = useRef<WaveSurfer | null>(null)
   const [origReady, setOrigReady] = useState(false)
+  const [origDuration, setOrigDuration] = useState(0)
   const [origPlaying, setOrigPlaying] = useState(false)
 
   // active waveform: ref for stale-closure-safe event handlers, state for render
@@ -248,27 +274,6 @@ export default function EditorModal({
     ctx.restore()
   }
 
-  const DB_AXIS = [0, -6, -12] as const
-  function DbfsAxis() {
-    return (
-      <div className="relative w-12 shrink-0 mt-5 min-h-[80px] select-none pointer-events-none">
-        {DB_AXIS.map(db => {
-          const pct = (1 - Math.pow(10, db / 20)) / 2 * 100
-          return (
-            <div
-              key={db}
-              className="absolute right-0 flex items-center gap-1"
-              style={{ top: `${pct}%`, transform: db === 0 ? 'none' : 'translateY(-50%)' }}
-            >
-              <span className="text-[11px] font-mono text-gray-400 dark:text-gray-500 tabular-nums leading-none">{db}</span>
-              <div className="w-2 h-px bg-slate-500/30 dark:bg-slate-400/20" />
-            </div>
-          )
-        })}
-      </div>
-    )
-  }
-
   const renderOrigWave = useCallback((peaks: Array<Float32Array | number[]>, ctx: CanvasRenderingContext2D) => {
     const isReplacement = origWaveCanvasRef.current && !origWaveCanvasRef.current.isConnected
     if (!origWaveCanvasRef.current || isReplacement) origWaveCanvasRef.current = ctx.canvas
@@ -277,7 +282,6 @@ export default function EditorModal({
     if (!peakData) return
     const { width, height } = ctx.canvas
     const centerY = height / 2
-    const BAR_W = 2, BAR_GAP = 1, BAR_R = 2
     const step = BAR_W + BAR_GAP
     const numBars = Math.floor(width / step)
     const numSamples = peakData.length
@@ -313,7 +317,6 @@ export default function EditorModal({
     if (!peakData) return
     const { width, height } = ctx.canvas
     const centerY = height / 2
-    const BAR_W = 2, BAR_GAP = 1, BAR_R = 2
     const step = BAR_W + BAR_GAP
     const numBars = Math.floor(width / step)
     const numSamples = peakData.length
@@ -453,7 +456,6 @@ export default function EditorModal({
   }, [songId])
 
   // keep refs in sync for stale-closure-safe event handlers
-  useEffect(() => { loopingRef.current = looping }, [looping])
   useEffect(() => { wsReadyRef.current = wsReady }, [wsReady])
   useEffect(() => { allSelectedRef.current = allSelected }, [allSelected])
 
@@ -586,7 +588,7 @@ export default function EditorModal({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ;(ws as any).renderer.renderProgress = () => {}
     ws.load(`${DOWNLOAD_URL}/${songId}`).catch((err: Error) => {
-      if (err?.name !== 'AbortError') console.error('WaveSurfer load:', err)
+      if (err?.name !== 'AbortError') { console.error('WaveSurfer load:', err); setWsLoadError(true) }
     })
     ws.on('ready', () => {
       const dur = ws.getDuration()
@@ -651,12 +653,8 @@ export default function EditorModal({
       setWfPlaying(false)
       stopWsPlayRaf()
       if (wsPreviewRef.current) { wsPreviewRef.current = false; setPreviewing(false); return }
-      if (loopingRef.current) {
-        const { trim_start, trim_end } = trimParamsRef.current
-        ws.play(trim_start, trim_end ?? undefined)
-      }
     })
-    ws.on('error', (err: Error) => { if (err?.name !== 'AbortError') console.error('WaveSurfer:', err) })
+    ws.on('error', (err: Error) => { if (err?.name !== 'AbortError') { console.error('WaveSurfer:', err); setWsLoadError(true) } })
     regions.on('region-created', region => {
       const el = region.element as HTMLElement
       const isTrim = region.id === 'trim'
@@ -1133,12 +1131,12 @@ export default function EditorModal({
     })
     wsOrigRef.current = ws
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(ws as any).renderer.renderProgress = () => {}
     ws.load(`${DOWNLOAD_URL}/${songId}`).catch((err: Error) => {
       if (err?.name !== 'AbortError') console.error('WaveSurfer orig:', err)
     })
     ws.on('ready', () => {
       setOrigReady(true)
+      setOrigDuration(ws.getDuration())
       const saved = sessionStorage.getItem(`sb-cursor-orig-${songId}`)
       if (saved) {
         const t = parseFloat(saved)
@@ -1254,18 +1252,18 @@ export default function EditorModal({
     const trimStart = p.trim_start
     const trimEnd = p.trim_end ?? duration
     const span = Math.min(10, trimEnd - trimStart)
-    const sorted = [...p.cuts].sort((a, b) => a.start - b.start)
+    const obstacles = [...p.fades, ...p.cuts].sort((a, b) => a.start - b.start)
     const cursor = wsRef.current?.getCurrentTime() ?? (trimStart + trimEnd) / 2
     let start = Math.max(trimStart, Math.min(trimEnd - span, cursor - span / 2))
-    for (let i = 0; i <= sorted.length; i++) {
+    for (let i = 0; i <= obstacles.length; i++) {
       const end = Math.min(trimEnd, start + span)
-      if (end - start < 0.5) return
-      const hit = sorted.find(c => start < c.end && end > c.start)
+      if (end - start < MIN_REGION_DUR) { showPasteWarning('No room for a new cut — remove or shrink existing regions first'); return }
+      const hit = obstacles.find(o => start < o.end && end > o.start)
       if (!hit) break
-      start = hit.end + 0.1
+      start = hit.end + OBSTACLE_GAP
     }
     const end = Math.min(trimEnd, start + span)
-    if (end - start < 0.5) return
+    if (end - start < MIN_REGION_DUR) { showPasteWarning('No room for a new cut — remove or shrink existing regions first'); return }
     const id = crypto.randomUUID()
     pushHistory(p)
     regionsRef.current?.addRegion({ id, start, end, color: 'transparent', drag: true, resize: true })
@@ -1308,7 +1306,6 @@ export default function EditorModal({
 
   function addFade(type: 'in' | 'out') {
     if (!wsReady || !duration) return
-    const DEFAULT_DUR = 10
     const p = paramsRef.current
     const trimStart = p.trim_start
     const trimEnd = p.trim_end ?? duration
@@ -1316,18 +1313,18 @@ export default function EditorModal({
     let start: number, end: number
     if (type === 'in') {
       start = trimStart
-      end = Math.min(trimEnd, trimStart + DEFAULT_DUR)
+      end = Math.min(trimEnd, trimStart + DEFAULT_FADE_DUR)
       for (const o of obstacles) {
-        if (start < o.end && end > o.start) { start = o.end + 0.1; end = Math.min(trimEnd, start + DEFAULT_DUR) }
+        if (start < o.end && end > o.start) { start = o.end + OBSTACLE_GAP; end = Math.min(trimEnd, start + DEFAULT_FADE_DUR) }
       }
     } else {
       end = trimEnd
-      start = Math.max(trimStart, trimEnd - DEFAULT_DUR)
+      start = Math.max(trimStart, trimEnd - DEFAULT_FADE_DUR)
       for (const o of [...obstacles].reverse()) {
-        if (start < o.end && end > o.start) { end = o.start - 0.1; start = Math.max(trimStart, end - DEFAULT_DUR) }
+        if (start < o.end && end > o.start) { end = o.start - OBSTACLE_GAP; start = Math.max(trimStart, end - DEFAULT_FADE_DUR) }
       }
     }
-    if (end - start < 0.5) return
+    if (end - start < MIN_REGION_DUR) { showPasteWarning('No room for a new fade — remove or shrink existing regions first'); return }
     const id = crypto.randomUUID()
     pushHistory(paramsRef.current)
     regionsRef.current?.addRegion({ id: `fade-${id}`, start, end, color: 'transparent', drag: true, resize: true })
@@ -1351,17 +1348,16 @@ export default function EditorModal({
 
   function addFadeAtTime(time: number, type: 'in' | 'out') {
     if (!wsReady || !duration) return
-    const DEFAULT_DUR = 10
     const p = paramsRef.current
     const trimStart = p.trim_start
     const trimEnd = p.trim_end ?? duration
     let start: number, end: number
     if (type === 'in') {
       start = Math.max(trimStart, time)
-      end = Math.min(trimEnd, start + DEFAULT_DUR)
+      end = Math.min(trimEnd, start + DEFAULT_FADE_DUR)
     } else {
       end = Math.min(trimEnd, time)
-      start = Math.max(trimStart, end - DEFAULT_DUR)
+      start = Math.max(trimStart, end - DEFAULT_FADE_DUR)
     }
     if (end - start < 0.5) return
     const id = crypto.randomUUID()
@@ -1776,7 +1772,7 @@ export default function EditorModal({
     if (!wsRef.current) return
     stopPreview()
     if (wfPlaying) wsRef.current.pause()
-    else { pausePlayer(); wsRef.current.play(params.trim_start, params.trim_end ?? undefined) }
+    else { pausePlayer(); wsOrigRef.current?.pause(); wsRef.current.play(params.trim_start, params.trim_end ?? undefined) }
   }
 
   async function handleSaveDraft() {
@@ -1819,6 +1815,7 @@ export default function EditorModal({
   }
 
   async function handleRestoreOriginal() {
+    stopPreview()
     const restoredId = rootSongId ?? songId
     setRestoring(true)
     await removeFromLibrary(activeSongId)
@@ -1829,6 +1826,7 @@ export default function EditorModal({
 
   async function handleRevertLastSave() {
     if (!parentSongId) return
+    stopPreview()
     setRestoring(true)
     await removeFromLibrary(activeSongId)
     await addToLibrary(parentSongId)
@@ -1839,7 +1837,7 @@ export default function EditorModal({
   async function handleSave() {
     setJobStatus('submitting')
     setJobError('')
-    const job = await createEditJob(songId, stripClientIds(params), overwrite)
+    const job = await createEditJob(songId, stripClientIds(paramsRef.current), overwrite)
     if (!job) { setJobStatus('error'); setJobError('failed to start'); return }
     setJobStatus('polling')
     if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
@@ -1883,7 +1881,7 @@ export default function EditorModal({
   }
 
   function handleClose() {
-    if (paramsChanged(params) && jobStatus !== 'done' && !localStorage.getItem('sb-skip-draft-banner')) {
+    if (paramsChanged(params) && jobStatus !== 'done' && !localStorage.getItem(DRAFT_SKIP_KEY)) {
       setCloseConfirm(true)
       closeTimerRef.current = setTimeout(() => {
         setCloseConfirm(false)
@@ -1992,8 +1990,9 @@ export default function EditorModal({
       e.stopPropagation()
       if (activeWaveformRef.current === 'orig') {
         if (origPlaying) wsOrigRef.current?.pause()
-        else { pausePlayer(); wsOrigRef.current?.play() }
+        else { pausePlayer(); wsRef.current?.pause(); stopPreview(); wsOrigRef.current?.play() }
       } else {
+        wsOrigRef.current?.pause()
         handlePreview()
       }
     }
@@ -2216,7 +2215,7 @@ export default function EditorModal({
               <button
                 onClick={() => {
                   if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
-                  localStorage.setItem('sb-skip-draft-banner', '1')
+                  localStorage.setItem(DRAFT_SKIP_KEY, '1')
                   setCloseConfirm(false)
                   router.back()
                 }}
@@ -2296,14 +2295,6 @@ export default function EditorModal({
                         ))}
                       </div>
                     )}
-                    {(jobStatus === 'submitting' || jobStatus === 'polling' || restoring) && (
-                      <div className="absolute inset-0 flex items-end justify-center gap-px pb-0 pointer-events-none overflow-hidden rounded bg-gray-950/50">
-                        {WAVEFORM_SKELETON.slice(0, 80).map((h, i) => (
-                          <div key={i} className="flex-1 bg-gray-700/60 rounded-sm animate-pulse"
-                            style={{ height: `${h * 0.6}%`, animationDelay: `${(i % 8) * 60}ms` }} />
-                        ))}
-                      </div>
-                    )}
                   </div>
                 </div>
               </div>
@@ -2316,6 +2307,7 @@ export default function EditorModal({
                   {origPlaying ? <FaPause size={12} /> : <FaPlay size={12} />}
                 </button>
                 <span ref={origCurrentTimeLabelRef} className="text-xs text-gray-400 tabular-nums">0:00</span>
+                {origDuration > 0 && <span className="text-xs text-gray-300 dark:text-gray-600 tabular-nums"> / {fmt(origDuration)}</span>}
                 <span className="text-xs text-gray-400 flex-1">
                   {activeRootSongId && activeRootSongId !== activeSongId ? ' · prev. edit' : ' · original'}
                 </span>
@@ -2370,7 +2362,7 @@ export default function EditorModal({
                       className="absolute top-0 bottom-0 pointer-events-none z-19"
                       style={{ display: 'none', left: '0%', width: '1px', background: '#94a3b8', opacity: 0.5 }}
                     />
-                    {!wsReady && (
+                    {!wsReady && !wsLoadError && (
                       <div className="absolute inset-0 flex items-end justify-center gap-px pb-0 pointer-events-none overflow-hidden">
                         {WAVEFORM_SKELETON.map((h, i) => (
                           <div key={i} className="flex-1 bg-gray-200 dark:bg-gray-800 rounded-sm animate-pulse"
@@ -2378,12 +2370,9 @@ export default function EditorModal({
                         ))}
                       </div>
                     )}
-                    {(jobStatus === 'submitting' || jobStatus === 'polling') && (
-                      <div className="absolute inset-0 flex items-end justify-center gap-px pb-0 pointer-events-none overflow-hidden rounded bg-gray-950/50">
-                        {WAVEFORM_SKELETON.map((h, i) => (
-                          <div key={i} className="flex-1 bg-sky-500/40 rounded-sm animate-pulse"
-                            style={{ height: `${h}%`, animationDelay: `${(i % 8) * 60}ms` }} />
-                        ))}
+                    {wsLoadError && (
+                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                        <span className="text-xs text-red-400">failed to load audio</span>
                       </div>
                     )}
                   </div>
@@ -2405,14 +2394,7 @@ export default function EditorModal({
                 <button onClick={() => { switchToWaveform('edit'); handlePreview() }} disabled={!wsReady} title={previewing ? 'stop preview' : 'preview with edits'} className={`shrink-0 ${wsReady ? 'text-sky-500 hover:text-sky-400' : 'text-gray-300 dark:text-gray-700'}`}>
                   {previewing ? <FaPause size={12} /> : <FaPlay size={12} />}
                 </button>
-                <button
-                  onClick={() => setLooping(l => !l)}
-                  disabled={!wsReady}
-                  title="loop trim region"
-                  className={`${btnGhost} shrink-0 ${looping ? 'text-sky-500' : ''}`}
-                >
-                  <FaSync size={11} />
-                </button>
+
               <span className="text-sm text-gray-400 tabular-nums">
                 <span ref={currentTimeLabelRef}>{fmt(params.trim_start)}</span>
                 <span className="text-gray-300 dark:text-gray-600"> / {fmt(duration)}</span>
@@ -2594,7 +2576,7 @@ export default function EditorModal({
               <div className="bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-4 text-xs text-gray-600 dark:text-gray-400 flex flex-col gap-4">
                 <div className="flex flex-col gap-1.5">
                   <p className="text-gray-400 dark:text-gray-500 font-medium text-xs uppercase tracking-wide">Controls</p>
-                  <p><span className="text-gray-800 dark:text-gray-300 font-medium">Volume</span> — −40 to +6 dB (0 dB = original level, +6 dB ≈ 2× amplitude). Preview matches the saved result exactly.</p>
+                  <p><span className="text-gray-800 dark:text-gray-300 font-medium">Volume</span> — −40 to +6 dB (0 dB = original level, +6 dB ≈ 2× amplitude). The edit waveform scales with volume so you can see the output level. The Y-axis labels (0, −6, −12 dBFS) show peak amplitude — 0 dBFS is the top edge (maximum before clipping).</p>
                   <p><span className="text-gray-800 dark:text-gray-300 font-medium">Speed</span> — 0.25× to 4×. Affects pitch. Preview matches.</p>
                   <p><span className="text-gray-800 dark:text-gray-300 font-medium">Normalize</span> — raises or lowers gain so the loudest peak hits 0 dBFS, maximising loudness without clipping.</p>
                   <p><span className="text-gray-800 dark:text-gray-300 font-medium">Cuts</span> — removes a section of audio. Drag the triangles at each cut edge to add a crossfade.</p>

@@ -260,6 +260,16 @@ export async function removeFromLibrary(songId: string): Promise<boolean> {
   }
 }
 
+export async function bulkRemoveFromLibrary(songIds: string[]): Promise<boolean> {
+  try {
+    const options = await buildFetchOptions('DELETE', { song_ids: songIds })
+    const response = await fetch(`${API_V1}/library/bulk`, options)
+    return response.ok
+  } catch {
+    return false
+  }
+}
+
 export interface DownloadedSong {
   songId?: string;
   properties: Properties;
@@ -758,6 +768,14 @@ export async function addSongToPlaylist(playlistId: string, songUuid: string): P
   try {
     const options = await buildFetchOptions('POST', { song_uuid: songUuid })
     const response = await fetch(`${API_V1}/playlists/${playlistId}/songs`, options)
+    return response.ok
+  } catch { return false }
+}
+
+export async function bulkAddSongsToPlaylist(playlistId: string, songUuids: string[]): Promise<boolean> {
+  try {
+    const options = await buildFetchOptions('POST', { song_uuids: songUuids })
+    const response = await fetch(`${API_V1}/playlists/${playlistId}/songs/bulk`, options)
     return response.ok
   } catch { return false }
 }

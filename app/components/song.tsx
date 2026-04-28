@@ -1,10 +1,10 @@
 'use client'
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import { addToLibrary, removeFromLibrary, downloadSongToFile, createShareToken, DownloadedSong, songArtworkUrl, addSongToPlaylist } from "../lib/data";
 import { cacheSong, uncacheSong } from "../lib/offline";
-import { FaBookmark, FaRegBookmark, FaPlay, FaPause, FaEllipsisV, FaLock } from "react-icons/fa";
+import { FaBookmark, FaRegBookmark, FaEllipsisV, FaLock, FaCloudDownloadAlt } from "react-icons/fa";
 import Image from "next/image";
 import { usePlayer } from "./player";
 import { useUser } from "../lib/user-context";
@@ -26,7 +26,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
     onPlaylistAdd?: () => void,
     selectMode?: boolean,
     isSelected?: boolean,
-    onSelect?: (songId: string) => void,
+    onSelect?: (songId: string, shiftKey?: boolean) => void,
     onLongPress?: (songId: string) => void,
     showSource?: boolean,
 }) {
@@ -39,6 +39,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
     const [downloadError, setDownloadError] = useState(false)
     const [copied, setCopied] = useState(false)
     const [offlineCached, setOfflineCached] = useState(initialCachedOffline ?? false)
+    useEffect(() => { setOfflineCached(initialCachedOffline ?? false) }, [initialCachedOffline])
     const [offlinePending, setOfflinePending] = useState(false)
     const [offlineProgress, setOfflineProgress] = useState(0)
     const [kebabOpen, setKebabOpen] = useState(false)
@@ -69,7 +70,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
 
     function handleCardClick(e?: React.MouseEvent) {
         if (selectMode) {
-            if (song.songId && onSelect) onSelect(song.songId)
+            if (song.songId && onSelect) onSelect(song.songId, e?.shiftKey)
             return
         }
         if (song.songId && isCurrentSong) {
@@ -95,13 +96,6 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
         }
     }
 
-    function handlePlay(e: React.MouseEvent) {
-        e.stopPropagation()
-        if (!song.songId) return
-        if (isCurrentSong && isPlaying) pause()
-        else if (isCurrentSong) resume()
-        else onClick()
-    }
 
     async function handleOfflineToggle() {
         if (!song.songId || offlinePending) return
@@ -162,27 +156,27 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
             <div className="fixed inset-0 z-40" onClick={() => setKebabOpen(false)} />
             <div
                 data-testid="song-kebab-menu"
-                className="fixed z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl py-1 min-w-[155px]"
+                className="fixed z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl py-1"
                 style={{ top: kebabPos.top, right: kebabPos.right }}
                 onClick={e => e.stopPropagation()}
             >
                 <button onClick={() => { setKebabOpen(false); handleDownload() }}
                     disabled={!online}
-                    className="w-full text-left px-3 py-3 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation">
+                    className="whitespace-nowrap block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation">
                     Download
                 </button>
                 <button onClick={() => { setKebabOpen(false); insertNext({ uuid: song.songId!, properties: song.properties }) }}
-                    className="w-full text-left px-3 py-3 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 touch-manipulation">
+                    className="whitespace-nowrap block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 touch-manipulation">
                     Play next
                 </button>
                 <button onClick={() => { setKebabOpen(false); handleShare() }}
                     disabled={!online}
-                    className="w-full text-left px-3 py-3 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation">
+                    className="whitespace-nowrap block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation">
                     {copied ? 'Link copied!' : 'Copy share link'}
                 </button>
                 <button onClick={() => { setKebabOpen(false); handleOfflineToggle() }}
                     disabled={offlinePending || (!online && !offlineCached)}
-                    className="w-full text-left px-3 py-3 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation">
+                    className="whitespace-nowrap block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation">
                     {offlinePending
                         ? `Saving… ${offlineProgress > 0 ? Math.round(offlineProgress * 100) + '%' : ''}`
                         : offlineCached ? 'Remove offline copy' : 'Save offline'}
@@ -192,7 +186,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                         <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
                         <button
                             onClick={() => setPlaylistPickerOpen(o => !o)}
-                            className="w-full text-left px-3 py-3 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 touch-manipulation flex items-center justify-between"
+                            className="whitespace-nowrap block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 touch-manipulation flex items-center justify-between"
                         >
                             Add to playlist
                             <span className="text-gray-400 text-xs">{playlistPickerOpen ? '▲' : '▼'}</span>
@@ -209,7 +203,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                                             setPlaylistPickerOpen(false)
                                             setKebabOpen(false)
                                         }}
-                                        className="w-full text-left pl-5 pr-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 truncate text-gray-500 dark:text-gray-400"
+                                        className="whitespace-nowrap block w-full text-left pl-5 pr-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 overflow-hidden text-ellipsis text-gray-500 dark:text-gray-400 max-w-[200px]"
                                     >
                                         {pl.name}
                                     </button>
@@ -221,7 +215,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                 <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
                 <button onClick={() => { setKebabOpen(false); openEditor() }}
                     disabled={!online}
-                    className="w-full text-left px-3 py-3 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation">
+                    className="whitespace-nowrap block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation">
                     Edit
                 </button>
             </div>
@@ -229,39 +223,42 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
         document.body
     ) : null
 
+    const iconSz = compact ? 12 : 15
+
     const kebabMenu = song.songId ? (
         <div onClick={e => e.stopPropagation()}>
-            <button ref={kebabRef} data-testid="song-kebab" onClick={openKebab} title="more" className="cursor-pointer text-gray-400 hover:text-sky-500 active:text-sky-500 p-2 -m-1 touch-manipulation">
-                <FaEllipsisV size={12} />
+            <button ref={kebabRef} data-testid="song-kebab" onClick={openKebab} title="More options" className="cursor-pointer text-gray-400 hover:text-sky-500 active:text-sky-500 p-2 -m-1 touch-manipulation">
+                <FaEllipsisV size={iconSz} />
             </button>
             {kebabDropdown}
         </div>
     ) : null
 
     const actions = (
-        <div className="flex gap-3 items-center">
-            {song.songId && (
-                <button data-testid="song-play" onClick={handlePlay} className="hover:text-sky-500 cursor-pointer text-gray-400">
-                    {isCurrentSong && isPlaying ? <FaPause size={13} /> : <FaPlay size={13} />}
-                </button>
-            )}
+        <div className="flex flex-col items-center gap-2">
+            {kebabMenu}
             {song.songId && (
                 <button
                     data-testid="song-library-toggle"
                     onClick={handleLibraryToggle}
                     aria-disabled={libraryPending}
+                    title={inLibrary ? 'Remove from library' : 'Add to library'}
                     className="aria-disabled:opacity-40 hover:text-sky-500 cursor-pointer"
                 >
                     {inLibrary
-                        ? <FaBookmark className="text-sky-500" />
-                        : <FaRegBookmark className="text-gray-400" />
+                        ? <FaBookmark size={iconSz} className="text-sky-500" />
+                        : <FaRegBookmark size={iconSz} className="text-gray-400" />
                     }
                 </button>
             )}
-            {!song.songId && (
-                <span className="text-red-700 text-xs">not downloaded</span>
+            {offlineCached && (
+                <span title="Saved offline">
+                    <FaCloudDownloadAlt size={iconSz} className="text-sky-400" />
+                </span>
             )}
-            {kebabMenu}
+            {!song.songId && (
+                <span className="text-red-700 text-xs">!</span>
+            )}
         </div>
     )
 
@@ -311,7 +308,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                         <span className="text-xs text-sky-500 truncate">{song.properties.artistName || 'Unknown artist'} · {song.properties.collectionName || 'Unknown album'}</span>
                     </div>
                     {!selectMode && (
-                        <div onClick={e => e.stopPropagation()}>
+                        <div className="shrink-0" onClick={e => e.stopPropagation()}>
                             {actions}
                         </div>
                     )}
@@ -360,7 +357,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                         </div>
                     </div>
                     {!selectMode && (
-                        <div className="flex flex-col gap-2 items-center justify-center shrink-0 ml-2" onClick={e => e.stopPropagation()}>
+                        <div className="flex flex-col items-center justify-start shrink-0 ml-2" onClick={e => e.stopPropagation()}>
                             {actions}
                         </div>
                     )}
