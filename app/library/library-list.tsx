@@ -2,12 +2,13 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import Image from "next/image"
 import { useRouter, useSearchParams } from "next/navigation"
-import { LibrarySong, Playlist, artworkUrl, fetchLibrarySongs, fetchPlaylists, publishEligibleSongs, removeFromLibrary, downloadSongToFile, addSongToPlaylist, bulkRemoveFromLibrary, bulkAddSongsToPlaylist } from "../lib/data"
-import { cacheSong, uncacheSong, getCachedSongIds } from "../lib/offline"
+import { LibrarySong, Playlist, artworkUrl, songArtworkUrl, fetchLibrarySongs, fetchPlaylists, fetchPlaylistSongs, publishEligibleSongs, removeFromLibrary, downloadSongToFile, addSongToPlaylist, bulkRemoveFromLibrary, bulkAddSongsToPlaylist, syncOfflineSongs, addServerOfflineSong, removeServerOfflineSong, clearServerOfflineSongs } from "../lib/data"
+import { cacheSong, uncacheSong, getCachedSongIds, cacheArtworkUrls } from "../lib/offline"
 import { useOnline } from "../lib/use-online"
 import Song from "../components/song"
 import { usePlayer } from "../components/player"
 import { routes } from "../lib/routes"
+import { EVENTS } from "../lib/events"
 import { FaPlay, FaCloudDownloadAlt } from "react-icons/fa"
 import PlaylistsView from "./playlists-view"
 import EditsBanner from "./edits-banner"
@@ -98,6 +99,8 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     const [offlineReady, setOfflineReady] = useState(false)
     const [savingAll, setSavingAll] = useState(false)
     const [saveAllProgress, setSaveAllProgress] = useState({ done: 0, total: 0 })
+    const [failedIds, setFailedIds] = useState<Set<string>>(new Set())
+    const [syncPromptIds, setSyncPromptIds] = useState<string[]>([])
     const [playlists, setPlaylists] = useState<Playlist[]>([])
     const [publishing, setPublishing] = useState(false)
     const [publishResult, setPublishResult] = useState<number | null>(null)
@@ -110,6 +113,16 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     const dragState = useRef<{ startId: string; lastId: string; committed: boolean; startY: number; addMode: boolean } | null>(null)
     const selectedIdsRef = useRef(selectedIds)
     useEffect(() => { selectedIdsRef.current = selectedIds }, [selectedIds])
+
+    useEffect(() => {
+        const handler = () => {
+            setCachedIds(new Set())
+            setSyncPromptIds([])
+            if (navigator.onLine) refreshSongs()
+        }
+        window.addEventListener(EVENTS.offlineCleared, handler)
+        return () => window.removeEventListener(EVENTS.offlineCleared, handler)
+    }, [])
 
     const displaySongs = useMemo(
         () => online ? songs : songs.filter(s => cachedIds.has(s.uuid)),
@@ -127,6 +140,11 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                 if (playable.length > 0) setSongs(playable)
             }
             setOfflineReady(true)
+            // Sync local cache state with server; surface songs on server not yet local
+            if (navigator.onLine) {
+                const serverOnly = await syncOfflineSongs([...ids])
+                if (serverOnly.length > 0) setSyncPromptIds(serverOnly)
+            }
         })
         fetchPlaylists().then(setPlaylists)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -155,19 +173,56 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         setTimeout(() => setPublishResult(null), 3000)
     }
 
-    async function saveAllOffline() {
-        const uncached = displaySongs.filter(s => s.properties && !cachedIds.has(s.uuid))
-        if (!uncached.length) return
+    async function cacheSongsById(songList: LibrarySong[]) {
+        const failed = new Set<string>()
         setSavingAll(true)
-        setSaveAllProgress({ done: 0, total: uncached.length })
-        for (const song of uncached) {
+        setSaveAllProgress({ done: 0, total: songList.length })
+        for (const song of songList) {
             try {
                 await cacheSong(song.uuid)
                 setCachedIds(prev => new Set([...prev, song.uuid]))
-            } catch {}
+                addServerOfflineSong(song.uuid)
+                if (song.properties) {
+                    const artUrls = [
+                        artworkUrl(song.properties.artworkUrl100, 400),
+                        ...(song.artwork_cached ? [
+                            songArtworkUrl(song.uuid, true, undefined, 200)!,
+                            songArtworkUrl(song.uuid, true, undefined, 400)!,
+                        ] : []),
+                    ].filter(Boolean)
+                    cacheArtworkUrls(artUrls)
+                }
+            } catch {
+                failed.add(song.uuid)
+            }
             setSaveAllProgress(p => ({ ...p, done: p.done + 1 }))
         }
         setSavingAll(false)
+        setFailedIds(failed)
+    }
+
+    async function saveAllOffline() {
+        const freshCached = await getCachedSongIds()
+        setCachedIds(freshCached)
+        setFailedIds(new Set())
+        const uncached = displaySongs.filter(s => s.properties && !freshCached.has(s.uuid))
+        if (uncached.length) await cacheSongsById(uncached)
+        // Cache playlist metadata + song lists in IDB so they're available offline
+        const fresh = await fetchPlaylists()
+        setPlaylists(fresh)
+        await Promise.allSettled(fresh.map(p => fetchPlaylistSongs(p.id)))
+    }
+
+    async function retryFailed() {
+        const toRetry = songs.filter(s => failedIds.has(s.uuid))
+        setFailedIds(new Set())
+        await cacheSongsById(toRetry)
+    }
+
+    async function downloadSyncSongs() {
+        const toSync = songs.filter(s => syncPromptIds.includes(s.uuid))
+        setSyncPromptIds([])
+        await cacheSongsById(toSync)
     }
 
     // songs + artists: grouped by first letter
@@ -469,6 +524,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                 try {
                     await cacheSong(id)
                     setCachedIds(prev => new Set([...prev, id]))
+                    addServerOfflineSong(id)
                 } catch {}
             }
         }
@@ -494,6 +550,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
             if (cachedIds.has(id)) {
                 try { await uncacheSong(id) } catch {}
                 setCachedIds(prev => { const next = new Set(prev); next.delete(id); return next })
+                removeServerOfflineSong(id)
             }
         }
         exitSelectMode()
@@ -519,9 +576,22 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
 
     return (
         <div ref={listContainerRef} className={`relative pr-7${selectMode ? ' select-none' : ''}`}>
-            {!online && (
-                <div className="mb-3 px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-400 text-xs">
-                    Offline — showing {displaySongs.length} saved song{displaySongs.length !== 1 ? 's' : ''}
+            {online && syncPromptIds.length > 0 && (
+                <div className="mb-3 px-3 py-2 rounded-lg bg-sky-50 dark:bg-sky-950/30 border border-sky-200 dark:border-sky-800 text-sky-700 dark:text-sky-400 text-xs flex items-center justify-between gap-3">
+                    <span>{syncPromptIds.length} song{syncPromptIds.length !== 1 ? 's' : ''} saved offline on another device</span>
+                    <div className="flex gap-2 shrink-0">
+                        <button onClick={downloadSyncSongs} className="font-medium underline underline-offset-2 hover:no-underline">Download</button>
+                        <button onClick={() => setSyncPromptIds([])} className="opacity-60 hover:opacity-100">Dismiss</button>
+                    </div>
+                </div>
+            )}
+            {failedIds.size > 0 && (
+                <div className="mb-3 px-3 py-2 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-xs flex items-center justify-between gap-3">
+                    <span>{failedIds.size} song{failedIds.size !== 1 ? 's' : ''} failed to download offline</span>
+                    <div className="flex gap-2 shrink-0">
+                        <button onClick={retryFailed} className="font-medium underline underline-offset-2 hover:no-underline">Retry</button>
+                        <button onClick={() => setFailedIds(new Set())} className="opacity-60 hover:opacity-100">Dismiss</button>
+                    </div>
                 </div>
             )}
             {/* Fixed Select button */}

@@ -2,7 +2,7 @@
 import { useRef, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
-import { addToLibrary, removeFromLibrary, downloadSongToFile, createShareToken, DownloadedSong, songArtworkUrl, addSongToPlaylist } from "../lib/data";
+import { addToLibrary, removeFromLibrary, downloadSongToFile, createShareToken, DownloadedSong, songArtworkUrl, addSongToPlaylist, addServerOfflineSong, removeServerOfflineSong } from "../lib/data";
 import { cacheSong, uncacheSong } from "../lib/offline";
 import { FaBookmark, FaRegBookmark, FaEllipsisV, FaLock, FaCloudDownloadAlt } from "react-icons/fa";
 import Image from "next/image";
@@ -106,13 +106,15 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                 await uncacheSong(song.songId)
                 setOfflineCached(false)
                 onCacheChange?.(song.songId, false)
+                removeServerOfflineSong(song.songId)
             } else {
                 await cacheSong(song.songId, (pct) => setOfflineProgress(pct))
                 setOfflineCached(true)
                 onCacheChange?.(song.songId, true)
+                addServerOfflineSong(song.songId)
             }
         } catch {
-            // silently fail
+            // silently fail — user sees no change since state wasn't updated
         }
         setOfflinePending(false)
     }

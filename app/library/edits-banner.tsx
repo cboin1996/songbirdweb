@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { DraftSummary, deleteEditDraft, fetchDrafts } from '../lib/data'
+import { EVENTS } from '../lib/events'
 import { FaChevronDown, FaTimes } from 'react-icons/fa'
 
 const DRAFT_EXPIRY_DAYS = 30
@@ -25,8 +26,8 @@ export default function EditsBanner() {
   useEffect(() => {
     fetchDrafts().then(setDrafts)
     function onDraftChanged() { fetchDrafts().then(setDrafts) }
-    window.addEventListener('songbird:draft-changed', onDraftChanged)
-    return () => window.removeEventListener('songbird:draft-changed', onDraftChanged)
+    window.addEventListener(EVENTS.draftChanged, onDraftChanged)
+    return () => window.removeEventListener(EVENTS.draftChanged, onDraftChanged)
   }, [])
 
   useEffect(() => {

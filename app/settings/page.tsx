@@ -2,6 +2,8 @@
 import { useEffect, useRef, useState } from "react";
 import { changePassword } from "../lib/data";
 import { clearOfflineCache, getCachedSongIds, getStorageEstimate, formatBytes } from "../lib/offline";
+import { clearServerOfflineSongs } from "../lib/data";
+import { EVENTS } from "../lib/events";
 import Button from "../components/button";
 import Input from "../components/input";
 import { FaEye, FaEyeSlash } from "react-icons/fa";
@@ -39,7 +41,7 @@ function PasswordField({ placeholder, value, onChange, inputRef }: {
 function OfflineStorage() {
     const [estimate, setEstimate] = useState<{ used: number; quota: number } | null>(null)
     const [cachedCount, setCachedCount] = useState(0)
-    const [clearing, setClearing] = useState(false)
+    const [clearPhase, setClearPhase] = useState<'idle' | 'local' | 'server'>('idle')
 
     useEffect(() => {
         Promise.all([getStorageEstimate(), getCachedSongIds()]).then(([est, ids]) => {
@@ -49,12 +51,15 @@ function OfflineStorage() {
     }, [])
 
     async function handleClear() {
-        setClearing(true)
+        setClearPhase('local')
         await clearOfflineCache()
+        setClearPhase('server')
+        await clearServerOfflineSongs()
         const est = await getStorageEstimate()
         setEstimate(est)
         setCachedCount(0)
-        setClearing(false)
+        setClearPhase('idle')
+        window.dispatchEvent(new CustomEvent(EVENTS.offlineCleared))
     }
 
     if (!estimate) return null
@@ -75,13 +80,11 @@ function OfflineStorage() {
                     </div>
                 </div>
                 <p className="text-xs text-gray-400">{cachedCount} song{cachedCount !== 1 ? 's' : ''} cached offline</p>
-                {cachedCount > 0 && (
-                    <Button
-                        text={clearing ? 'clearing…' : 'clear offline cache'}
-                        disabled={clearing}
-                        onClick={handleClear}
-                    />
-                )}
+                <Button
+                    text={clearPhase === 'local' ? 'clearing local…' : clearPhase === 'server' ? 'clearing server…' : 'clear offline cache'}
+                    disabled={clearPhase !== 'idle'}
+                    onClick={handleClear}
+                />
             </div>
         </div>
     )

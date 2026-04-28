@@ -1,7 +1,12 @@
 import { cacheLibraryData, getCachedData } from './offline-db'
+import { EVENTS } from './events'
 
-export const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
+const isServer = typeof window === 'undefined'
+export const BASE_URL = isServer
+  ? (process.env.API_BASE_URL ?? 'http://localhost:8000')
+  : (process.env.NEXT_PUBLIC_API_BASE_URL ?? '');
 export const API_V1 = `${BASE_URL}/v1`;
+export const API_V1_PATH = '/v1';
 export const DOWNLOAD_URL = `${API_V1}/download`;
 export const TAGGING_URL = `${API_V1}/properties`;
 export const ITUNES_SEARCH_URL = `${API_V1}/properties/itunes`;
@@ -94,7 +99,9 @@ async function fetchData<T>(args: {
     if (responseType === ResponseTypes.bytes) return response.bytes() as T;
     if (responseType === ResponseTypes.blob) return response.blob() as T;
   } catch (error) {
-    console.error("Fetch error:", error);
+    if (!(error instanceof TypeError && error.message.includes('NetworkError'))) {
+      console.error("Fetch error:", error)
+    }
     return undefined;
   }
 }
@@ -286,7 +293,7 @@ export function artworkUrl(url: string, size: number): string {
 export function songArtworkUrl(songId: string | undefined, artworkCached: boolean | undefined, artworkUrl100: string | undefined, size: number): string | null {
   if (songId && artworkCached) {
     const sizeParam = size <= 300 ? 'thumb' : 'full'
-    return `${API_V1}/songs/${songId}/artwork?size=${sizeParam}`
+    return `${API_V1_PATH}/songs/${songId}/artwork?size=${sizeParam}`
   }
   return artworkUrl100 ? artworkUrl(artworkUrl100, size) : null
 }
@@ -697,7 +704,7 @@ export async function saveEditDraft(songId: string, params: EditParams): Promise
   try {
     const options = await buildFetchOptions('PUT', params)
     await fetch(`${API_V1}/edit/songs/${songId}/draft`, options)
-    window.dispatchEvent(new CustomEvent('songbird:draft-changed'))
+    window.dispatchEvent(new CustomEvent(EVENTS.draftChanged))
   } catch {}
 }
 
@@ -705,7 +712,7 @@ export async function deleteEditDraft(songId: string): Promise<void> {
   try {
     const options = await buildFetchOptions('DELETE')
     await fetch(`${API_V1}/edit/songs/${songId}/draft`, options)
-    window.dispatchEvent(new CustomEvent('songbird:draft-changed'))
+    window.dispatchEvent(new CustomEvent(EVENTS.draftChanged))
   } catch {}
 }
 
@@ -759,10 +766,7 @@ export async function fetchPlaylistSongs(id: string): Promise<PlaylistSong[]> {
     if (typeof window !== 'undefined') cacheLibraryData(`playlist-songs:${id}`, result)
     return result
   }
-  if (typeof navigator !== 'undefined' && !navigator.onLine) {
-    return await getCachedData<PlaylistSong[]>(`playlist-songs:${id}`) ?? []
-  }
-  return []
+  return await getCachedData<PlaylistSong[]>(`playlist-songs:${id}`) ?? []
 }
 
 export async function addSongToPlaylist(playlistId: string, songUuid: string): Promise<boolean> {
@@ -787,6 +791,42 @@ export async function removeSongFromPlaylist(playlistId: string, songUuid: strin
     const response = await fetch(`${API_V1}/playlists/${playlistId}/songs/${songUuid}`, options)
     return response.ok
   } catch { return false }
+}
+
+export async function fetchServerOfflineSongs(): Promise<string[]> {
+  return await fetchData<string[]>({ url: `${API_V1}/library/offline`, method: 'GET' }) ?? []
+}
+
+export async function syncOfflineSongs(localIds: string[]): Promise<string[]> {
+  const result = await fetchData<{ server_only: string[] }>({
+    url: `${API_V1}/library/offline/sync`,
+    method: 'POST',
+    body: { song_ids: localIds },
+  })
+  return result?.server_only ?? []
+}
+
+export async function addServerOfflineSong(songId: string): Promise<void> {
+  try {
+    const options = await buildFetchOptions('POST')
+    await fetch(`${API_V1}/library/offline/${songId}`, options)
+  } catch {}
+}
+
+export async function removeServerOfflineSong(songId: string): Promise<void> {
+  try {
+    const options = await buildFetchOptions('DELETE')
+    await fetch(`${API_V1}/library/offline/${songId}`, options)
+  } catch {}
+}
+
+export async function clearServerOfflineSongs(): Promise<void> {
+  try {
+    const options = await buildFetchOptions('DELETE')
+    await fetch(`${API_V1}/library/offline`, options)
+  } catch (e) {
+    console.error('clearServerOfflineSongs:', e)
+  }
 }
 
 export async function publishEligibleSongs(): Promise<number> {

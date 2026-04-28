@@ -1,0 +1,6 @@
+services:
+  songbirdweb:
+    image: cboin/songbirdweb:latest
+    restart: unless-stopped
+    ports:
+      - "6996:3000"
