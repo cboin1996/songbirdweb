@@ -325,6 +325,8 @@ export interface AlbumProps {
 interface DownloadedSongIds {
   song_ids: string[];
   cached: boolean;
+  properties?: Properties | null;
+  artwork_cached?: boolean;
 }
 
 export async function downloadSongViaUrl(

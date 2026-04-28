@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import Image from "next/image"
 import Link from "next/link"
 import { FaPause, FaPlay, FaStepBackward, FaStepForward, FaRandom, FaRedo, FaList, FaTimes, FaVolumeUp, FaVolumeMute, FaBars } from "react-icons/fa"
+import Spinner from "./spinner"
 import { DOWNLOAD_URL, PlayableSong, artworkUrl, fetchLibrarySongs, fetchPlayerState, recordPlay, savePlayerState, updatePosition } from "../lib/data"
 import { getSongFile } from "../lib/offline"
 import Slider from "./slider"
@@ -59,9 +60,10 @@ function fmt(s: number) {
     return `${m}:${sec.toString().padStart(2, '0')}`
 }
 
-function ProgressBar({ current, duration, onSeek }: {
+function ProgressBar({ current, duration, buffered, onSeek }: {
     current: number
     duration: number
+    buffered: number
     onSeek: (t: number) => void
 }) {
     const barRef = useRef<HTMLDivElement>(null)
@@ -102,6 +104,7 @@ function ProgressBar({ current, duration, onSeek }: {
     }
 
     const pct = duration ? (current / duration) * 100 : 0
+    const bufferedPct = duration ? Math.min((buffered / duration) * 100, 100) : 0
 
     return (
         <div className="flex items-center gap-3 flex-1">
@@ -113,6 +116,12 @@ function ProgressBar({ current, duration, onSeek }: {
                 onTouchMove={onTouchMove}
                 className="flex-1 h-0.5 bg-gray-200 dark:bg-gray-700 rounded-full cursor-pointer group relative"
             >
+                {/* buffer track */}
+                <div
+                    className="absolute inset-y-0 left-0 bg-gray-400/40 dark:bg-gray-500/40 rounded-full"
+                    style={{ width: `${bufferedPct}%` }}
+                />
+                {/* played track */}
                 <div
                     className="h-full bg-sky-500 rounded-full relative"
                     style={{ width: `${pct}%` }}
@@ -129,7 +138,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const audioRef = useRef<HTMLAudioElement>(null)
     const [current, setCurrent] = useState<PlayableSong | null>(null)
     const [isPlaying, setIsPlaying] = useState(false)
+    const [isBuffering, setIsBuffering] = useState(false)
     const [currentTime, setCurrentTime] = useState(0)
+    const [buffered, setBuffered] = useState(0)
     const [duration, setDuration] = useState(0)
     const [queue, setQueue] = useState<PlayableSong[]>([])
     const [shuffle, setShuffle] = useState(false)
@@ -408,6 +419,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         const audio = audioRef.current
         if (!audio) return
         function onCanPlay() {
+            setIsBuffering(false)
             if (pendingPosition.current > 0) {
                 audio!.currentTime = pendingPosition.current
                 pendingPosition.current = 0
@@ -417,18 +429,30 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 audio!.play().catch(() => {})
             }
         }
-        function onPlay() { setIsPlaying(true); autoplayActivatedRef.current = true }
-        function onPause() { setIsPlaying(false) }
-        function onTimeUpdate() { setCurrentTime(audio!.currentTime) }
+        function onPlay() { setIsPlaying(true); setIsBuffering(false); autoplayActivatedRef.current = true }
+        function onPause() { setIsPlaying(false); setIsBuffering(false) }
+        function onLoadStart() { setIsBuffering(true); setBuffered(0) }
+        function onWaiting() { setIsBuffering(true) }
+        function onPlaying() { setIsBuffering(false) }
+        function onTimeUpdate() {
+            setCurrentTime(audio!.currentTime)
+            if (audio!.buffered.length > 0) setBuffered(audio!.buffered.end(audio!.buffered.length - 1))
+        }
         function onDurationChange() { setDuration(audio!.duration) }
         audio.addEventListener('play', onPlay)
         audio.addEventListener('pause', onPause)
+        audio.addEventListener('loadstart', onLoadStart)
+        audio.addEventListener('waiting', onWaiting)
+        audio.addEventListener('playing', onPlaying)
         audio.addEventListener('canplay', onCanPlay)
         audio.addEventListener('timeupdate', onTimeUpdate)
         audio.addEventListener('durationchange', onDurationChange)
         return () => {
             audio.removeEventListener('play', onPlay)
             audio.removeEventListener('pause', onPause)
+            audio.removeEventListener('loadstart', onLoadStart)
+            audio.removeEventListener('waiting', onWaiting)
+            audio.removeEventListener('playing', onPlaying)
             audio.removeEventListener('canplay', onCanPlay)
             audio.removeEventListener('timeupdate', onTimeUpdate)
             audio.removeEventListener('durationchange', onDurationChange)
@@ -725,7 +749,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                         <FaStepBackward size={13} />
                                     </button>
                                     <button data-testid="player-play-pause" onClick={isPlaying ? pause : resume} className={`shrink-0 ${idleClass}`}>
-                                        {isPlaying ? <FaPause size={18} /> : <FaPlay size={18} />}
+                                        {isBuffering ? <Spinner /> : isPlaying ? <FaPause size={18} /> : <FaPlay size={18} />}
                                     </button>
                                     <button data-testid="player-next" onClick={skipNext} disabled={!hasQueue} className={`shrink-0 disabled:opacity-30 ${idleClass}`}>
                                         <FaStepForward size={13} />
@@ -749,7 +773,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                             <FaStepBackward size={12} />
                                         </button>
                                         <button onClick={isPlaying ? pause : resume} className={`shrink-0 ${idleClass}`}>
-                                            {isPlaying ? <FaPause size={14} /> : <FaPlay size={14} />}
+                                            {isBuffering ? <Spinner size={14} /> : isPlaying ? <FaPause size={14} /> : <FaPlay size={14} />}
                                         </button>
                                         <button data-testid="player-next" onClick={skipNext} disabled={!hasQueue} className={`shrink-0 disabled:opacity-30 ${idleClass}`}>
                                             <FaStepForward size={12} />
@@ -776,7 +800,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                 </div>
                             </div>
                             <div data-testid="player-progress" className="flex px-4 pb-3">
-                                <ProgressBar current={currentTime} duration={duration} onSeek={handleSeek} />
+                                <ProgressBar current={currentTime} duration={duration} buffered={buffered} onSeek={handleSeek} />
                             </div>
                         </div>
                     </div>

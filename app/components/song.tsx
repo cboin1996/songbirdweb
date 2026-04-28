@@ -2,7 +2,7 @@
 import { useRef, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
-import { addToLibrary, removeFromLibrary, downloadSongToFile, createShareToken, DownloadedSong, songArtworkUrl, addSongToPlaylist, addServerOfflineSong, removeServerOfflineSong } from "../lib/data";
+import { addToLibrary, removeFromLibrary, downloadSongToFile, createShareToken, DownloadedSong, songArtworkUrl, artworkUrl, addSongToPlaylist, addServerOfflineSong, removeServerOfflineSong } from "../lib/data";
 import { cacheSong, uncacheSong } from "../lib/offline";
 import { FaBookmark, FaRegBookmark, FaEllipsisV, FaLock, FaCloudDownloadAlt } from "react-icons/fa";
 import Image from "next/image";
@@ -50,6 +50,13 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
     const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
     const { play, pause, resume, current, isPlaying, insertNext } = usePlayer()
     const isCurrentSong = current?.uuid === song.songId
+    const [artworkFailed, setArtworkFailed] = useState(false)
+    useEffect(() => { setArtworkFailed(false) }, [song.songId])
+
+    const artSrc = (size: number): string | null => {
+        if (artworkFailed) return song.properties?.artworkUrl100 ? artworkUrl(song.properties.artworkUrl100, size) : null
+        return songArtworkUrl(song.songId, song.artworkCached, song.properties?.artworkUrl100, size)
+    }
 
     async function handleLibraryToggle(e: React.MouseEvent) {
         e.stopPropagation()
@@ -311,8 +318,8 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                         <span className="text-gray-400 tabular-nums w-5 text-right shrink-0 text-sm">{rank}</span>
                     )}
                     <div className={`shrink-0 transition-all ${selectMode ? 'ml-7' : ''}`}>
-                        {songArtworkUrl(song.songId, song.artworkCached, song.properties.artworkUrl100, 200) ? (
-                            <Image src={songArtworkUrl(song.songId, song.artworkCached, song.properties.artworkUrl100, 200)!} alt="" width={36} height={36} className="rounded" />
+                        {artSrc(200) ? (
+                            <Image src={artSrc(200)!} alt="" width={36} height={36} className="rounded" unoptimized={song.artworkCached && !artworkFailed} onError={() => setArtworkFailed(true)} />
                         ) : (
                             <div className="w-9 h-9 rounded bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-base">🎵</div>
                         )}
@@ -353,8 +360,8 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                 <div className="flex flex-row justify-between">
                     <div className={`flex flex-row rounded-lg min-w-0 transition-all ${selectMode ? 'ml-8' : ''}`}>
                         <div className="shrink-0">
-                            {songArtworkUrl(song.songId, song.artworkCached, song.properties.artworkUrl100, 400) ? (
-                                <Image className="rounded-md object-contain w-16 h-16 md:w-24 md:h-24" alt="" src={songArtworkUrl(song.songId, song.artworkCached, song.properties.artworkUrl100, 400)!} width={96} height={96} />
+                            {artSrc(400) ? (
+                                <Image className="rounded-md object-contain w-16 h-16 md:w-24 md:h-24" alt="" src={artSrc(400)!} width={96} height={96} unoptimized={song.artworkCached && !artworkFailed} onError={() => setArtworkFailed(true)} />
                             ) : (
                                 <div className="rounded-md w-16 h-16 md:w-24 md:h-24 bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-2xl">🎵</div>
                             )}
