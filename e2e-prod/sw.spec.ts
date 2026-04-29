@@ -76,9 +76,11 @@ test.describe('Service Worker Lifecycle', () => {
   test('static /_next/static/* chunks served from cache on reload', async ({ page }) => {
     // First load to populate cache and ensure SW is controlling the page
     await page.goto('/')
+
+    // Wait for SW to be ready
     await page.evaluate(() => navigator.serviceWorker.ready)
 
-    // Wait for SW to actively control the page (not just ready)
+    // Wait for SW to be actively controlling this page
     const isControlling = await page.evaluate(() => {
       return new Promise<boolean>((resolve) => {
         if (navigator.serviceWorker.controller) {
@@ -94,8 +96,9 @@ test.describe('Service Worker Lifecycle', () => {
     })
     expect(isControlling).toBe(true)
 
-    // Ensure SW update is complete before measuring cache hits
-    await page.waitForTimeout(1000)
+    // Wait for all static chunks to be cached on first load
+    // This is crucial: without this, the second load may still hit network
+    await page.waitForTimeout(3000)
 
     // Collect network requests on the reload
     const networkRequests: string[] = []
