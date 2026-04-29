@@ -314,6 +314,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         manualNextRef.current.push(song)
         setManualNextIds(new Set(manualNextRef.current.map(s => s.uuid)))
         setQueue([...q])
+        // Keep shuffleOrder in sync without reseeding: shift ≥insertAt indices up,
+        // splice the new index right after the current shuffle position.
+        if (shuffleRef.current && shuffleOrderRef.current.length > 0) {
+            const order = shuffleOrderRef.current.map(idx => idx >= insertAt ? idx + 1 : idx)
+            order.splice(shufflePosRef.current + 1, 0, insertAt)
+            shuffleOrderRef.current = order
+            setShuffleOrder([...order])
+        }
         scheduleSave()
         const afterName = queueRef.current[queueIndexRef.current]?.properties?.trackName
         showToast(afterName ? `Playing after ${afterName}` : 'Added to queue')
@@ -326,7 +334,19 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         queueRef.current = q
         if (index <= currentIdx) queueIndexRef.current = Math.max(-1, currentIdx - 1)
         setQueue([...q])
-        if (shuffleRef.current) generateShuffleOrder()
+        // Preserve shuffle seed: drop the removed index from shuffleOrder and shift
+        // higher indices down by 1. Adjust shufflePosRef if the removal was before it.
+        if (shuffleRef.current && shuffleOrderRef.current.length > 0) {
+            const removedShufflePos = shuffleOrderRef.current.indexOf(index)
+            const order = shuffleOrderRef.current
+                .filter(idx => idx !== index)
+                .map(idx => idx > index ? idx - 1 : idx)
+            shuffleOrderRef.current = order
+            if (removedShufflePos >= 0 && removedShufflePos < shufflePosRef.current) {
+                shufflePosRef.current -= 1
+            }
+            setShuffleOrder([...order])
+        }
         scheduleSave()
     }
 
@@ -603,11 +623,25 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     useEffect(() => {
         if (!current?.properties || !('mediaSession' in navigator)) return
         const p = current.properties
+        // iOS lock screen prefers several sizes; provide both small and large so the OS picks what fits.
+        // Use the absolute origin for cached artwork URLs since Media Session needs fully-qualified URLs.
+        const origin = typeof window !== 'undefined' ? window.location.origin : ''
+        const buildArtwork = (): { src: string; sizes: string; type: string }[] => {
+            const sizes = [128, 192, 256, 384, 512]
+            const out: { src: string; sizes: string; type: string }[] = []
+            for (const s of sizes) {
+                const url = songArtworkUrl(current.uuid, current.artwork_cached, p.artworkUrl100, s)
+                if (!url) continue
+                const absolute = url.startsWith('/') ? `${origin}${url}` : url
+                out.push({ src: absolute, sizes: `${s}x${s}`, type: 'image/jpeg' })
+            }
+            return out
+        }
         navigator.mediaSession.metadata = new MediaMetadata({
             title: p.trackName,
             artist: p.artistName,
             album: p.collectionName,
-            artwork: p.artworkUrl100 ? [{ src: artworkUrl(p.artworkUrl100, 600), sizes: '600x600', type: 'image/jpeg' }] : [],
+            artwork: buildArtwork(),
         })
         navigator.mediaSession.setActionHandler('play', () => {
             audioRef.current?.play().catch(() => {})
@@ -752,7 +786,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                     .filter(s => s.last_played_at && s.properties)
                     .sort((a, b) => new Date(b.last_played_at!).getTime() - new Date(a.last_played_at!).getTime())[0]
                 if (last?.properties) {
-                    const song = { uuid: last.uuid, properties: last.properties, last_position: last.last_position, last_played_at: last.last_played_at, artwork_cached: last.artwork_cached, source: sourceMap[last.uuid] ?? null }
+                    const song = { uuid: last.uuid, properties: last.properties, last_position: last.last_position, last_played_at: last.last_played_at, artwork_cached: last.artwork_cached, source: sourceMap[last.uuid] ?? fallbackCtx }
                     setCurrent(song)
                     queueRef.current = [song]
                     queueIndexRef.current = 0
@@ -933,19 +967,19 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                             <div className="flex items-center gap-3 px-4 pt-3 pb-1.5 md:grid md:grid-cols-[1fr_auto_1fr]">
                                 {/* Left: artwork + track info */}
                                 <div className="flex items-center gap-3 min-w-0 flex-1 md:flex-initial">
-                                    {(() => { const a = songArtworkUrl(current?.uuid, current?.artwork_cached, p.artworkUrl100, 200); return a ? <Image src={a} alt="" width={36} height={36} className="rounded shrink-0" unoptimized={!!current?.artwork_cached} /> : null })()}
+                                    {(() => { const a = songArtworkUrl(current?.uuid, current?.artwork_cached, p.artworkUrl100, 200); return a ? <Image src={a} alt="" width={44} height={44} className="rounded shrink-0 w-11 h-11 md:w-9 md:h-9" unoptimized={!!current?.artwork_cached} /> : null })()}
                                     {(() => {
                                         const ctx = current?.source ?? playContext
                                         return ctx ? (
                                             <Link href={ctx.href} className="flex flex-col min-w-0 flex-1 group">
-                                                <span data-testid="player-track-name" className="text-xs font-medium truncate group-hover:text-sky-500 transition-colors">{p.trackName || 'Unknown title'}</span>
-                                                <span className="text-xs text-sky-500 truncate">{p.artistName || 'Unknown artist'}</span>
+                                                <span data-testid="player-track-name" className="text-sm md:text-xs font-medium truncate group-hover:text-sky-500 transition-colors">{p.trackName || 'Unknown title'}</span>
+                                                <span className="text-sm md:text-xs text-sky-500 truncate">{p.artistName || 'Unknown artist'}</span>
                                                 <span className="text-xs text-gray-400 truncate hidden md:block">from {ctx.label}</span>
                                             </Link>
                                         ) : (
                                             <div className="flex flex-col min-w-0 flex-1">
-                                                <span data-testid="player-track-name" className="text-xs font-medium truncate">{p.trackName || 'Unknown title'}</span>
-                                                <span className="text-xs text-sky-500 truncate">{p.artistName || 'Unknown artist'}</span>
+                                                <span data-testid="player-track-name" className="text-sm md:text-xs font-medium truncate">{p.trackName || 'Unknown title'}</span>
+                                                <span className="text-sm md:text-xs text-sky-500 truncate">{p.artistName || 'Unknown artist'}</span>
                                             </div>
                                         )
                                     })()}
@@ -976,23 +1010,23 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                 {/* Right: mobile has all controls; desktop has volume + queue toggle */}
                                 <div className="flex items-center gap-3 shrink-0 md:justify-end">
                                     {/* Mobile-only transport */}
-                                    <div className="flex md:hidden items-center gap-3">
-                                        <button data-testid="player-shuffle" onClick={toggleShuffle} className={`shrink-0 ${shuffle ? activeClass : idleClass}`}>
-                                            <FaRandom size={12} />
+                                    <div className="flex md:hidden items-center gap-1">
+                                        <button data-testid="player-shuffle" onClick={toggleShuffle} className={`shrink-0 p-2 -m-1 touch-manipulation ${shuffle ? activeClass : idleClass}`}>
+                                            <FaRandom size={16} />
                                         </button>
-                                        <button data-testid="player-prev" onClick={skipPrev} disabled={!hasQueue} className={`shrink-0 disabled:opacity-30 ${idleClass}`}>
-                                            <FaStepBackward size={12} />
+                                        <button data-testid="player-prev" onClick={skipPrev} disabled={!hasQueue} className={`shrink-0 p-2 -m-1 touch-manipulation disabled:opacity-30 ${idleClass}`}>
+                                            <FaStepBackward size={16} />
                                         </button>
-                                        <button onClick={isPlaying ? pause : resume} className={`shrink-0 ${idleClass}`}>
-                                            {isBuffering ? <Spinner size={14} /> : isPlaying ? <FaPause size={14} /> : <FaPlay size={14} />}
+                                        <button onClick={isPlaying ? pause : resume} className={`shrink-0 p-2 -m-1 touch-manipulation ${idleClass}`}>
+                                            {isBuffering ? <Spinner size={20} /> : isPlaying ? <FaPause size={20} /> : <FaPlay size={20} />}
                                         </button>
-                                        <button data-testid="player-next" onClick={skipNext} disabled={!hasQueue} className={`shrink-0 disabled:opacity-30 ${idleClass}`}>
-                                            <FaStepForward size={12} />
+                                        <button data-testid="player-next" onClick={skipNext} disabled={!hasQueue} className={`shrink-0 p-2 -m-1 touch-manipulation disabled:opacity-30 ${idleClass}`}>
+                                            <FaStepForward size={16} />
                                         </button>
-                                        <button data-testid="player-repeat" onClick={toggleRepeat} title={repeat === 'off' ? 'repeat: off' : repeat === 'one' ? 'repeat: one' : 'repeat: all'} className={`shrink-0 relative ${repeat !== 'off' ? activeClass : idleClass}`}>
-                                            <FaRedo size={12} />
+                                        <button data-testid="player-repeat" onClick={toggleRepeat} title={repeat === 'off' ? 'repeat: off' : repeat === 'one' ? 'repeat: one' : 'repeat: all'} className={`shrink-0 p-2 -m-1 touch-manipulation relative ${repeat !== 'off' ? activeClass : idleClass}`}>
+                                            <FaRedo size={16} />
                                             {repeat === 'one' && (
-                                                <span className="absolute -top-1.5 -right-1.5 text-[8px] font-bold leading-none">1</span>
+                                                <span className="absolute top-0 right-0 text-[8px] font-bold leading-none">1</span>
                                             )}
                                         </button>
                                     </div>

@@ -1,5 +1,17 @@
 'use client'
 import { useEffect, useRef, useState } from "react";
+
+function useIsDesktop() {
+    const [isDesktop, setIsDesktop] = useState(false)
+    useEffect(() => {
+        const mq = window.matchMedia('(min-width: 768px)')
+        setIsDesktop(mq.matches)
+        const handler = (e: MediaQueryListEvent) => setIsDesktop(e.matches)
+        mq.addEventListener('change', handler)
+        return () => mq.removeEventListener('change', handler)
+    }, [])
+    return isDesktop
+}
 import { DownloadedSong, downloadSongViaUrl, downloadSongToFile, addToLibrary, fetchLibrary, tagSong, toPlayableSong } from "../lib/data";
 import { usePlayer } from "./player";
 import { routes } from "../lib/routes";
@@ -9,6 +21,7 @@ import Spinner from "./spinner";
 import { FaX } from "react-icons/fa6";
 
 export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[] }) {
+    const isDesktop = useIsDesktop()
     const noActiveIndex = -1
     const [songs, setSongs] = useState<DownloadedSong[]>(initialSongs)
     const [libraryIds, setLibraryIds] = useState<Set<string>>(new Set())
@@ -96,7 +109,10 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
         return (
             <div className="py-2">
                 <p className="text-gray-400 text-sm pb-2">{label}</p>
-                <div className="grid 2xl:grid-cols-4 xl:grid-cols-3 lg:grid-cols-2 gap-2 md:gap-8 rounded-2xl justify-items-stretch">
+                <div className={isDesktop
+                    ? "grid grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-2 md:gap-6"
+                    : "flex flex-col"
+                }>
                     {sectionSongs.map((song, i) => {
                         const globalIndex = songs.indexOf(song)
                         return (
@@ -119,6 +135,7 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
                                 inLibrary={song.songId ? libraryIds.has(song.songId) : false}
                                 isPrivate={!!song.owner_id}
                                 showSource={true}
+                                compact={!isDesktop}
                             />
                         )
                     })}

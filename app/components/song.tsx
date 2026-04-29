@@ -332,7 +332,7 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
                     onTouchStart={handleTouchStart}
                     onTouchEnd={cancelLongPress}
                     onTouchMove={cancelLongPress}
-                    className={`relative flex items-center gap-3 w-full text-left rounded-md p-2 transition-colors cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-900 touch-manipulation ${isSelected ? 'bg-sky-50 dark:bg-sky-950/30' : selected ? 'bg-gray-100 dark:bg-gray-800' : ''}`}
+                    className={`relative flex items-center gap-3 w-full text-left rounded-md p-3 transition-colors cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-900 touch-manipulation ${isSelected ? 'bg-sky-50 dark:bg-sky-950/30' : selected ? 'bg-gray-100 dark:bg-gray-800' : ''}`}
                 >
                     {checkboxOverlay}
                     {rank !== undefined && (
@@ -340,19 +340,19 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
                     )}
                     <div className={`shrink-0 transition-all ${selectMode ? 'ml-7' : ''}`}>
                         {artSrc(200) ? (
-                            <Image src={artSrc(200)!} alt="" width={36} height={36} className="rounded" unoptimized={song.artworkCached && !artworkFailed} onError={() => setArtworkFailed(true)} />
+                            <Image src={artSrc(200)!} alt="" width={48} height={48} className="rounded" unoptimized={song.artworkCached && !artworkFailed} onError={() => setArtworkFailed(true)} />
                         ) : (
-                            <div className="w-9 h-9 rounded bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-base">🎵</div>
+                            <div className="w-12 h-12 rounded bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-lg">🎵</div>
                         )}
                     </div>
-                    <div className="flex flex-col min-w-0 flex-1">
-                        <span className={`text-sm font-medium truncate flex items-center gap-1 ${isCurrentSong ? 'text-sky-500' : ''}`}>
-                            {isPrivate && <FaLock size={9} className="text-gray-400 shrink-0" />}
+                    <div className="flex flex-col min-w-0 flex-1 gap-0.5">
+                        <span className={`text-base font-medium truncate flex items-center gap-1 ${isCurrentSong ? 'text-sky-500' : ''}`}>
+                            {isPrivate && <FaLock size={10} className="text-gray-400 shrink-0" />}
                             {song.properties.trackName || 'Unknown title'}
                             {showSource && song.source === 'community' && <CommunityBadge />}
                             {isEligible && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" title="publish eligible" />}
                         </span>
-                        <span className="text-xs text-sky-500 truncate">{song.properties.artistName || 'Unknown artist'} · {song.properties.collectionName || 'Unknown album'}</span>
+                        <span className="text-sm text-sky-500 truncate">{song.properties.artistName || 'Unknown artist'} · {song.properties.collectionName || 'Unknown album'}</span>
                     </div>
                     {!selectMode && (
                         <div className="shrink-0" onClick={e => e.stopPropagation()}>
