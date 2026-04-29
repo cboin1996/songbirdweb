@@ -2,6 +2,10 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  // Audio uploads routed through middleware can exceed the default 10MB.
+  experimental: {
+    middlewareClientMaxBodySize: '100mb',
+  },
   env: {
     NEXT_PUBLIC_APP_VERSION: process.env.npm_package_version,
   },

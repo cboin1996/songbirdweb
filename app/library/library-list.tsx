@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useMemo, useRef, useState } from "react"
+import { memo, useEffect, useMemo, useRef, useState } from "react"
 import Image from "next/image"
 import { useRouter, useSearchParams } from "next/navigation"
 import { LibrarySong, Playlist, EligibleSong, artworkUrl, songArtworkUrl, fetchLibrarySongs, fetchPlaylists, fetchPlaylistSongs, fetchEligibleSongs, fetchDrafts, publishSongs, removeFromLibrary, downloadSongToFile, addSongToPlaylist, bulkRemoveFromLibrary, bulkAddSongsToPlaylist, syncOfflineSongs, addServerOfflineSong, removeServerOfflineSong, clearServerOfflineSongs } from "../lib/data"
@@ -16,7 +16,7 @@ import EditsBanner from "./edits-banner"
 
 type ViewMode = 'songs' | 'artists' | 'albums' | 'genres' | 'playlists'
 
-const ALPHABET = '#ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')
+const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ#'.split('')
 
 interface LibraryAlbum {
     collectionId: string
@@ -43,15 +43,29 @@ function letterKey(str: string): string {
     return /[A-Z]/.test(first) ? first : '#'
 }
 
-function AlbumCard({ album, isCompact, isActive, isPlaying, onClick }: { album: LibraryAlbum; isCompact: boolean; isActive: boolean; isPlaying: boolean; onClick: () => void }) {
+// Sort entries by letter key, '#' last.
+function sortLetterEntries<T>(entries: [string, T][]): [string, T][] {
+    return entries.sort(([a], [b]) => {
+        if (a === b) return 0
+        if (a === '#') return 1
+        if (b === '#') return -1
+        return a.localeCompare(b)
+    })
+}
+
+const AlbumCard = memo(function AlbumCard({ album, isCompact, isActive, isPlaying, onClick }: { album: LibraryAlbum; isCompact: boolean; isActive: boolean; isPlaying: boolean; onClick: () => void }) {
+    const firstSong = album.songs[0]
+    const smallArt = songArtworkUrl(firstSong?.uuid, firstSong?.artwork_cached, album.artworkUrl100, 200)
+    const largeArt = songArtworkUrl(firstSong?.uuid, firstSong?.artwork_cached, album.artworkUrl100, 600)
+    const useLocalArt = !!firstSong?.artwork_cached
     if (isCompact) {
         return (
             <button
                 onClick={onClick}
                 className="flex items-center gap-3 w-full text-left rounded-md p-2 transition-colors hover:bg-gray-100 dark:hover:bg-gray-900"
             >
-                {album.artworkUrl100
-                    ? <Image src={artworkUrl(album.artworkUrl100, 200)} alt="" width={40} height={40} className="rounded shrink-0" />
+                {smallArt
+                    ? <Image src={smallArt} alt="" width={40} height={40} className="rounded shrink-0" unoptimized={useLocalArt} />
                     : <div className="w-10 h-10 rounded shrink-0 bg-gray-100 dark:bg-gray-800 flex items-center justify-center"><FaMusic size={12} className="text-gray-400" /></div>
                 }
                 <div className="flex flex-col min-w-0 flex-1">
@@ -71,8 +85,8 @@ function AlbumCard({ album, isCompact, isActive, isPlaying, onClick }: { album: 
             className="group flex flex-col gap-2 rounded-lg p-2 text-left transition-colors hover:bg-gray-100 dark:hover:bg-gray-900"
         >
             <div className="relative w-full aspect-square">
-                {album.artworkUrl100
-                    ? <Image src={artworkUrl(album.artworkUrl100, 600)} alt="" fill sizes="(max-width: 1024px) 16vw, (max-width: 1280px) 12vw, (max-width: 1536px) 10vw, 9vw" className="rounded-lg object-cover" />
+                {largeArt
+                    ? <Image src={largeArt} alt="" fill sizes="(max-width: 1024px) 16vw, (max-width: 1280px) 12vw, (max-width: 1536px) 10vw, 9vw" className="rounded-lg object-cover" unoptimized={useLocalArt} />
                     : <div className="w-full h-full rounded-lg bg-gray-100 dark:bg-gray-800 flex items-center justify-center"><FaMusic size={24} className="text-gray-400" /></div>
                 }
                 <div className={`absolute inset-0 flex items-center justify-center transition-opacity ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
@@ -91,7 +105,7 @@ function AlbumCard({ album, isCompact, isActive, isPlaying, onClick }: { album: 
             </div>
         </button>
     )
-}
+})
 
 export default function LibraryList({ initialSongs }: { initialSongs: LibrarySong[] }) {
     const online = useOnline()
@@ -273,6 +287,10 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         const valid = displaySongs.filter(s => s.properties)
         const sorted = [...valid].sort((a, b) => {
             const pa = a.properties!, pb = b.properties!
+            const ka = letterKey(viewMode === 'songs' ? pa.trackName : pa.artistName)
+            const kb = letterKey(viewMode === 'songs' ? pb.trackName : pb.artistName)
+            if (ka === '#' && kb !== '#') return 1
+            if (kb === '#' && ka !== '#') return -1
             if (viewMode === 'songs') return pa.trackName.localeCompare(pb.trackName)
             return pa.artistName.localeCompare(pb.artistName) || pa.trackName.localeCompare(pb.trackName)
         })
@@ -286,17 +304,20 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         return map
     }, [displaySongs, viewMode])
 
-    // genres: grouped by full genre name, sorted genre-then-track
+    // genres: grouped by full genre name, sorted genre-then-track ('Unknown' last)
     const genreGrouped = useMemo(() => {
         if (viewMode !== 'genres') return new Map<string, LibrarySong[]>()
         const valid = displaySongs.filter(s => s.properties)
+        const genreOf = (s: LibrarySong) => s.properties?.primaryGenreName?.trim() || 'Unknown'
         const sorted = [...valid].sort((a, b) => {
-            const pa = a.properties!, pb = b.properties!
-            return (pa.primaryGenreName ?? '').localeCompare(pb.primaryGenreName ?? '') || pa.trackName.localeCompare(pb.trackName)
+            const ga = genreOf(a), gb = genreOf(b)
+            if (ga === 'Unknown' && gb !== 'Unknown') return 1
+            if (gb === 'Unknown' && ga !== 'Unknown') return -1
+            return ga.localeCompare(gb) || a.properties!.trackName.localeCompare(b.properties!.trackName)
         })
         const map = new Map<string, LibrarySong[]>()
         for (const song of sorted) {
-            const genre = song.properties?.primaryGenreName?.trim() || 'Unknown'
+            const genre = genreOf(song)
             if (!map.has(genre)) map.set(genre, [])
             map.get(genre)!.push(song)
         }
@@ -309,24 +330,32 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         for (const song of displaySongs) {
             const p = song.properties
             if (!p) continue
-            const id = p.collectionId
-            if (!albumMap.has(id)) {
-                albumMap.set(id, {
-                    collectionId: id,
+            const artist = p.collectionArtistName ?? p.artistName ?? ''
+            // Fall back to name+artist when collectionId is missing (raw imports lack iTunes IDs).
+            const key = p.collectionId || `${p.collectionName ?? ''}::${artist}`
+            if (!albumMap.has(key)) {
+                albumMap.set(key, {
+                    collectionId: p.collectionId || key,
                     collectionName: p.collectionName,
-                    artistName: p.collectionArtistName ?? p.artistName,
+                    artistName: artist,
                     artworkUrl100: p.artworkUrl100,
                     songs: [],
                 })
             }
-            albumMap.get(id)!.songs.push(song)
+            albumMap.get(key)!.songs.push(song)
         }
         // sort songs within each album by track number
         for (const album of albumMap.values()) {
             album.songs.sort((a, b) => (a.properties?.trackNumber ?? 0) - (b.properties?.trackNumber ?? 0))
         }
         // sort albums alphabetically then group A-Z
-        const albums = [...albumMap.values()].sort((a, b) => a.collectionName.localeCompare(b.collectionName))
+        const albums = [...albumMap.values()].sort((a, b) => {
+            const ka = letterKey(a.collectionName)
+            const kb = letterKey(b.collectionName)
+            if (ka === '#' && kb !== '#') return 1
+            if (kb === '#' && ka !== '#') return -1
+            return a.collectionName.localeCompare(b.collectionName)
+        })
         const grouped = new Map<string, LibraryAlbum[]>()
         for (const album of albums) {
             const key = letterKey(album.collectionName)
@@ -747,7 +776,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
 
             {/* Sections */}
             {viewMode === 'albums'
-                ? [...albumGrouped.entries()].map(([letter, albums]) => (
+                ? sortLetterEntries([...albumGrouped.entries()]).map(([letter, albums]) => (
                     <div key={letter} ref={el => { sectionRefs.current[letter] = el }} data-letter={letter} className="scroll-mt-24 cv-auto">
                         <div className="sticky top-24 z-30 bg-background px-1 py-0.5 mb-1">
                             <span className="text-xs font-bold text-sky-500 tracking-widest">{letter}</span>
@@ -818,7 +847,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                         </div>
                     </div>
                 ))
-                : [...songGrouped.entries()].map(([letter, group]) => (
+                : sortLetterEntries([...songGrouped.entries()]).map(([letter, group]) => (
                     <div key={letter} ref={el => { sectionRefs.current[letter] = el }} data-letter={letter} className="scroll-mt-24 cv-auto">
                         <div className="sticky top-24 z-30 bg-background px-1 py-0.5 mb-1">
                             <span className="text-xs font-bold text-sky-500 tracking-widest">{letter}</span>

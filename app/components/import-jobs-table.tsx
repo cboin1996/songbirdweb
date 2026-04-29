@@ -1,9 +1,11 @@
 'use client'
-import { useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import { useEffect, useImperativeHandle, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { ImportJobResult, listImportJobs, pollImportJob } from '../lib/data'
+import { FaDove } from 'react-icons/fa6'
+import { ImportJobResult, listImportJobs } from '../lib/data'
 import { routes } from '../lib/routes'
 import SearchInput from './search-input'
+import Spinner from './spinner'
 
 const PAGE_SIZE = 20
 const POLL_INTERVAL_MS = 3000
@@ -15,30 +17,57 @@ export interface ImportJobsTableHandle {
 export default function ImportJobsTable({
   initialJobs,
   total: initialTotal,
+  initialCounts,
   tableRef,
 }: {
   initialJobs: ImportJobResult[]
   total: number
+  initialCounts?: Record<string, number>
   tableRef?: React.RefObject<ImportJobsTableHandle | null>
 }) {
   const [jobs, setJobs] = useState<ImportJobResult[]>(initialJobs)
   const [total, setTotal] = useState(initialTotal)
+  const [counts, setCounts] = useState<Record<string, number>>(initialCounts ?? {})
   const [filter, setFilter] = useState('')
   const [page, setPage] = useState(0)
   const [loading, setLoading] = useState(false)
-  const intervalsRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map())
+  // Session in-flight tracking — survives pagination/filter changes.
+  const [activeIds, setActiveIds] = useState<Set<string>>(new Set())
+  const [sessionFinished, setSessionFinished] = useState(0)
+  const inFlight = activeIds.size
+  const hasInFlight = inFlight > 0
+
+  const isPending = (s: string) => s === 'pending' || s === 'processing'
 
   useEffect(() => {
     setJobs(initialJobs)
     setTotal(initialTotal)
-  }, [initialJobs, initialTotal])
+    if (initialCounts) setCounts(initialCounts)
+  }, [initialJobs, initialTotal, initialCounts])
+
+  // Reset session counter when there's a fresh wave (no active → some active).
+  function trackJob(job: ImportJobResult, replaceId?: string) {
+    setActiveIds(prev => {
+      const next = new Set(prev)
+      let finishedDelta = 0
+      if (replaceId) {
+        if (next.delete(replaceId) && !isPending(job.status)) finishedDelta = 1
+      }
+      if (isPending(job.status)) {
+        if (prev.size === 0 && next.size === 0) setSessionFinished(0)
+        next.add(job.job_id)
+      } else if (next.has(job.job_id)) {
+        next.delete(job.job_id)
+        finishedDelta = 1
+      }
+      if (finishedDelta) setSessionFinished(d => d + finishedDelta)
+      return next
+    })
+  }
 
   useImperativeHandle(tableRef, () => ({
     addJob(job: ImportJobResult, replaceId?: string) {
-      if (replaceId) {
-        const stale = intervalsRef.current.get(replaceId)
-        if (stale) { clearInterval(stale); intervalsRef.current.delete(replaceId) }
-      }
+      trackJob(job, replaceId)
       setJobs(prev => {
         if (replaceId) {
           const idx = prev.findIndex(j => j.job_id === replaceId)
@@ -54,39 +83,44 @@ export default function ImportJobsTable({
     },
   }))
 
-  function startPolling(jobId: string) {
-    if (intervalsRef.current.has(jobId)) return
-    const interval = setInterval(async () => {
-      const result = await pollImportJob(jobId)
-      if (!result) return
-      setJobs(prev => prev.map(j => j.job_id === jobId ? { ...j, ...result } : j))
-      if (result.status !== 'pending' && result.status !== 'processing') {
-        clearInterval(interval)
-        intervalsRef.current.delete(jobId)
-      }
-    }, POLL_INTERVAL_MS)
-    intervalsRef.current.set(jobId, interval)
-  }
-
+  // Single shared poller — refreshes recent jobs while any active exist.
   useEffect(() => {
-    for (const job of jobs) {
-      if (job.status === 'pending' || job.status === 'processing') {
-        startPolling(job.job_id)
-      }
+    if (!hasInFlight) return
+    const tick = async () => {
+      const need = Math.max(PAGE_SIZE, activeIds.size + 10)
+      const data = await listImportJobs(need, 0)
+      if (!data?.jobs?.length) return
+      const byId = new Map(data.jobs.map(j => [j.job_id, j]))
+      // update in-flight tracker
+      setActiveIds(prev => {
+        let finishedDelta = 0
+        const next = new Set(prev)
+        for (const id of prev) {
+          const updated = byId.get(id)
+          if (updated && !isPending(updated.status)) {
+            next.delete(id)
+            finishedDelta++
+          }
+        }
+        if (finishedDelta) setSessionFinished(d => d + finishedDelta)
+        return next
+      })
+      // update visible page
+      setJobs(prev => prev.map(j => byId.get(j.job_id) ?? j))
+      setTotal(data.total)
+      if (data.status_counts) setCounts(data.status_counts)
     }
-  }, [jobs])
-
-  useEffect(() => {
-    return () => {
-      for (const interval of intervalsRef.current.values()) clearInterval(interval)
-    }
-  }, [])
+    const interval = setInterval(tick, POLL_INTERVAL_MS)
+    return () => clearInterval(interval)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasInFlight])
 
   async function goToPage(p: number) {
     setLoading(true)
     const data = await listImportJobs(PAGE_SIZE, p * PAGE_SIZE)
     setJobs(data.jobs)
     setTotal(data.total)
+    if (data.status_counts) setCounts(data.status_counts)
     setPage(p)
     setLoading(false)
   }
@@ -112,7 +146,12 @@ export default function ImportJobsTable({
       case 'duplicate':
         return <span className="text-amber-500">duplicate</span>
       case 'processing':
-        return <span className="text-sky-500 animate-pulse">importing…</span>
+        return (
+          <span className="inline-flex items-center gap-1.5 text-sky-500">
+            <Spinner size={12} />
+            importing
+          </span>
+        )
       default:
         return <span className="text-gray-400">queued</span>
     }
@@ -138,8 +177,25 @@ export default function ImportJobsTable({
 
   return (
     <div className="w-full flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-3">
-        <span className="text-gray-400 text-sm font-medium uppercase tracking-wide">Import history</span>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-gray-400 text-sm font-medium uppercase tracking-wide">Import history</span>
+          {(counts.done ?? 0) > 0 && (
+            <span className="text-xs px-2 py-0.5 rounded-full bg-green-50 dark:bg-green-950/30 text-green-600 dark:text-green-400 border border-green-200 dark:border-green-900">
+              {counts.done} done
+            </span>
+          )}
+          {(counts.duplicate ?? 0) > 0 && (
+            <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-900">
+              {counts.duplicate} duplicate
+            </span>
+          )}
+          {(counts.failed ?? 0) > 0 && (
+            <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-900">
+              {counts.failed} failed
+            </span>
+          )}
+        </div>
         <SearchInput
           value={filter}
           onChange={setFilter}
@@ -147,6 +203,17 @@ export default function ImportJobsTable({
           className="w-48"
         />
       </div>
+
+      {hasInFlight && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-sky-50 dark:bg-sky-950/30 border border-sky-200 dark:border-sky-900 text-sm">
+          <FaDove size={16} className="text-sky-500 animate-bounce" />
+          <span className="text-sky-600 dark:text-sky-400 font-medium">
+            {inFlight} importing
+          </span>
+          <span className="text-gray-400">·</span>
+          <span className="text-gray-500">{sessionFinished} finished</span>
+        </div>
+      )}
 
       {jobs.length === 0 && (
         <p className="text-gray-500 text-sm py-2">no file imports yet — drag & drop files above to import</p>

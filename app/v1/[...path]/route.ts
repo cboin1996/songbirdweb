@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 const API_BASE = process.env.API_BASE_URL ?? 'http://localhost:8000'
 
-async function proxy(req: NextRequest) {
+async function proxyImpl(req: NextRequest) {
     const path = req.nextUrl.pathname
     const search = req.nextUrl.search
     const target = `${API_BASE}${path}${search}`
@@ -10,19 +10,23 @@ async function proxy(req: NextRequest) {
     const headers = new Headers()
     const cookie = req.headers.get('cookie')
     if (cookie) headers.set('cookie', cookie)
-    const contentType = req.headers.get('content-type')
-    if (contentType) headers.set('content-type', contentType)
     const auth = req.headers.get('authorization')
     if (auth) headers.set('authorization', auth)
+    const contentType = req.headers.get('content-type') ?? ''
 
     const hasBody = req.method !== 'GET' && req.method !== 'HEAD'
-    const res = await fetch(target, {
-        method: req.method,
-        headers,
-        body: hasBody ? req.body : undefined,
-        // @ts-expect-error - duplex required for streaming body
-        duplex: 'half',
-    })
+    // For multipart, parse via formData() and let fetch regenerate the boundary.
+    // For everything else, buffer the body (avoids stream races on parallel requests).
+    let body: BodyInit | undefined
+    if (hasBody) {
+        if (contentType.startsWith('multipart/')) {
+            body = await req.formData()
+        } else {
+            body = await req.arrayBuffer()
+            if (contentType) headers.set('content-type', contentType)
+        }
+    }
+    const res = await fetch(target, { method: req.method, headers, body })
 
     const resHeaders = new Headers()
     const setCookie = res.headers.get('set-cookie')
@@ -31,6 +35,15 @@ async function proxy(req: NextRequest) {
     if (resContentType) resHeaders.set('content-type', resContentType)
 
     return new NextResponse(res.body, { status: res.status, headers: resHeaders })
+}
+
+async function proxy(req: NextRequest) {
+    try {
+        return await proxyImpl(req)
+    } catch (err) {
+        console.error('[v1 proxy]', req.method, req.nextUrl.pathname, err)
+        throw err
+    }
 }
 
 export const GET = proxy

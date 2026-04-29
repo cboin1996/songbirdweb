@@ -13,16 +13,31 @@ export default function ImportPage() {
   const [asOriginal, setAsOriginal] = useState(false)
   const [initialJobs, setInitialJobs] = useState<ImportJobResult[]>([])
   const [initialTotal, setInitialTotal] = useState(0)
+  const [initialCounts, setInitialCounts] = useState<Record<string, number>>({})
+  const [pendingUploads, setPendingUploads] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const tableRef = useRef<ImportJobsTableHandle | null>(null)
 
   useEffect(() => {
-    listImportJobs().then(data => { setInitialJobs(data.jobs); setInitialTotal(data.total) })
+    listImportJobs().then(data => {
+      setInitialJobs(data.jobs)
+      setInitialTotal(data.total)
+      setInitialCounts(data.status_counts ?? {})
+    })
   }, [])
+
+  // Warn on tab close / hard refresh while uploads are in flight (server-side jobs are safe).
+  useEffect(() => {
+    if (pendingUploads === 0) return
+    const handler = (e: BeforeUnloadEvent) => { e.preventDefault() }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [pendingUploads])
 
   const uploadFiles = useCallback(async (files: File[]) => {
     const arr = files.filter(f => /\.(mp3|m4a)$/i.test(f.name))
     if (arr.length === 0) return
+    setPendingUploads(p => p + arr.length)
     const CONCURRENCY = 5
     for (let i = 0; i < arr.length; i += CONCURRENCY) {
       await Promise.all(arr.slice(i, i + CONCURRENCY).map(async file => {
@@ -34,9 +49,21 @@ export default function ImportPage() {
           created_at: new Date().toISOString(),
         }
         tableRef.current?.addJob(optimistic)
-        const job = await startImport(file, isAdmin && asOriginal)
-        if (job) {
-          tableRef.current?.addJob(job, tempId)
+        try {
+          const job = await startImport(file, isAdmin && asOriginal)
+          if (job) {
+            tableRef.current?.addJob(job, tempId)
+          } else {
+            tableRef.current?.addJob({
+              job_id: tempId,
+              status: 'failed',
+              filename: file.name,
+              error: 'upload rejected (422)',
+              created_at: new Date().toISOString(),
+            }, tempId)
+          }
+        } finally {
+          setPendingUploads(p => p - 1)
         }
       }))
     }
@@ -92,7 +119,7 @@ export default function ImportPage() {
         </label>
       )}
 
-      <ImportJobsTable initialJobs={initialJobs} total={initialTotal} tableRef={tableRef} />
+      <ImportJobsTable initialJobs={initialJobs} total={initialTotal} initialCounts={initialCounts} tableRef={tableRef} />
     </main>
   )
 }

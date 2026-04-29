@@ -671,10 +671,11 @@ export async function startImport(file: File, asOriginal = false): Promise<Impor
 export interface ImportJobsPage {
   total: number
   jobs: ImportJobResult[]
+  status_counts?: Record<string, number>
 }
 
 export async function listImportJobs(limit = 20, offset = 0): Promise<ImportJobsPage> {
-  return await fetchData<ImportJobsPage>({ url: `${API_V1}/import?limit=${limit}&offset=${offset}`, method: 'GET' }) ?? { total: 0, jobs: [] }
+  return await fetchData<ImportJobsPage>({ url: `${API_V1}/import?limit=${limit}&offset=${offset}`, method: 'GET' }) ?? { total: 0, jobs: [], status_counts: {} }
 }
 
 export async function pollImportJob(jobId: string): Promise<ImportJobResult | undefined> {
