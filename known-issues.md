@@ -2,14 +2,7 @@
 
 ## Offline / Service Worker
 
-### Dev: stale JS chunks after rebuild
-In dev (Turbopack), chunk filenames are non-deterministic and change every build. After a code change, the SW may serve stale chunks causing runtime errors. Fix: unregister the SW in the browser console, then hard-refresh.
-
-```js
-navigator.serviceWorker.getRegistrations().then(rs => rs.forEach(r => r.unregister()))
-```
-
-This is not an issue in production — chunks are content-hashed and stable.
+The SW is **disabled in development** (`sw-register.tsx` checks `NODE_ENV`). It only registers in production builds where chunk filenames are content-hashed and stable. To test offline behavior locally, run a production build (`npm run build && npm start`).
 
 ## Performance
 

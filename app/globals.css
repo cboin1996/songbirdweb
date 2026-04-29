@@ -33,3 +33,10 @@ body {
   0%   { background-color: rgb(14 165 233 / 0.25); }
   100% { background-color: transparent; }
 }
+
+/* Skip painting/layout of offscreen library sections at scale.
+   Browser keeps the first render's height as the placeholder. */
+.cv-auto {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 600px;
+}

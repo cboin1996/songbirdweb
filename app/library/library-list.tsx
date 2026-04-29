@@ -748,7 +748,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
             {/* Sections */}
             {viewMode === 'albums'
                 ? [...albumGrouped.entries()].map(([letter, albums]) => (
-                    <div key={letter} ref={el => { sectionRefs.current[letter] = el }} data-letter={letter} className="scroll-mt-24">
+                    <div key={letter} ref={el => { sectionRefs.current[letter] = el }} data-letter={letter} className="scroll-mt-24 cv-auto">
                         <div className="sticky top-24 z-30 bg-background px-1 py-0.5 mb-1">
                             <span className="text-xs font-bold text-sky-500 tracking-widest">{letter}</span>
                         </div>
@@ -771,7 +771,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                 ))
                 : viewMode === 'genres'
                 ? [...genreGrouped.entries()].map(([genre, group]) => (
-                    <div key={genre} ref={el => { sectionRefs.current[genre] = el }} data-letter={letterKey(genre)} className="scroll-mt-24">
+                    <div key={genre} ref={el => { sectionRefs.current[genre] = el }} data-letter={letterKey(genre)} className="scroll-mt-24 cv-auto">
                         <div className="sticky top-24 z-30 bg-background px-1 py-0.5 mb-1">
                             <span className="text-sm font-bold text-sky-500">{genre}</span>
                             <span className="ml-2 text-xs text-gray-400">{group.length}</span>
@@ -819,7 +819,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                     </div>
                 ))
                 : [...songGrouped.entries()].map(([letter, group]) => (
-                    <div key={letter} ref={el => { sectionRefs.current[letter] = el }} data-letter={letter} className="scroll-mt-24">
+                    <div key={letter} ref={el => { sectionRefs.current[letter] = el }} data-letter={letter} className="scroll-mt-24 cv-auto">
                         <div className="sticky top-24 z-30 bg-background px-1 py-0.5 mb-1">
                             <span className="text-xs font-bold text-sky-500 tracking-widest">{letter}</span>
                         </div>

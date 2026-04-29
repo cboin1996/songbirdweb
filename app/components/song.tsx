@@ -1,5 +1,5 @@
 'use client'
-import { useRef, useState, useEffect } from "react";
+import { memo, useRef, useState, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { createPortal } from "react-dom";
 import { addToLibrary, removeFromLibrary, downloadSongToFile, createShareToken, DownloadedSong, songArtworkUrl, artworkUrl, addSongToPlaylist, addServerOfflineSong, removeServerOfflineSong } from "../lib/data";
@@ -12,7 +12,7 @@ import { useUser } from "../lib/user-context";
 import { useOnline } from "../lib/use-online";
 import CommunityBadge from "./community-badge";
 
-export default function Song({ song, selected, onClick, inLibrary: initialInLibrary, cachedOffline: initialCachedOffline, onRemove, onCacheChange, compact, rank, isPrivate, playlists, onPlaylistAdd, selectMode, isSelected, onSelect, onLongPress, showSource, hasDraft, isEligible }: {
+function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cachedOffline: initialCachedOffline, onRemove, onCacheChange, compact, rank, isPrivate, playlists, onPlaylistAdd, selectMode, isSelected, onSelect, onLongPress, showSource, hasDraft, isEligible }: {
     song: DownloadedSong,
     selected: boolean,
     onClick: (e?: React.MouseEvent) => void,
@@ -415,3 +415,25 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
         </>
     )
 }
+
+const Song = memo(SongInner, (prev, next) => (
+    prev.song.songId === next.song.songId &&
+    prev.song.properties === next.song.properties &&
+    prev.song.artworkCached === next.song.artworkCached &&
+    prev.song.parentSongId === next.song.parentSongId &&
+    prev.song.rootSongId === next.song.rootSongId &&
+    prev.selected === next.selected &&
+    prev.inLibrary === next.inLibrary &&
+    prev.cachedOffline === next.cachedOffline &&
+    prev.compact === next.compact &&
+    prev.rank === next.rank &&
+    prev.isPrivate === next.isPrivate &&
+    prev.selectMode === next.selectMode &&
+    prev.isSelected === next.isSelected &&
+    prev.showSource === next.showSource &&
+    prev.hasDraft === next.hasDraft &&
+    prev.isEligible === next.isEligible &&
+    prev.playlists === next.playlists
+))
+
+export default Song
