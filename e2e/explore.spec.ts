@@ -187,4 +187,30 @@ test.describe('explore page', () => {
         expect(href).toContain('sort=plays')
         expect(href).toContain(`song=${songId}`)
     })
+
+    // === Tier 2 view filter persistence ===
+
+    test('view filter persists in URL', async ({ page }) => {
+        await page.goto(routes.explore)
+        await expect(page.locator('main')).toBeVisible({ timeout: 10000 })
+
+        // Click the "you" filter button
+        const youBtn = page.getByRole('button', { name: 'you', exact: true })
+        await expect(youBtn).toBeVisible({ timeout: 5000 })
+        await youBtn.click()
+        await page.waitForTimeout(300)
+
+        // Assert URL contains view=you
+        await expect(page).toHaveURL(/view=you/, { timeout: 5000 })
+
+        // Verify the "you" button has active class
+        await expect(youBtn).toHaveClass(/bg-sky-500|text-sky-500|bg-white/)
+
+        // Reload page
+        await page.reload()
+
+        // Verify "you" filter is still active and URL still has view=you
+        await expect(page).toHaveURL(/view=you/)
+        await expect(youBtn).toHaveClass(/bg-sky-500|text-sky-500|bg-white/)
+    })
 })

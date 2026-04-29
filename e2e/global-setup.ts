@@ -1,10 +1,21 @@
 import { request } from '@playwright/test'
-import fs from 'fs'
-import path from 'path'
+const fs = require('fs')
+const path = require('path')
 
-for (const line of fs.readFileSync(path.resolve(__dirname, '../.env.local'), 'utf-8').split('\n')) {
+let __dirname = '.'
+try {
+  __dirname = path.dirname(require.main?.filename || '.')
+} catch (e) {
+  __dirname = process.cwd()
+}
+
+try {
+  for (const line of fs.readFileSync(path.resolve(__dirname, '../.env.local'), 'utf-8').split('\n')) {
     const eq = line.indexOf('=')
     if (eq > 0) process.env[line.slice(0, eq).trim()] ??= line.slice(eq + 1).trim()
+  }
+} catch (e) {
+  // Ignore if .env.local not found
 }
 
 const API_BASE = process.env.E2E_API_BASE_URL || process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000'
@@ -127,6 +138,15 @@ async function globalSetup() {
         }
     }
     if (purged > 0) console.log(`[global-setup] purged ${purged} stale e2e playlists`)
+
+    // Persist storage state (cookies) for test user to avoid per-test login.
+    const authDir = path.resolve(__dirname, '.auth')
+    if (!fs.existsSync(authDir)) {
+        fs.mkdirSync(authDir, { recursive: true })
+    }
+    const storageFile = path.join(authDir, 'test-user.json')
+    await ctx.storageState({ path: storageFile })
+    console.log(`[global-setup] saved test-user storage state to ${storageFile}`)
 
     await ctx.dispose()
 }

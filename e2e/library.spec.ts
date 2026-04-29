@@ -124,11 +124,11 @@ test.describe('library page', () => {
         expect(errors).toHaveLength(0)
     })
 
-    test('play button on card starts player', async ({ page }) => {
+    test('clicking song card starts player', async ({ page }) => {
         await page.goto(routes.library)
         const card = page.getByTestId('song-card').first()
         await expect(card).toBeVisible({ timeout: 10000 })
-        await card.getByTestId('song-play').click()
+        await card.click()
         await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
     })
 
@@ -330,5 +330,133 @@ test.describe('library page', () => {
             return window.getComputedStyle(el).animation
         })
         expect(animationStyle).toContain('song-highlight')
+    })
+
+    // === Letter rail active-letter highlight ===
+
+    test('letter rail highlights first present letter on initial load', async ({ page }) => {
+        await page.goto(routes.library)
+        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
+
+        // Get the first section's letter to know what should be active
+        const firstLetter = await page.locator('[data-letter]').first().getAttribute('data-letter')
+        expect(firstLetter).toBeTruthy()
+
+        // Find the active letter in the rail (has text-sky-500 and font-bold)
+        const rail = page.locator('div.touch-none.select-none.cursor-pointer')
+        const activeSpan = rail.locator('span').filter({
+            has: page.locator('.text-sky-500.font-bold')
+        })
+        const activeText = await activeSpan.textContent()
+        expect(activeText?.trim()).toBe(firstLetter)
+
+        // Verify the active letter has the bold+blue styling
+        await expect(activeSpan).toHaveClass(/text-sky-500/)
+        await expect(activeSpan).toHaveClass(/font-bold/)
+    })
+
+    test('letter rail active letter updates when scrolling to a different section', async ({ page }) => {
+        await page.goto(routes.library)
+        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
+
+        // Get all present letters
+        const sections = page.locator('[data-letter]')
+        const allLetters = await sections.evaluateAll(els =>
+            els.map(e => e.getAttribute('data-letter')).filter(Boolean)
+        )
+        test.skip(allLetters.length < 2, 'need at least 2 letter sections to test scroll update')
+
+        const firstLetter = allLetters[0]
+        const targetLetter = allLetters[Math.floor(allLetters.length / 2)] // Pick a letter midway
+
+        // Scroll to the target letter section
+        await page.locator(`[data-letter="${targetLetter}"]`).scrollIntoViewIfNeeded()
+        // Wait for rAF-debounced scroll handler to fire
+        await page.waitForTimeout(250)
+
+        // Check that the active letter is now the target letter
+        const rail = page.locator('div.touch-none.select-none.cursor-pointer')
+        const activeSpan = rail.locator('span').filter({
+            has: page.locator('.text-sky-500.font-bold')
+        })
+        const activeText = await activeSpan.textContent()
+        expect(activeText?.trim()).toBe(targetLetter)
+    })
+
+    test('active letter style is larger and bold blue (text-sky-500 font-bold)', async ({ page }) => {
+        await page.goto(routes.library)
+        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
+
+        const rail = page.locator('div.touch-none.select-none.cursor-pointer')
+        const allSpans = rail.locator('span')
+
+        // Find active span (has both text-sky-500 and font-bold)
+        const activeSpan = allSpans.filter({
+            has: page.locator('.text-sky-500.font-bold')
+        })
+        await expect(activeSpan).toHaveClass(/text-sky-500/)
+        await expect(activeSpan).toHaveClass(/font-bold/)
+
+        // Get computed font-size of active span (should be text-xs or text-sm)
+        const activeFontSize = await activeSpan.evaluate((el) => {
+            return window.getComputedStyle(el).fontSize
+        })
+
+        // Get an inactive span's font-size (should be text-[10px])
+        const inactiveSpan = allSpans.filter({
+            hasNot: page.locator('.text-sky-500')
+        }).first()
+        const inactiveFontSize = await inactiveSpan.evaluate((el) => {
+            return window.getComputedStyle(el).fontSize
+        })
+
+        // Active should be larger than inactive
+        const activePx = parseFloat(activeFontSize)
+        const inactivePx = parseFloat(inactiveFontSize)
+        expect(activePx).toBeGreaterThan(inactivePx)
+    })
+
+    // === Tier 2 scroll position and editor save flow ===
+
+    test.fixme('editor save → library scrolls to and highlights edited song', async ({ page }) => {
+        // This test requires navigating to /songs/<uuid>/edit, modifying a field,
+        // saving, and verifying the library scrolls and highlights. Editor save flow
+        // may be complex/flaky; marked fixme pending clearer requirements.
+        // Sketch: pick a song, go to edit, change notes field, save → should
+        // land at /library?song=<uuid> with animation on the card.
+        test.skip(true, 'Editor save flow complexity deferred — needs clearer test setup')
+    })
+
+    test('sessionStorage scroll position restores per view', async ({ page }) => {
+        await page.goto(routes.library)
+        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
+
+        // Get initial scroll (should be 0)
+        let initialScroll = await page.evaluate(() => window.scrollY)
+        expect(initialScroll).toBe(0)
+
+        // Scroll down by 600px
+        await page.evaluate(() => window.scrollBy(0, 600))
+        await page.waitForTimeout(300)
+        const scrolledY = await page.evaluate(() => window.scrollY)
+        expect(scrolledY).toBeGreaterThan(500) // Allow some tolerance
+
+        // Switch to artists view
+        await page.getByRole('button', { name: 'artists', exact: true }).click()
+        await expect(page).toHaveURL(/view=artists/, { timeout: 5000 })
+        await page.waitForTimeout(300)
+
+        // Scroll should be reset to 0 on new view
+        const artistsScroll = await page.evaluate(() => window.scrollY)
+        expect(artistsScroll).toBe(0)
+
+        // Switch back to songs view
+        await page.getByRole('button', { name: 'songs', exact: true }).click()
+        await expect(page).toHaveURL(/view=songs/, { timeout: 5000 })
+        await page.waitForTimeout(300)
+
+        // Scroll position should be restored (within 50px tolerance)
+        const restoredScroll = await page.evaluate(() => window.scrollY)
+        expect(Math.abs(restoredScroll - scrolledY)).toBeLessThan(50)
     })
 })

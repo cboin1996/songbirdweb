@@ -320,4 +320,260 @@ test.describe('player bar', () => {
         const hrefAfter = await linkAfter.getAttribute('href')
         expect(hrefAfter).toContain(`song=${songId}`)
     })
+
+    // === Queue drag-reorder ===
+
+    test('queue drag preserves shuffle seed (shuffle on, regression test)', async ({ page }) => {
+        await startPlayback(page)
+
+        // Ensure shuffle is ON
+        const shuffleBtn = page.getByTestId('player-shuffle').filter({ visible: true }).first()
+        const cls = await shuffleBtn.getAttribute('class') ?? ''
+        if (!cls.includes('text-sky-500')) await shuffleBtn.click()
+        await page.waitForTimeout(300)
+
+        // Capture shuffle_seed before drag
+        const seedBefore = await page.evaluate(() => {
+            try {
+                const raw = localStorage.getItem('playerState')
+                if (!raw) return null
+                return (JSON.parse(raw) as { shuffle_seed?: number | null }).shuffle_seed ?? null
+            } catch { return null }
+        })
+        expect(seedBefore, 'shuffle_seed should exist when shuffle is on').not.toBeNull()
+
+        // Open queue panel
+        const queueToggle = page.getByTestId('player-queue-toggle')
+        await queueToggle.click()
+        await page.waitForTimeout(300)
+
+        // Get queue rows and verify at least 2 exist
+        const rows = page.locator('[data-qi]')
+        const rowCount = await rows.count()
+        expect(rowCount, 'queue should have at least 2 rows to drag').toBeGreaterThanOrEqual(2)
+
+        // Read track name of first row before drag
+        const firstRowName = await rows.nth(0).locator('p').first().textContent()
+        const secondRowName = await rows.nth(1).locator('p').first().textContent()
+        expect(firstRowName?.trim()).not.toBe(secondRowName?.trim())
+
+        // Find drag handle (FaBars icon) in second row and drag it to first position
+        const dragHandle = rows.nth(1).locator('[role="button"]').filter({ has: page.locator('svg') }).first()
+        const targetBox = await rows.nth(0).boundingBox()
+        if (targetBox) {
+            await dragHandle.dragTo(rows.nth(0))
+            await page.waitForTimeout(3500) // debounce delay
+        }
+
+        // Assert shuffle_seed is unchanged
+        const seedAfter = await page.evaluate(() => {
+            try {
+                const raw = localStorage.getItem('playerState')
+                if (!raw) return null
+                return (JSON.parse(raw) as { shuffle_seed?: number | null }).shuffle_seed ?? null
+            } catch { return null }
+        })
+        expect(seedAfter, 'shuffle_seed must NOT change after drag (regression test)').toBe(seedBefore)
+
+        // Verify the second song is now at the first position
+        const newFirstRowName = await page.locator('[data-qi]').nth(0).locator('p').first().textContent()
+        expect(newFirstRowName?.trim()).toBe(secondRowName?.trim())
+    })
+
+    test('queue drag reorders song (shuffle off)', async ({ page }) => {
+        await startPlayback(page)
+
+        // Ensure shuffle is OFF
+        const shuffleBtn = page.getByTestId('player-shuffle').filter({ visible: true }).first()
+        const cls = await shuffleBtn.getAttribute('class') ?? ''
+        if (cls.includes('text-sky-500')) await shuffleBtn.click()
+        await page.waitForTimeout(300)
+
+        // Open queue panel
+        const queueToggle = page.getByTestId('player-queue-toggle')
+        await queueToggle.click()
+        await page.waitForTimeout(300)
+
+        // Get queue rows
+        const rows = page.locator('[data-qi]')
+        const rowCount = await rows.count()
+        expect(rowCount, 'queue should have at least 2 rows to drag').toBeGreaterThanOrEqual(2)
+
+        // Read track names before drag
+        const firstRowName = await rows.nth(0).locator('p').first().textContent()
+        const secondRowName = await rows.nth(1).locator('p').first().textContent()
+        expect(firstRowName?.trim()).not.toBe(secondRowName?.trim())
+
+        // Drag second row to first position
+        const dragHandle = rows.nth(1).locator('[role="button"]').filter({ has: page.locator('svg') }).first()
+        if (await dragHandle.isVisible()) {
+            await dragHandle.dragTo(rows.nth(0))
+            await page.waitForTimeout(3500) // debounce delay
+        }
+
+        // Verify second song moved to first position
+        const newFirstRowName = await page.locator('[data-qi]').nth(0).locator('p').first().textContent()
+        expect(newFirstRowName?.trim()).toBe(secondRowName?.trim())
+
+        // Verify original first song moved down (or out if was at end)
+        const newSecondRowName = await page.locator('[data-qi]').nth(1).locator('p').first().textContent()
+        expect(newSecondRowName?.trim()).toBe(firstRowName?.trim())
+    })
+
+    // === Regression tests: shuffle seed preservation during queue operations ===
+
+    test('shuffle preserved when inserting next song', async ({ page }) => {
+        await startPlayback(page)
+
+        // Ensure shuffle is ON
+        const shuffleBtn = page.getByTestId('player-shuffle').filter({ visible: true }).first()
+        const cls = await shuffleBtn.getAttribute('class') ?? ''
+        if (!cls.includes('text-sky-500')) await shuffleBtn.click()
+        await page.waitForTimeout(300)
+
+        // Capture shuffle_seed before inserting
+        const seedBefore = await page.evaluate(() => {
+            try {
+                const raw = localStorage.getItem('playerState')
+                if (!raw) return null
+                return (JSON.parse(raw) as { shuffle_seed?: number | null }).shuffle_seed ?? null
+            } catch { return null }
+        })
+        expect(seedBefore, 'shuffle_seed should exist when shuffle is on').not.toBeNull()
+
+        // Get a different song card (not the current one)
+        const cards = page.getByTestId('song-card').all()
+        let targetCard = null
+        for (const card of await cards) {
+            const visible = await card.isVisible()
+            if (visible) {
+                targetCard = card
+                break
+            }
+        }
+        expect(targetCard).toBeTruthy()
+
+        // Hover and open kebab menu
+        if (targetCard) {
+            await targetCard.hover()
+            await page.waitForTimeout(200)
+            const kebab = targetCard.getByTestId('song-kebab')
+            await expect(kebab).toBeVisible({ timeout: 3000 })
+            await kebab.click()
+
+            // Click "Play next"
+            await page.getByRole('button', { name: /play next/i }).click()
+            await page.waitForTimeout(2000) // wait for save
+
+            // Re-read shuffle_seed
+            const seedAfter = await page.evaluate(() => {
+                try {
+                    const raw = localStorage.getItem('playerState')
+                    if (!raw) return null
+                    return (JSON.parse(raw) as { shuffle_seed?: number | null }).shuffle_seed ?? null
+                } catch { return null }
+            })
+            expect(seedAfter, 'shuffle_seed should not change when inserting next song').toBe(seedBefore)
+        }
+    })
+
+    test('shuffle preserved when removing from queue', async ({ page }) => {
+        await startPlayback(page)
+
+        // Ensure shuffle is ON
+        const shuffleBtn = page.getByTestId('player-shuffle').filter({ visible: true }).first()
+        const cls = await shuffleBtn.getAttribute('class') ?? ''
+        if (!cls.includes('text-sky-500')) await shuffleBtn.click()
+        await page.waitForTimeout(300)
+
+        // Capture shuffle_seed
+        const seedBefore = await page.evaluate(() => {
+            try {
+                const raw = localStorage.getItem('playerState')
+                if (!raw) return null
+                return (JSON.parse(raw) as { shuffle_seed?: number | null }).shuffle_seed ?? null
+            } catch { return null }
+        })
+        expect(seedBefore, 'shuffle_seed should exist when shuffle is on').not.toBeNull()
+
+        // Open queue panel
+        const queueToggle = page.getByTestId('player-queue-toggle')
+        await queueToggle.click()
+        await page.waitForTimeout(300)
+
+        // Find a non-current row and remove it
+        const rows = page.locator('[data-qi]')
+        const rowCount = await rows.count()
+        test.skip(rowCount < 2, 'queue needs at least 2 rows to test removal')
+
+        if (rowCount >= 2) {
+            // Remove second row (skip current song)
+            const removeBtn = rows.nth(1).locator('button[aria-label*="Remove"]').first()
+            if (await removeBtn.isVisible()) {
+                await removeBtn.click()
+                await page.waitForTimeout(2000) // wait for save
+            }
+
+            // Re-read shuffle_seed
+            const seedAfter = await page.evaluate(() => {
+                try {
+                    const raw = localStorage.getItem('playerState')
+                    if (!raw) return null
+                    return (JSON.parse(raw) as { shuffle_seed?: number | null }).shuffle_seed ?? null
+                } catch { return null }
+            })
+            expect(seedAfter, 'shuffle_seed should not change when removing from queue').toBe(seedBefore)
+        }
+    })
+
+    test('Queued pill appears on manually inserted song', async ({ page }) => {
+        await startPlayback(page)
+
+        // Get a different song card
+        const cards = page.getByTestId('song-card').all()
+        let targetCard = null
+        let targetTrackName = null
+        for (const card of await cards) {
+            const visible = await card.isVisible()
+            if (visible) {
+                targetTrackName = await card.locator('[data-testid="song-track-name"]').textContent()
+                targetCard = card
+                break
+            }
+        }
+        expect(targetCard).toBeTruthy()
+
+        if (targetCard && targetTrackName) {
+            // Hover and open kebab
+            await targetCard.hover()
+            await page.waitForTimeout(200)
+            const kebab = targetCard.getByTestId('song-kebab')
+            await expect(kebab).toBeVisible({ timeout: 3000 })
+            await kebab.click()
+
+            // Click "Play next"
+            await page.getByRole('button', { name: /play next/i }).click()
+            await page.waitForTimeout(1500)
+
+            // Open queue panel
+            const queueToggle = page.getByTestId('player-queue-toggle')
+            await queueToggle.click()
+            await page.waitForTimeout(300)
+
+            // Find the inserted song in the queue and verify "Queued" label
+            const rows = page.locator('[data-qi]')
+            let found = false
+            for (let i = 0; i < await rows.count(); i++) {
+                const trackText = await rows.nth(i).locator('p').first().textContent()
+                if (trackText?.includes(targetTrackName.trim())) {
+                    // Check for "Queued" text/pill
+                    const queuedLabel = rows.nth(i).locator('text=/Queued/i')
+                    await expect(queuedLabel).toBeVisible({ timeout: 2000 })
+                    found = true
+                    break
+                }
+            }
+            expect(found, `Song "${targetTrackName}" with "Queued" label not found in queue`).toBe(true)
+        }
+    })
 })

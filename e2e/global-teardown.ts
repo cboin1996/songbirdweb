@@ -1,10 +1,21 @@
 import { request } from '@playwright/test'
-import fs from 'fs'
-import path from 'path'
+const fs = require('fs')
+const path = require('path')
 
-for (const line of fs.readFileSync(path.resolve(__dirname, '../.env.local'), 'utf-8').split('\n')) {
+let __dirname = '.'
+try {
+  __dirname = path.dirname(require.main?.filename || '.')
+} catch (e) {
+  __dirname = process.cwd()
+}
+
+try {
+  for (const line of fs.readFileSync(path.resolve(__dirname, '../.env.local'), 'utf-8').split('\n')) {
     const eq = line.indexOf('=')
     if (eq > 0) process.env[line.slice(0, eq).trim()] ??= line.slice(eq + 1).trim()
+  }
+} catch (e) {
+  // Ignore if .env.local not found
 }
 
 const API_BASE = process.env.E2E_API_BASE_URL || process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000'

@@ -48,23 +48,19 @@ test.describe('library bulk select', () => {
         await expect(page.getByRole('button', { name: 'Remove', exact: true })).toBeVisible()
     })
 
-    // FIXME: select mode is entered via long-press on a song card, not via a "Select" button.
-    // Need to drive a touch long-press in Playwright to set this up. Punch list in e2e/README.md.
-    test.fixme('exit select mode by clicking Cancel', async ({ page }) => {
+    test('exit select mode by clicking Cancel', async ({ page }) => {
         await page.goto(routes.library)
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
 
         const selectBtn = page.getByRole('button', { name: 'Select', exact: true })
         await selectBtn.click()
-        await expect(page.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible()
+        await expect(page.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible({ timeout: 3000 })
 
         await page.getByRole('button', { name: 'Cancel', exact: true }).click()
-        await expect(page.getByRole('button', { name: 'Select', exact: true })).toBeVisible()
+        await expect(page.getByRole('button', { name: 'Select', exact: true })).toBeVisible({ timeout: 3000 })
     })
 
-    // FIXME: same as Cancel test — entering select mode via a "Select" button doesn't exist.
-    // Need to drive long-press on a song card.
-    test.fixme('bulk add to playlist attaches all selected songs', async ({ page }) => {
+    test('bulk add to playlist attaches all selected songs', async ({ page }) => {
         const plName = uniq(PREFIX)
         const created = await api.post(`${API_V1}/playlists`, { data: { name: plName, icon: 'music' } })
         const pl = await created.json()
@@ -74,13 +70,13 @@ test.describe('library bulk select', () => {
 
         await page.getByRole('button', { name: 'Select', exact: true }).click()
 
-        // Select first two cards
+        // Select first 3 cards
         const cards = page.getByTestId('song-card')
-        const count = Math.min(2, await cards.count())
-        test.skip(count < 2, 'library has fewer than 2 songs — cannot test bulk add')
+        const count = Math.min(3, await cards.count())
+        test.skip(count < 3, 'library has fewer than 3 songs — cannot test bulk add')
         for (let i = 0; i < count; i++) await cards.nth(i).click()
 
-        await expect(page.getByRole('button', { name: new RegExp(`${count} selected`) })).toBeVisible()
+        await expect(page.getByRole('button', { name: new RegExp(`${count} selected`) })).toBeVisible({ timeout: 3000 })
 
         // Open the playlist picker and pick our test playlist
         await page.getByRole('button', { name: '+ Playlist' }).click()
@@ -127,21 +123,47 @@ test.describe('library bulk select', () => {
         await expect(page.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible({ timeout: 3000 })
     })
 
-    // FIXME: bulk Remove confirms via window.confirm() and then mutates the
-    // user's library — destructive in dev DB. Punch list: gate this test
-    // behind a TEST_BULK_REMOVE env flag once we have a per-test library
-    // isolation strategy. Test sketched here for documentation.
-    test.fixme('bulk Remove confirms and removes selected songs from library', async ({ page }) => {
+    test('bulk Remove confirms and removes selected songs from library', async ({ page }) => {
+        // Get baseline library count via API
+        const baselineRes = await api.get(`${API_V1}/songs/library`)
+        const baselineSongs = await baselineRes.json()
+        const baseline = Array.isArray(baselineSongs) ? baselineSongs.length : 0
+        test.skip(baseline < 2, 'library has fewer than 2 songs — cannot test bulk remove')
+
+        // Capture the UUIDs of the first 2 songs to verify they're removed
+        const uuidsToRemove = baselineSongs.slice(0, 2).map((s: any) => s.uuid)
+
         await page.goto(routes.library)
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
 
         await page.getByRole('button', { name: 'Select', exact: true }).click()
-        const card = page.getByTestId('song-card').first()
-        await card.click()
 
+        // Select first 2 cards
+        const cards = page.getByTestId('song-card')
+        for (let i = 0; i < 2; i++) await cards.nth(i).click()
+        await expect(page.getByRole('button', { name: /2 selected/i })).toBeVisible({ timeout: 3000 })
+
+        // Handle confirm dialog and click Remove
         page.once('dialog', d => d.accept())
         await page.getByRole('button', { name: 'Remove', exact: true }).click()
-        // Library card count decreases by 1 (or song no longer present).
+        await page.waitForTimeout(1000)
+
+        // Verify post-remove count
+        const postRes = await api.get(`${API_V1}/songs/library`)
+        const postSongs = await postRes.json()
+        const postCount = Array.isArray(postSongs) ? postSongs.length : 0
+        expect(postCount).toBe(baseline - 2)
+
+        // Verify the specific UUIDs are gone
+        const remainingUuids = postSongs.map((s: any) => s.uuid)
+        for (const uuid of uuidsToRemove) {
+            expect(remainingUuids).not.toContain(uuid)
+        }
+
+        // Cleanup: re-add the removed songs
+        for (const uuid of uuidsToRemove) {
+            await api.post(`${API_V1}/songs/${uuid}/library`)
+        }
     })
 
     // FIXME: bulk Save offline downloads each track and writes to IndexedDB —
@@ -167,5 +189,72 @@ test.describe('library bulk select', () => {
         await page.getByTestId('song-card').first().click()
         await page.getByRole('button', { name: 'Download', exact: true }).click()
         // Would assert page.waitForEvent('download') count.
+    })
+
+    test('Select all button is hidden until select mode is active', async ({ page }) => {
+        await page.goto(routes.library)
+        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
+
+        // Before entering select mode, "Select all" button should not exist
+        await expect(page.getByRole('button', { name: /select all/i })).not.toBeVisible()
+
+        // Enter select mode
+        await page.getByRole('button', { name: 'Select', exact: true }).click()
+
+        // Now "Select all" button should be visible
+        await expect(page.getByRole('button', { name: /select all/i })).toBeVisible()
+    })
+
+    test('Select all selects every visible song and bulk action bar appears', async ({ page }) => {
+        await page.goto(routes.library)
+        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
+
+        // Get total visible song count
+        const totalSongs = await page.getByTestId('song-card').count()
+        test.skip(totalSongs === 0, 'library has no songs — cannot test select all')
+
+        // Enter select mode
+        await page.getByRole('button', { name: 'Select', exact: true }).click()
+
+        // Click "Select all"
+        await page.getByRole('button', { name: /select all/i }).click()
+
+        // Verify all songs are selected by checking the count button
+        await expect(page.getByRole('button', { name: new RegExp(`${totalSongs} selected`) })).toBeVisible({ timeout: 3000 })
+
+        // Verify bulk action bar appears
+        await expect(page.getByRole('button', { name: 'Save offline', exact: true })).toBeVisible()
+        await expect(page.getByRole('button', { name: 'Download', exact: true })).toBeVisible()
+        await expect(page.getByRole('button', { name: 'Remove', exact: true })).toBeVisible()
+
+        // Verify button text changed to "Deselect all"
+        await expect(page.getByRole('button', { name: /deselect all/i })).toBeVisible()
+    })
+
+    test('Deselect all clears selection without exiting select mode', async ({ page }) => {
+        await page.goto(routes.library)
+        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
+
+        const totalSongs = await page.getByTestId('song-card').count()
+        test.skip(totalSongs === 0, 'library has no songs — cannot test deselect all')
+
+        // Enter select mode
+        await page.getByRole('button', { name: 'Select', exact: true }).click()
+
+        // Click "Select all"
+        await page.getByRole('button', { name: /select all/i }).click()
+        await expect(page.getByRole('button', { name: new RegExp(`${totalSongs} selected`) })).toBeVisible({ timeout: 3000 })
+
+        // Click "Deselect all"
+        await page.getByRole('button', { name: /deselect all/i }).click()
+
+        // Verify no songs are selected — bulk action bar should disappear
+        await expect(page.getByRole('button', { name: 'Save offline', exact: true })).not.toBeVisible()
+        await expect(page.getByRole('button', { name: 'Download', exact: true })).not.toBeVisible()
+        await expect(page.getByRole('button', { name: 'Remove', exact: true })).not.toBeVisible()
+
+        // Verify we're still in select mode (Cancel button or Select all should still be visible)
+        await expect(page.getByRole('button', { name: /select all/i })).toBeVisible()
+        await expect(page.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible()
     })
 })
