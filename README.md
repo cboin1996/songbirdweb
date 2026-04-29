@@ -85,6 +85,13 @@ The Dockerfile uses the Next.js standalone output and runs as a non-root user on
 
 **Admin**: `/admin` is accessible only to users with `role=admin`. It lists all users and allows changing roles, toggling active status, and deleting accounts.
 
+## Further docs
+
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — stack, route map, the `/v1` dev proxy, middleware, service worker, offline strategy.
+- [`docs/STATE.md`](docs/STATE.md) — `PlayerProvider` API, library / editor / import state shapes, SW lifecycle.
+- [`docs/ENV.md`](docs/ENV.md) — exhaustive env var reference (build-time vs runtime).
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — branch + commit policy, how to add a page or component, pre-PR checklist.
+
 ## App Routes
 
 | Route | Description |
