@@ -7,10 +7,11 @@ import { routes } from "../lib/routes"
 import { usePlayer } from "../components/player"
 import Song from "../components/song"
 import { useScrollRestoration } from "../lib/use-scroll-restoration"
+import { timeAgo } from "../lib/time"
 
 const WINDOWS: { value: ExploreWindow; label: string }[] = [
     { value: 'day', label: 'today' },
-    { value: 'week', label: 'this week' },
+    { value: 'week', label: 'week' },
     { value: 'all', label: 'all time' },
 ]
 
@@ -58,10 +59,10 @@ function itemStat(item: AnyItem, sortBy: SortBy): string | null {
         return `played ${item.count}×`
     }
     if ('added_at' in item && typeof (item as { added_at: string }).added_at === 'string') {
-        return `added ${new Date((item as { added_at: string }).added_at).toLocaleDateString('en-US')}`
+        return `added ${timeAgo((item as { added_at: string }).added_at)}`
     }
     if ('last_played_at' in item && typeof (item as RecentlyPlayedSong).last_played_at === 'string') {
-        return `played ${new Date((item as RecentlyPlayedSong).last_played_at).toLocaleDateString('en-US')}`
+        return `played ${timeAgo((item as RecentlyPlayedSong).last_played_at)}`
     }
     return null
 }
@@ -160,14 +161,25 @@ export default function ExploreClient({ data, window }: { data: ExploreData | un
 
     return (
         <div className="flex flex-col gap-6">
-            <div className="sticky top-11 z-40 bg-white/90 dark:bg-gray-950/90 backdrop-blur-md py-3 flex flex-col gap-3 border-b border-gray-100 dark:border-gray-800">
-                <SearchInput
-                    value={search}
-                    onChange={changeSearch}
-                    placeholder="search by track or artist…"
-                    className="w-full md:w-80"
-                />
-                <div className="flex flex-wrap gap-2">
+            <div className="sticky top-11 z-40 bg-white/90 dark:bg-gray-950/90 backdrop-blur-md py-3 flex flex-col md:flex-row gap-2 border-b border-gray-100 dark:border-gray-800 -mt-px">
+                <div className="flex gap-2 items-center">
+                    <SearchInput
+                        value={search}
+                        onChange={changeSearch}
+                        placeholder="search…"
+                        className="flex-1 md:max-w-xs"
+                    />
+                    <select
+                        value={sortBy}
+                        onChange={e => changeSortBy(e.target.value as SortBy)}
+                        className="px-3 py-1 rounded-full text-sm bg-transparent text-gray-400 hover:text-sky-500 cursor-pointer focus:outline-none"
+                    >
+                        {SORTS.map(s => (
+                            <option key={s.value} value={s.value}>{s.label}</option>
+                        ))}
+                    </select>
+                </div>
+                <div className="flex flex-1 flex-wrap gap-2 items-center">
                     {VIEWS.map(v => (
                         <button
                             key={v.value}
@@ -181,7 +193,7 @@ export default function ExploreClient({ data, window }: { data: ExploreData | un
                             {v.label}
                         </button>
                     ))}
-                    <span className="text-gray-200 dark:text-gray-700 self-center px-1">·</span>
+                    <div className="self-stretch w-px bg-gray-200 dark:bg-gray-700 mx-1" />
                     {WINDOWS.map(w => (
                         <button
                             key={w.value}
@@ -193,18 +205,6 @@ export default function ExploreClient({ data, window }: { data: ExploreData | un
                             }`}
                         >
                             {w.label}
-                        </button>
-                    ))}
-                    <span className="text-gray-200 dark:text-gray-700 self-center px-1">·</span>
-                    {SORTS.map(s => (
-                        <button
-                            key={s.value}
-                            onClick={() => changeSortBy(s.value)}
-                            className={`px-3 py-1 rounded-full text-sm transition-colors ${
-                                sortBy === s.value ? 'bg-sky-500 text-white' : 'text-gray-400 hover:text-sky-500'
-                            }`}
-                        >
-                            {s.label}
                         </button>
                     ))}
                 </div>
