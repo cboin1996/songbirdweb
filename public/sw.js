@@ -66,7 +66,7 @@ self.addEventListener('fetch', event => {
         return
     }
 
-    // Page navigations: network first, cache on success, serve cache offline
+    // Page navigations: network first, cache only on 200, fall back to cache/offline only when network is unreachable
     if (event.request.mode === 'navigate') {
         event.respondWith(
             fetch(event.request)
@@ -74,7 +74,7 @@ self.addEventListener('fetch', event => {
                     if (r.ok) {
                         caches.open(SHELL_CACHE).then(cache => cache.put(event.request, r.clone()))
                     }
-                    return r.ok ? r : caches.match(event.request).then(c => c ?? caches.match('/offline'))
+                    return r
                 })
                 .catch(() =>
                     caches.match(event.request).then(c => c ?? caches.match('/offline'))
