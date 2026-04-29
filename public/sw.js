@@ -1,9 +1,9 @@
-const SHELL_CACHE = 'songbird-shell-v3'
+const SHELL_CACHE = 'songbird-shell-v4'
 const ARTWORK_CACHE = 'songbird-artwork-v1'
 
 self.addEventListener('install', event => {
     event.waitUntil(
-        caches.open(SHELL_CACHE).then(cache => cache.addAll(['/offline']))
+        caches.open(SHELL_CACHE).then(cache => cache.addAll(['/offline', '/', '/library']))
     )
     self.skipWaiting()
 })
