@@ -25,6 +25,33 @@ ENV_VARS = $(shell cat $(ENV).env | xargs)
 requirements:
 	npm i
 
+.PHONY: install
+install:
+	npm ci
+
+.PHONY: lint
+lint:
+	npm run lint
+
+.PHONY: typecheck
+typecheck:
+	npx tsc --noEmit
+
+.PHONY: build
+build:
+	npm run build
+
+.PHONY: test-e2e
+test-e2e:
+	npx playwright test --project=dev
+
+.PHONY: test-e2e-prod
+test-e2e-prod:
+	npx playwright test --project=prod
+
+.PHONY: test
+test: lint typecheck
+
 local-run-songbirdweb:
 	npm run dev
 
