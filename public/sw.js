@@ -1,4 +1,4 @@
-const SHELL_CACHE = 'songbird-shell-v6'
+const SHELL_CACHE = 'songbird-shell-v7'
 const ARTWORK_CACHE = 'songbird-artwork-v1'
 
 self.addEventListener('install', event => {

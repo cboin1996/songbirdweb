@@ -9,6 +9,21 @@ import Spinner from "./spinner"
 import { DOWNLOAD_URL, PlayableSong, artworkUrl, songArtworkUrl, fetchLibrarySongs, fetchPlayerState, fetchSongById, recordPlay, savePlayerState, updatePosition } from "../lib/data"
 import { getSongFile, cacheArtworkUrls } from "../lib/offline"
 import Slider from "./slider"
+import { routes } from "../lib/routes"
+
+function contextFromId(id: string | null): PlayContext | null {
+    if (!id) return null
+    if (id === 'library')   return { id, label: 'Library',   href: routes.library }
+    if (id === 'artists')   return { id, label: 'Artists',   href: `${routes.library}?view=artists` }
+    if (id === 'albums')    return { id, label: 'Albums',    href: `${routes.library}?view=albums` }
+    if (id === 'genres')    return { id, label: 'Genres',    href: `${routes.library}?view=genres` }
+    if (id === 'playlists') return { id, label: 'Playlists', href: `${routes.library}?view=playlists` }
+    if (id === 'explore')   return { id, label: 'Explore',   href: routes.explore }
+    if (id === 'downloads') return { id, label: 'Downloads', href: routes.downloadSong }
+    if (id.startsWith('genre:')) { const g = id.slice(6); return { id, label: g, href: `${routes.library}?view=genres` } }
+    if (id.startsWith('album:')) return { id, label: 'Album', href: `${routes.library}?view=albums` }
+    return null
+}
 
 export type RepeatMode = 'off' | 'one' | 'all'
 export type PlayContext = { label: string; href: string; id: string }
@@ -192,6 +207,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const dragFromRef = useRef<number | null>(null)
     const queueContainerRef = useRef<HTMLDivElement>(null)
     const [queueDropTarget, setQueueDropTarget] = useState<number | null>(null)
+    const [draggedQi, setDraggedQi] = useState<number | null>(null)
+    const [manualNextIds, setManualNextIds] = useState<Set<string>>(new Set())
     const shuffleSeedRef = useRef<number | null>(null)
     const playContextRef = useRef<PlayContext | null>(null)
 
@@ -274,6 +291,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         queueRef.current = q
         queueIndexRef.current = idx
         manualNextRef.current = []
+        setManualNextIds(new Set())
         setQueue(q)
         if (shuffleRef.current) generateShuffleOrder(idx)
         loadSong(playingSong, true)
@@ -294,6 +312,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         q.splice(insertAt, 0, song)
         queueRef.current = q
         manualNextRef.current.push(song)
+        setManualNextIds(new Set(manualNextRef.current.map(s => s.uuid)))
         setQueue([...q])
         scheduleSave()
         const afterName = queueRef.current[queueIndexRef.current]?.properties?.trackName
@@ -311,20 +330,40 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         scheduleSave()
     }
 
-    function reorderQueue(fromIdx: number, toIdx: number) {
-        if (fromIdx === toIdx) return
+    // fromDpos / toDpos are *display positions* — i.e. positions in the queue panel as the
+    // user sees it (which equals shuffleOrder positions when shuffled, queue indices otherwise).
+    // toDpos = N means "drop above row N"; toDpos = N+1 means "drop below row N".
+    function reorderQueue(fromDpos: number, toDpos: number) {
+        if (fromDpos === toDpos || fromDpos === toDpos - 1) return
+        if (shuffleRef.current) {
+            // Reorder the shuffle order array directly — preserves the seed.
+            const order = [...shuffleOrderRef.current]
+            const [moved] = order.splice(fromDpos, 1)
+            const insertAt = toDpos > fromDpos ? toDpos - 1 : toDpos
+            order.splice(insertAt, 0, moved)
+            shuffleOrderRef.current = order
+            const currentUuid = queueRef.current[queueIndexRef.current]?.uuid
+            if (currentUuid) {
+                const newPos = order.findIndex(qi => queueRef.current[qi]?.uuid === currentUuid)
+                if (newPos >= 0) shufflePosRef.current = newPos
+            }
+            setShuffleOrder([...order])
+            scheduleSave()
+            return
+        }
+        // Non-shuffle: dpos === queue index
         const q = [...queueRef.current]
-        const [item] = q.splice(fromIdx, 1)
-        q.splice(toIdx, 0, item)
+        const [item] = q.splice(fromDpos, 1)
+        const insertAt = toDpos > fromDpos ? toDpos - 1 : toDpos
+        q.splice(insertAt, 0, item)
         const currentIdx = queueIndexRef.current
         let newIdx = currentIdx
-        if (fromIdx === currentIdx) newIdx = toIdx
-        else if (fromIdx < currentIdx && toIdx >= currentIdx) newIdx = currentIdx - 1
-        else if (fromIdx > currentIdx && toIdx <= currentIdx) newIdx = currentIdx + 1
+        if (fromDpos === currentIdx) newIdx = insertAt
+        else if (fromDpos < currentIdx && insertAt >= currentIdx) newIdx = currentIdx - 1
+        else if (fromDpos > currentIdx && insertAt <= currentIdx) newIdx = currentIdx + 1
         queueRef.current = q
         queueIndexRef.current = newIdx
         setQueue([...q])
-        if (shuffleRef.current) generateShuffleOrder()
         scheduleSave()
     }
 
@@ -356,6 +395,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         if (shuffleRef.current) {
             if (manualNextRef.current.length > 0) {
                 manualNextRef.current.shift()
+                setManualNextIds(new Set(manualNextRef.current.map(s => s.uuid)))
                 nextIdx = idx + 1
                 if (nextIdx >= q.length) return
                 // advance shuffle position to wherever this manually-queued song lands
@@ -411,6 +451,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
         saveTimerRef.current = setTimeout(() => {
             const ctx = playContextRef.current
+            const sources: Record<string, PlayContext> = {}
+            for (const s of queueRef.current) if (s.source) sources[s.uuid] = s.source
+            for (const s of manualNextRef.current) if (s.source) sources[s.uuid] = s.source
             const state = {
                 shuffle: shuffleRef.current,
                 repeat: repeatRef.current,
@@ -418,19 +461,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 queue_index: queueIndexRef.current,
                 shuffle_order: null, // legacy — replaced by seed
                 play_context: ctx?.id ?? null,
-                shuffle_seed: shuffleRef.current ? shuffleSeedRef.current : null,
+                shuffle_seed: shuffleSeedRef.current,
                 shuffle_position: shufflePosRef.current,
                 manual_next: manualNextRef.current.map(s => s.uuid),
                 current_song_uuid: queueRef.current[queueIndexRef.current]?.uuid ?? null,
+                queue_sources: sources,
             }
             try { localStorage.setItem('playerState', JSON.stringify(state)) } catch {}
-            // Per-song source map — local only; not sent to API
-            try {
-                const sources: Record<string, PlayContext> = {}
-                for (const s of queueRef.current) if (s.source) sources[s.uuid] = s.source
-                for (const s of manualNextRef.current) if (s.source) sources[s.uuid] = s.source
-                localStorage.setItem('playerSources', JSON.stringify(sources))
-            } catch {}
             savePlayerState(state)
         }, 2000)
     }
@@ -439,8 +476,25 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setShuffle(prev => {
             const next = !prev
             shuffleRef.current = next
-            if (next) generateShuffleOrder()
-            else { shuffleOrderRef.current = []; shufflePosRef.current = 0; shuffleSeedRef.current = null; setShuffleOrder([]) }
+            if (next) {
+                // Resume prior shuffle if seed + order are intact and queue length matches.
+                // Otherwise generate a fresh shuffle. Re-anchor position to current song.
+                const q = queueRef.current
+                const order = shuffleOrderRef.current
+                const currentUuid = q[queueIndexRef.current]?.uuid
+                if (shuffleSeedRef.current !== null && order.length === q.length && currentUuid) {
+                    const newPos = order.findIndex(idx => q[idx]?.uuid === currentUuid)
+                    if (newPos >= 0) {
+                        shufflePosRef.current = newPos
+                        setShuffleOrder([...order])
+                    } else {
+                        generateShuffleOrder()
+                    }
+                } else {
+                    generateShuffleOrder()
+                }
+            }
+            // Toggle OFF: keep seed/order/pos so the user can re-enter shuffle without re-shuffling.
             scheduleSave()
             return next
         })
@@ -603,11 +657,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             } catch {}
             const state = serverState ?? localState
 
-            let sourceMap: Record<string, PlayContext> = {}
-            try {
-                const raw = localStorage.getItem('playerSources')
-                if (raw) sourceMap = JSON.parse(raw)
-            } catch {}
+            let sourceMap: Record<string, PlayContext> = state?.queue_sources ?? {}
+            if (Object.keys(sourceMap).length === 0) {
+                // Legacy fallback — pre queue_sources rollout
+                try {
+                    const raw = localStorage.getItem('playerSources')
+                    if (raw) sourceMap = JSON.parse(raw)
+                } catch {}
+            }
 
             if (state) {
                 setShuffle(state.shuffle)
@@ -624,14 +681,15 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 for (const id of uuids) {
                     const lib = libMap.get(id)
                     if (lib?.properties) {
-                        results.push({ uuid: lib.uuid, properties: lib.properties!, last_position: lib.last_position, last_played_at: lib.last_played_at, artwork_cached: lib.artwork_cached, source: sourceMap[id] ?? null })
+                        results.push({ uuid: lib.uuid, properties: lib.properties!, last_position: lib.last_position, last_played_at: lib.last_played_at, artwork_cached: lib.artwork_cached, source: sourceMap[id] ?? fallbackCtx })
                     } else {
                         const fetched = await fetchSongById(id)
-                        if (fetched) results.push({ ...fetched, source: sourceMap[id] ?? null })
+                        if (fetched) results.push({ ...fetched, source: sourceMap[id] ?? fallbackCtx })
                     }
                 }
                 return results
             }
+            const fallbackCtx = contextFromId(state?.play_context ?? null)
             const restoredQueue = await resolveUuids(queueUuids)
 
             const warmArtworkCache = (songs: PlayableSong[]) => {
@@ -650,30 +708,30 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 queueIndexRef.current = safeIndex
                 setQueue(restoredQueue)
                 warmArtworkCache(restoredQueue)
-                if (state?.shuffle) {
-                    const seed = (state as { shuffle_seed?: number | null }).shuffle_seed
-                    const savedPos = (state as { shuffle_position?: number }).shuffle_position ?? 0
-                    if (seed != null) {
-                        // Restore shuffle: pin safeIndex first, seed the rest (matches generateShuffleOrder)
-                        shuffleSeedRef.current = seed
-                        const rest = seededShuffle(restoredQueue.map((_, i) => i).filter(i => i !== safeIndex), seed)
-                        const order = [safeIndex, ...rest]
-                        shuffleOrderRef.current = order
-                        shufflePosRef.current = Math.max(0, Math.min(savedPos, order.length - 1))
-                        setShuffleOrder([...order])
-                    } else if (state.shuffle_order && state.shuffle_order.length === restoredQueue.length) {
-                        // Legacy: index array saved before seed migration
-                        shuffleOrderRef.current = state.shuffle_order
-                        shufflePosRef.current = Math.max(0, state.shuffle_order.indexOf(safeIndex))
-                        setShuffleOrder([...state.shuffle_order])
-                    } else {
-                        generateShuffleOrder(safeIndex)
-                    }
+                // Restore shuffle order whenever a seed exists, regardless of whether
+                // shuffle is currently on — so toggling on after reload doesn't reshuffle.
+                const seed = (state as { shuffle_seed?: number | null }).shuffle_seed
+                const savedPos = (state as { shuffle_position?: number }).shuffle_position ?? 0
+                if (seed != null) {
+                    shuffleSeedRef.current = seed
+                    const rest = seededShuffle(restoredQueue.map((_, i) => i).filter(i => i !== safeIndex), seed)
+                    const order = [safeIndex, ...rest]
+                    shuffleOrderRef.current = order
+                    shufflePosRef.current = Math.max(0, Math.min(savedPos, order.length - 1))
+                    setShuffleOrder([...order])
+                } else if (state?.shuffle && state.shuffle_order && state.shuffle_order.length === restoredQueue.length) {
+                    // Legacy: index array saved before seed migration
+                    shuffleOrderRef.current = state.shuffle_order
+                    shufflePosRef.current = Math.max(0, state.shuffle_order.indexOf(safeIndex))
+                    setShuffleOrder([...state.shuffle_order])
+                } else if (state?.shuffle) {
+                    generateShuffleOrder(safeIndex)
                 }
                 // Restore manual_next queue
                 const savedManualNext = (state as { manual_next?: string[] }).manual_next ?? []
                 if (savedManualNext.length > 0) {
                     manualNextRef.current = await resolveUuids(savedManualNext)
+                    setManualNextIds(new Set(savedManualNext))
                 }
                 setCurrent(song)
                 const audio = audioRef.current
@@ -793,46 +851,61 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                 ref={queueContainerRef}
                                 className="overflow-y-auto flex-1"
                                 onPointerMove={e => {
-                                    if (dragFromRef.current === null) return
+                                    const from = dragFromRef.current
+                                    if (from === null) return
                                     const el = document.elementFromPoint(e.clientX, e.clientY)
-                                    const idxStr = (el?.closest('[data-qi]') as HTMLElement | null)?.dataset.qi
-                                    if (idxStr !== undefined) setQueueDropTarget(parseInt(idxStr))
+                                    const row = el?.closest('[data-dpos]') as HTMLElement | null
+                                    if (!row) return
+                                    const dpos = parseInt(row.dataset.dpos!)
+                                    if (dpos === from) { setQueueDropTarget(null); return }
+                                    setQueueDropTarget(dpos > from ? dpos + 1 : dpos)
                                 }}
                                 onPointerUp={() => {
                                     if (dragFromRef.current !== null && queueDropTarget !== null && dragFromRef.current !== queueDropTarget) {
                                         reorderQueue(dragFromRef.current, queueDropTarget)
                                     }
                                     dragFromRef.current = null
+                                    setDraggedQi(null)
                                     setQueueDropTarget(null)
                                 }}
                                 onPointerLeave={() => {
                                     dragFromRef.current = null
+                                    setDraggedQi(null)
                                     setQueueDropTarget(null)
                                 }}
                             >
                                 <div style={{ height: totalHeight }}>
                                     <div style={{ paddingTop: offsetTop }}>
-                                        {queueDisplayItems.slice(start, end).map(({ song, qi }) => {
+                                        {queueDisplayItems.slice(start, end).map(({ song, qi }, i) => {
+                                            const dpos = start + i
                                             const isActive = song.uuid === current.uuid
                                             const sp = song.properties
-                                            const isDropTarget = queueDropTarget === qi
+                                            const isBeingDragged = draggedQi === dpos
+                                            const isDropTarget = queueDropTarget === dpos && !isBeingDragged
+                                            const isDropAfter = queueDropTarget === dpos + 1 && dpos === queueDisplayItems.length - 1 && !isBeingDragged
                                             return (
                                                 <div
                                                     key={`${song.uuid}-${qi}`}
                                                     data-qi={qi}
+                                                    data-dpos={dpos}
                                                     style={{ height: QUEUE_ROW_H }}
-                                                    className={`flex items-center gap-3 px-4 border-t-2 transition-colors ${isDropTarget ? 'border-sky-500' : 'border-transparent'} ${isActive ? 'bg-sky-50 dark:bg-sky-950/30' : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'}`}
+                                                    className={`flex items-center gap-3 px-4 border-t-2 border-b-2 transition-colors ${isDropTarget ? 'border-t-sky-500' : 'border-t-transparent'} ${isDropAfter ? 'border-b-sky-500' : 'border-b-transparent'} ${isBeingDragged ? 'opacity-40' : ''} ${isActive ? 'bg-sky-50 dark:bg-sky-950/30' : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'}`}
                                                 >
                                                     <span
                                                         className="text-gray-300 dark:text-gray-600 cursor-grab active:cursor-grabbing shrink-0 touch-none"
-                                                        onPointerDown={e => { e.preventDefault(); dragFromRef.current = qi }}
+                                                        onPointerDown={e => { e.preventDefault(); dragFromRef.current = dpos; setDraggedQi(dpos); setQueueDropTarget(null) }}
                                                     >
                                                         <FaBars size={11} />
                                                     </span>
                                                     <button onClick={() => { if (isActive) { isPlaying ? pause() : audioRef.current?.play() } else { playAt(qi) } }} className="flex items-center gap-3 flex-1 text-left min-w-0">
                                                         {(() => { const a = songArtworkUrl(song.uuid, song.artwork_cached, sp?.artworkUrl100, 200); return a ? <Image src={a} alt="" width={36} height={36} className="rounded shrink-0 object-cover" unoptimized={!!song.artwork_cached} /> : <div className="w-9 h-9 rounded shrink-0 bg-gray-100 dark:bg-gray-800 flex items-center justify-center"><FaMusic size={11} className="text-gray-400" /></div> })()}
                                                         <div className="flex-1 min-w-0">
-                                                            <p className={`text-sm font-medium truncate ${isActive ? 'text-sky-500' : ''}`}>{sp?.trackName ?? '—'}</p>
+                                                            <div className="flex items-center gap-1.5">
+                                                                <p className={`text-sm font-medium truncate ${isActive ? 'text-sky-500' : ''}`}>{sp?.trackName ?? '—'}</p>
+                                                                {manualNextIds.has(song.uuid) && (
+                                                                    <span className="text-[10px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded bg-sky-100 dark:bg-sky-950/50 text-sky-600 dark:text-sky-400 shrink-0">Queued</span>
+                                                                )}
+                                                            </div>
                                                             <p className="text-xs text-gray-400 truncate">{sp?.artistName ?? '—'}</p>
                                                         </div>
                                                         {isActive && (isPlaying ? <FaPause size={9} className="text-sky-500 shrink-0" /> : <FaPlay size={9} className="text-sky-500 shrink-0" />)}
@@ -854,7 +927,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                         </div>
                     )}
 
-                    <div data-testid="player-bar" className="fixed bottom-0 left-0 right-0 z-50 bg-white/90 dark:bg-gray-950/90 backdrop-blur-md border-t border-gray-100 dark:border-gray-800">
+                    <div data-testid="player-bar" className="fixed bottom-0 left-0 right-0 z-50 bg-[var(--background)]/90 backdrop-blur-md border-t border-gray-100 dark:border-gray-800">
                         <div className="flex flex-col">
                             {/* Mobile: single row. Desktop: three-column layout */}
                             <div className="flex items-center gap-3 px-4 pt-3 pb-1.5 md:grid md:grid-cols-[1fr_auto_1fr]">

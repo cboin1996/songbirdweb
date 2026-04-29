@@ -71,6 +71,46 @@ test.describe('player bar', () => {
         await btn.click()
     })
 
+    // Toggling shuffle off and back on must NOT reshuffle the queue —
+    // the same seed/order is preserved so users don't repeat songs they've heard.
+    test('shuffle toggle off+on preserves shuffle order (no reshuffle)', async ({ page }) => {
+        await startPlayback(page)
+        const btn = page.getByTestId('player-shuffle').filter({ visible: true }).first()
+        await expect(btn).toBeVisible()
+
+        // Ensure shuffle is ON. If currently off, click once.
+        const cls0 = await btn.getAttribute('class') ?? ''
+        if (!cls0.includes('text-sky-500')) await btn.click()
+        await page.waitForTimeout(300)
+
+        // Capture the saved shuffle_seed (server-side state via API once it saves).
+        // Easier: read it from localStorage where the player mirrors state.
+        const seedBefore = await page.evaluate(() => {
+            try {
+                const raw = localStorage.getItem('playerState')
+                if (!raw) return null
+                return (JSON.parse(raw) as { shuffle_seed?: number | null }).shuffle_seed ?? null
+            } catch { return null }
+        })
+        expect(seedBefore, 'shuffle_seed should exist while shuffle is on').not.toBeNull()
+
+        // Toggle OFF
+        await btn.click()
+        await page.waitForTimeout(300)
+        // Toggle ON
+        await btn.click()
+        await page.waitForTimeout(300)
+
+        const seedAfter = await page.evaluate(() => {
+            try {
+                const raw = localStorage.getItem('playerState')
+                if (!raw) return null
+                return (JSON.parse(raw) as { shuffle_seed?: number | null }).shuffle_seed ?? null
+            } catch { return null }
+        })
+        expect(seedAfter, 'shuffle_seed must be unchanged after off→on toggle').toBe(seedBefore)
+    })
+
     test('repeat cycles off → one → all → off', async ({ page }) => {
         await startPlayback(page)
         const btn = page.getByTestId('player-repeat').filter({ visible: true }).first()
@@ -188,5 +228,96 @@ test.describe('player bar', () => {
         const s = parseInt(match![2])
         const totalSec = m * 60 + s
         expect(totalSec, `expected >=4s elapsed, got ${totalSec}`).toBeGreaterThanOrEqual(4)
+    })
+
+    // === Tier 2 per-song deep-linking (queue_sources) ===
+
+    test('library songs: player link includes ?song=<uuid>', async ({ page }) => {
+        await page.goto(routes.library)
+        const card = page.getByTestId('song-card').first()
+        await expect(card).toBeVisible({ timeout: 10000 })
+
+        // Get the song UUID from the card's data attribute
+        const songId = await card.getAttribute('data-song-id')
+        expect(songId).toBeTruthy()
+
+        await card.click()
+        await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
+
+        // Hover player bar bottom-left to see the context link
+        const contextLink = page.getByText(/from library/i)
+        await expect(contextLink).toBeVisible({ timeout: 5000 })
+
+        // Check that the link parent contains the song UUID
+        const link = contextLink.locator('..')
+        const href = await link.locator('a').getAttribute('href')
+        expect(href).toContain(`?song=${songId}`)
+    })
+
+    test('library genres: player link includes ?view=genres&song=<uuid>', async ({ page }) => {
+        await page.goto(routes.libraryGenres)
+        const card = page.getByTestId('song-card').first()
+        await expect(card).toBeVisible({ timeout: 10000 })
+
+        const songId = await card.getAttribute('data-song-id')
+        expect(songId).toBeTruthy()
+
+        await card.click()
+        await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
+
+        // The context link should reflect the genres view + song UUID
+        const link = page.locator('a[href*="genres"]').first()
+        const href = await link.getAttribute('href')
+        expect(href).toContain(`genres`)
+        expect(href).toContain(`song=${songId}`)
+    })
+
+    test('library albums: player link includes ?view=albums&album=<id>', async ({ page }) => {
+        await page.goto(routes.libraryAlbums)
+        // In albums view, click a song card
+        const card = page.getByTestId('song-card').first()
+        await expect(card).toBeVisible({ timeout: 10000 })
+
+        const albumId = await card.getAttribute('data-album-id')
+        expect(albumId).toBeTruthy()
+
+        await card.click()
+        await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
+
+        // Check the context link for album query param (NOT song param)
+        const link = page.locator('a[href*="albums"]').first()
+        const href = await link.getAttribute('href')
+        expect(href).toContain(`albums`)
+        expect(href).toContain(`album=${albumId}`)
+        expect(href).not.toContain(`song=`) // albums use album param, not song
+    })
+
+    test('queue_sources persists across reload (cross-session)', async ({ page }) => {
+        // Play a song from library
+        await page.goto(routes.library)
+        const card = page.getByTestId('song-card').first()
+        await expect(card).toBeVisible({ timeout: 10000 })
+
+        const songId = await card.getAttribute('data-song-id')
+        expect(songId).toBeTruthy()
+
+        await card.click()
+        await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
+
+        // Capture the context link href before reload
+        const linkBefore = page.locator('a[href*="library"]').first()
+        const hrefBefore = await linkBefore.getAttribute('href')
+        expect(hrefBefore).toContain(`song=${songId}`)
+
+        // Reload the page — queue_sources should be restored server-side
+        await page.reload()
+
+        // Player bar should still show (persisted via queue_sources)
+        await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
+
+        // The context link should still have the same song UUID
+        const linkAfter = page.locator('a[href*="library"]').first()
+        const hrefAfter = await linkAfter.getAttribute('href')
+        expect(hrefAfter).toContain(`song=${songId}`)
     })
 })

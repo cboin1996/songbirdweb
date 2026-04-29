@@ -67,17 +67,28 @@ function itemStat(item: AnyItem, sortBy: SortBy): string | null {
     return null
 }
 
-function SongGrid({ songs, libraryIds, sortBy, showSource }: {
+function exploreHref(window: ExploreWindow, sortBy: SortBy, viewFilter: ViewFilter, songUuid?: string): string {
+    const params = new URLSearchParams({ window, sort: sortBy, view: viewFilter })
+    if (songUuid) params.set('song', songUuid)
+    return `${routes.explore}?${params.toString()}`
+}
+
+function SongGrid({ songs, libraryIds, sortBy, viewFilter, window, showSource }: {
     songs: AnyItem[]
     libraryIds: Set<string>
     sortBy: SortBy
+    viewFilter: ViewFilter
+    window: ExploreWindow
     showSource?: boolean
 }) {
     const { play, current } = usePlayer()
     const isDesktop = useIsDesktop()
     if (songs.length === 0) return <p className="text-gray-400 text-sm py-4">no data yet</p>
-    const exploreCtx = { label: 'Explore', href: routes.explore, id: 'explore' }
-    const queue = songs.filter(s => s.properties).map(s => toPlayableSong(s, exploreCtx))
+    const baseCtx = { label: 'Explore', href: exploreHref(window, sortBy, viewFilter), id: 'explore' }
+    const queue = songs.filter(s => s.properties).map(s => ({
+        ...toPlayableSong(s, baseCtx),
+        source: { ...baseCtx, href: exploreHref(window, sortBy, viewFilter, s.uuid) },
+    }))
     return (
         <div className={isDesktop
             ? "grid grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-2 md:gap-6"
@@ -87,12 +98,13 @@ function SongGrid({ songs, libraryIds, sortBy, showSource }: {
                 if (!s.properties) return null
                 const song = toSongCard(s)
                 const stat = itemStat(s, sortBy)
+                const songCtx = { ...baseCtx, href: exploreHref(window, sortBy, viewFilter, s.uuid) }
                 return (
-                    <div key={s.uuid} className="flex flex-col gap-1">
+                    <div key={s.uuid} data-song-id={s.uuid} className="flex flex-col gap-1">
                         <Song
                             song={song}
                             selected={current?.uuid === s.uuid}
-                            onClick={() => play(toPlayableSong(s, exploreCtx), queue, exploreCtx)}
+                            onClick={() => play({ ...toPlayableSong(s, baseCtx), source: songCtx }, queue, baseCtx)}
                             inLibrary={libraryIds.has(s.uuid)}
                             showSource={showSource}
                             compact={!isDesktop}
@@ -105,12 +117,13 @@ function SongGrid({ songs, libraryIds, sortBy, showSource }: {
     )
 }
 
-export default function ExploreClient({ data, window }: { data: ExploreData | undefined; window: ExploreWindow }) {
+export default function ExploreClient({ data, window: timeWindow }: { data: ExploreData | undefined; window: ExploreWindow }) {
     const router = useRouter()
     const searchParams = useSearchParams()
     const initialSort = (searchParams.get('sort') as SortBy | null) ?? 'plays'
+    const initialView = (searchParams.get('view') as ViewFilter | null) ?? 'everyone'
     const [sortBy, setSortBy] = useState<SortBy>(initialSort)
-    const [viewFilter, setViewFilter] = useState<ViewFilter>('everyone')
+    const [viewFilter, setViewFilter] = useState<ViewFilter>(initialView)
     const [libraryIds, setLibraryIds] = useState<Set<string>>(new Set())
     const [search, setSearch] = useState(searchParams.get('q') ?? '')
     useScrollRestoration()
@@ -119,8 +132,41 @@ export default function ExploreClient({ data, window }: { data: ExploreData | un
         fetchLibrary().then(entries => setLibraryIds(new Set(entries.map(e => e.song_id))))
     }, [])
 
+    function changeViewFilter(v: ViewFilter) {
+        setViewFilter(v)
+        const params = new URLSearchParams(searchParams.toString())
+        params.set('view', v)
+        router.replace(`${routes.explore}?${params.toString()}`)
+    }
+
+    // scroll to and highlight a specific song when ?song=<uuid> appears in URL
+    useEffect(() => {
+        const songId = searchParams.get('song')
+        if (!songId) return
+        let cleanupScrollend: (() => void) | null = null
+        const id = setTimeout(() => {
+            const el = document.querySelector<HTMLElement>(`[data-song-id="${songId}"]`)
+            if (!el) return
+            const flash = () => {
+                el.style.animation = 'none'
+                void el.offsetWidth
+                el.style.animation = 'song-highlight 1.5s ease-out forwards'
+                el.addEventListener('animationend', () => { el.style.animation = '' }, { once: true })
+            }
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+            if ('onscrollend' in window) {
+                const onScrollEnd = () => { flash(); window.removeEventListener('scrollend', onScrollEnd) }
+                window.addEventListener('scrollend', onScrollEnd, { once: true })
+                cleanupScrollend = () => window.removeEventListener('scrollend', onScrollEnd)
+            } else {
+                flash()
+            }
+        }, 300)
+        return () => { clearTimeout(id); cleanupScrollend?.() }
+    }, [searchParams, viewFilter, sortBy, timeWindow])
+
     function setWindow(w: ExploreWindow) {
-        router.push(`${routes.explore}?window=${w}&sort=${sortBy}`)
+        router.push(`${routes.explore}?window=${w}&sort=${sortBy}&view=${viewFilter}`)
     }
 
     function changeSortBy(s: SortBy) {
@@ -156,12 +202,12 @@ export default function ExploreClient({ data, window }: { data: ExploreData | un
 
     const mainList = rawList.filter(s => matchesSearch(s, search))
 
-    const windowLabel = WINDOWS.find(w => w.value === window)?.label
+    const windowLabel = WINDOWS.find(w => w.value === timeWindow)?.label
     const sortLabel = SORTS.find(s => s.value === sortBy)?.label
 
     return (
         <div className="flex flex-col gap-6">
-            <div className="sticky top-11 z-40 bg-white/90 dark:bg-gray-950/90 backdrop-blur-md py-3 flex flex-col md:flex-row gap-2 border-b border-gray-100 dark:border-gray-800 -mt-px">
+            <div className="sticky top-11 z-40 bg-[var(--background)]/90 backdrop-blur-md py-3 flex flex-col md:flex-row gap-2 border-b border-gray-100 dark:border-gray-800 -mt-px">
                 <div className="flex gap-2 items-center">
                     <SearchInput
                         value={search}
@@ -183,7 +229,7 @@ export default function ExploreClient({ data, window }: { data: ExploreData | un
                     {VIEWS.map(v => (
                         <button
                             key={v.value}
-                            onClick={() => setViewFilter(v.value)}
+                            onClick={() => changeViewFilter(v.value)}
                             className={`px-3 py-1 rounded-full text-sm transition-colors ${
                                 viewFilter === v.value
                                     ? 'bg-sky-500 text-white'
@@ -199,7 +245,7 @@ export default function ExploreClient({ data, window }: { data: ExploreData | un
                             key={w.value}
                             onClick={() => setWindow(w.value)}
                             className={`px-3 py-1 rounded-full text-sm transition-colors ${
-                                window === w.value
+                                timeWindow === w.value
                                     ? 'bg-sky-500 text-white'
                                     : 'text-gray-400 hover:text-sky-500'
                             }`}
@@ -220,7 +266,7 @@ export default function ExploreClient({ data, window }: { data: ExploreData | un
                         {viewFilter === 'you' ? `your ${sortLabel}` : sortLabel}
                         <span className="ml-1 text-gray-300 dark:text-gray-600">· {windowLabel}</span>
                     </h2>
-                    <SongGrid songs={mainList} libraryIds={libraryIds} sortBy={sortBy} showSource={viewFilter === 'everyone'} />
+                    <SongGrid songs={mainList} libraryIds={libraryIds} sortBy={sortBy} viewFilter={viewFilter} window={timeWindow} showSource={viewFilter === 'everyone'} />
                 </div>
             )}
         </div>

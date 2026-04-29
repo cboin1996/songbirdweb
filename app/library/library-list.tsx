@@ -115,6 +115,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     const viewMode = (searchParams.get('view') as ViewMode | null) ?? 'songs'
     const { play, current, isPlaying, playContext } = usePlayer()
     const sectionRefs = useRef<Record<string, HTMLElement | null>>({})
+    const stickyHeaderRef = useRef<HTMLDivElement | null>(null)
     const isDesktop = useIsDesktop()
     const [cachedIds, setCachedIds] = useState<Set<string>>(new Set())
     const [offlineReady, setOfflineReady] = useState(false)
@@ -385,25 +386,41 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         return [...songGrouped.values()].flat()
     }, [viewMode, songGrouped, genreGrouped])
 
+    function withSong(href: string, uuid: string) {
+        return href.includes('?') ? `${href}&song=${uuid}` : `${href}?song=${uuid}`
+    }
+
+    function stickyOffset() {
+        const navBottom = document.querySelector('nav')?.getBoundingClientRect().bottom ?? 0
+        const headerBottom = stickyHeaderRef.current?.getBoundingClientRect().bottom ?? 0
+        return Math.max(navBottom, headerBottom, 0)
+    }
+
+    function scrollToEl(el: HTMLElement | null, behavior: ScrollBehavior) {
+        if (!el) return
+        const top = el.getBoundingClientRect().top + window.scrollY - stickyOffset()
+        window.scrollTo({ top, behavior })
+    }
+
     function scrollTo(letter: string) {
         const params = new URLSearchParams(searchParams.toString())
         params.set('letter', letter)
         router.replace(`?${params.toString()}`, { scroll: false })
         if (viewMode === 'genres') {
             const genre = [...genreGrouped.keys()].find(g => letterKey(g) === letter)
-            if (genre) sectionRefs.current[genre]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+            scrollToEl(genre ? sectionRefs.current[genre] ?? null : null, 'smooth')
             return
         }
-        sectionRefs.current[letter]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        scrollToEl(sectionRefs.current[letter] ?? null, 'smooth')
     }
 
     function scrubTo(letter: string) {
         if (viewMode === 'genres') {
             const genre = [...genreGrouped.keys()].find(g => letterKey(g) === letter)
-            if (genre) sectionRefs.current[genre]?.scrollIntoView({ behavior: 'instant' as ScrollBehavior, block: 'start' })
+            scrollToEl(genre ? sectionRefs.current[genre] ?? null : null, 'instant')
             return
         }
-        sectionRefs.current[letter]?.scrollIntoView({ behavior: 'instant' as ScrollBehavior, block: 'start' })
+        scrollToEl(sectionRefs.current[letter] ?? null, 'instant')
     }
 
     function letterFromPointer(e: React.PointerEvent): string | null {
@@ -435,8 +452,9 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         setScrubLetter(null)
     }
 
-    // restore scroll position for current view from sessionStorage
+    // restore scroll position for current view from sessionStorage (skip if jumping to a specific song)
     useEffect(() => {
+        if (searchParams.get('song')) return
         const saved = sessionStorage.getItem(`library-scroll-${viewMode}`)
         const y = saved ? parseInt(saved, 10) : 0
         if (isNaN(y)) return
@@ -465,41 +483,63 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         return () => { window.removeEventListener('scroll', handler); clearTimeout(timer) }
     }, [viewMode])
 
-    // scroll to and highlight a specific song on mount (?song=<uuid>)
+    // scroll to and highlight a specific song or album when URL includes ?song=<uuid> or ?album=<id>
     useEffect(() => {
         const songId = searchParams.get('song')
-        if (!songId) return
+        const albumId = searchParams.get('album')
+        const target = songId
+            ? `[data-song-id="${songId}"]`
+            : albumId ? `[data-album-id="${albumId}"]` : null
+        if (!target) return
+        let cleanupScrollend: (() => void) | null = null
         const id = setTimeout(() => {
-            const el = document.querySelector<HTMLElement>(`[data-song-id="${songId}"]`)
+            const el = document.querySelector<HTMLElement>(target)
             if (!el) return
+            const flash = () => {
+                el.style.animation = 'none'
+                void el.offsetWidth // force reflow so re-applying same animation restarts it
+                el.style.animation = 'song-highlight 1.5s ease-out forwards'
+                el.addEventListener('animationend', () => { el.style.animation = '' }, { once: true })
+            }
+            // If scrollend isn't supported, flash immediately after kicking off scroll.
+            const supportsScrollend = 'onscrollend' in window
             el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-            el.style.animation = 'song-highlight 1.5s ease-out forwards'
-            el.addEventListener('animationend', () => { el.style.animation = '' }, { once: true })
+            if (supportsScrollend) {
+                const onScrollEnd = () => { flash(); window.removeEventListener('scrollend', onScrollEnd) }
+                window.addEventListener('scrollend', onScrollEnd, { once: true })
+                cleanupScrollend = () => window.removeEventListener('scrollend', onScrollEnd)
+            } else {
+                flash()
+            }
         }, 300)
-        return () => clearTimeout(id)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [])
+        return () => { clearTimeout(id); cleanupScrollend?.() }
+    }, [searchParams, viewMode])
 
-    // update URL letter + active sidebar highlight as user scrolls through sections
+    // track active letter: last section whose header has scrolled to/past the sticky bar bottom
     useEffect(() => {
         if (viewMode === 'playlists') return
-        const entries = Object.entries(sectionRefs.current).filter(([, el]) => el != null)
-        if (entries.length === 0) return
         let rafId: number | null = null
-        const obs = new IntersectionObserver(changes => {
-            for (const c of changes) {
-                if (c.isIntersecting) {
-                    const key = (c.target as HTMLElement).dataset.letter
-                    if (!key) continue
-                    if (rafId) cancelAnimationFrame(rafId)
-                    rafId = requestAnimationFrame(() => {
-                        setActiveLetter(key)
-                    })
+        const handler = () => {
+            if (rafId) cancelAnimationFrame(rafId)
+            rafId = requestAnimationFrame(() => {
+                const navBottom = document.querySelector('nav')?.getBoundingClientRect().bottom ?? 0
+                const headerBottom = stickyHeaderRef.current?.getBoundingClientRect().bottom ?? 0
+                const threshold = Math.max(navBottom, headerBottom, 0) + 4
+                const keys = viewMode === 'genres'
+                    ? [...genreGrouped.keys()].map(g => ({ key: letterKey(g), el: sectionRefs.current[g] }))
+                    : ALPHABET.map(l => ({ key: l, el: sectionRefs.current[l] }))
+                let active: string | null = null
+                for (const { key, el } of keys) {
+                    if (!el) continue
+                    if (el.getBoundingClientRect().top <= threshold) active = key
+                    else break
                 }
-            }
-        }, { rootMargin: '-20% 0px -70% 0px' })
-        entries.forEach(([, el]) => el && obs.observe(el))
-        return () => { obs.disconnect(); if (rafId) cancelAnimationFrame(rafId); setActiveLetter(null) }
+                if (active) setActiveLetter(active)
+            })
+        }
+        window.addEventListener('scroll', handler, { passive: true })
+        handler()
+        return () => { window.removeEventListener('scroll', handler); if (rafId) cancelAnimationFrame(rafId); setActiveLetter(null) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [viewMode, songGrouped, albumGrouped, genreGrouped])
 
@@ -512,8 +552,10 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     }
 
     function playAll() {
-        const ctx = { ...VIEW_CONTEXT[viewMode], id: viewMode === 'songs' ? 'library' : viewMode }
+        const baseCtx = VIEW_CONTEXT[viewMode]
+        const ctx = { ...baseCtx, id: viewMode === 'songs' ? 'library' : viewMode }
         if (viewMode === 'albums') {
+            // Albums: source = album view (not per-song), keep generic ctx
             const allAlbumSongs = [...albumGrouped.values()].flat().flatMap(a => a.songs)
             const first = allAlbumSongs[0]
             if (!first?.properties) return
@@ -522,15 +564,16 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         } else {
             const first = allSortedSongs[0]
             if (!first?.properties) return
-            const queue = allSortedSongs.filter(s => s.properties).map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached, source: ctx }))
-            play({ uuid: first.uuid, properties: first.properties, last_position: first.last_position, last_played_at: first.last_played_at, artwork_cached: first.artwork_cached, source: ctx }, queue, ctx)
+            const queue = allSortedSongs.filter(s => s.properties).map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached, source: { ...ctx, href: withSong(baseCtx.href, s.uuid) } }))
+            play({ uuid: first.uuid, properties: first.properties, last_position: first.last_position, last_played_at: first.last_played_at, artwork_cached: first.artwork_cached, source: { ...ctx, href: withSong(baseCtx.href, first.uuid) } }, queue, ctx)
         }
     }
 
     function playAlbum(album: LibraryAlbum) {
         const first = album.songs[0]
         if (!first?.properties) return
-        const ctx = { label: album.collectionName, href: `${routes.library}?view=albums`, id: `album:${album.collectionId}` }
+        // Album source = link to that album in albums view (not per-song)
+        const ctx = { label: album.collectionName, href: `${routes.library}?view=albums&album=${album.collectionId}`, id: `album:${album.collectionId}` }
         const queue = album.songs.filter(s => s.properties).map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached, source: ctx }))
         play({ uuid: first.uuid, properties: first.properties, last_position: first.last_position, last_played_at: first.last_played_at, artwork_cached: first.artwork_cached, source: ctx }, queue, ctx)
     }
@@ -550,13 +593,17 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         setBulkPlaylistPicking(false)
     }
 
+    function selectAllSongs() {
+        const allIds = [...songGrouped.values()].flat().map(s => s.uuid)
+        setSelectedIds(new Set(allIds))
+    }
+
     useEffect(() => {
         if (!selectMode) return
         function onKeyDown(e: KeyboardEvent) {
             if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
                 e.preventDefault()
-                const allIds = [...songGrouped.values()].flat().map(s => s.uuid)
-                setSelectedIds(new Set(allIds))
+                selectAllSongs()
             } else if (e.key === 'Escape') {
                 exitSelectMode()
             }
@@ -721,8 +768,10 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
 
     return (
         <div ref={listContainerRef} className={`relative pr-7${selectMode ? ' select-none' : ''}`}>
+            {/* Sticky header: toolbar + banners */}
+            <div ref={stickyHeaderRef} className="md:sticky md:top-11 md:z-40 md:-mx-6 md:px-6 md:bg-[var(--background)]/90 md:backdrop-blur-md md:border-b border-gray-100 dark:border-gray-800 md:pt-2">
             {online && syncPromptIds.length > 0 && (
-                <div className="mb-3 px-3 py-2 rounded-lg bg-sky-50 dark:bg-sky-950/30 border border-sky-200 dark:border-sky-800 text-sky-700 dark:text-sky-400 text-xs flex items-center justify-between gap-3">
+                <div className="mb-2 mt-2 px-3 py-2 rounded-lg bg-sky-50 dark:bg-sky-950/30 border border-sky-200 dark:border-sky-800 text-sky-700 dark:text-sky-400 text-xs flex items-center justify-between gap-3">
                     <span>{syncPromptIds.length} song{syncPromptIds.length !== 1 ? 's' : ''} saved offline on another device</span>
                     <div className="flex gap-2 shrink-0">
                         <button onClick={() => setOfflineSyncModalOpen(true)} className="font-medium underline underline-offset-2 hover:no-underline">View</button>
@@ -731,7 +780,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                 </div>
             )}
             {failedIds.size > 0 && (
-                <div className="mb-3 px-3 py-2 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-xs flex items-center justify-between gap-3">
+                <div className="mb-2 mt-2 px-3 py-2 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-xs flex items-center justify-between gap-3">
                     <span>{failedIds.size} song{failedIds.size !== 1 ? 's' : ''} failed to download offline</span>
                     <div className="flex gap-2 shrink-0">
                         <button onClick={retryFailed} className="font-medium underline underline-offset-2 hover:no-underline">Retry</button>
@@ -739,21 +788,35 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                     </div>
                 </div>
             )}
-            {/* Fixed Select button */}
+            {/* Fixed Select button(s) */}
             {viewMode === 'songs' && (
-                <button
-                    onClick={selectMode ? exitSelectMode : () => enterSelectMode()}
-                    className={`fixed top-14 right-4 z-40 flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors border ${selectMode ? 'bg-sky-500 text-white border-sky-500' : 'bg-white/90 dark:bg-gray-950/90 backdrop-blur-md text-gray-400 hover:text-sky-500 border-gray-200 dark:border-gray-800 hover:border-sky-500'}`}
-                >
-                    {selectMode
-                        ? selectedIds.size > 0
-                            ? `${selectedIds.size} selected`
-                            : 'Cancel'
-                        : 'Select'}
-                </button>
+                <div className="fixed top-14 right-4 z-40 flex items-center gap-2">
+                    {selectMode && (() => {
+                        const totalSongs = [...songGrouped.values()].flat().length
+                        const allSelected = selectedIds.size > 0 && selectedIds.size === totalSongs
+                        return (
+                            <button
+                                onClick={() => allSelected ? setSelectedIds(new Set()) : selectAllSongs()}
+                                className="flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors border bg-[var(--background)]/90 backdrop-blur-md text-gray-400 hover:text-sky-500 border-gray-200 dark:border-gray-800 hover:border-sky-500 min-h-[36px]"
+                            >
+                                {allSelected ? 'Deselect all' : 'Select all'}
+                            </button>
+                        )
+                    })()}
+                    <button
+                        onClick={selectMode ? exitSelectMode : () => enterSelectMode()}
+                        className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors border min-h-[36px] ${selectMode ? 'bg-sky-500 text-white border-sky-500' : 'bg-[var(--background)]/90 backdrop-blur-md text-gray-400 hover:text-sky-500 border-gray-200 dark:border-gray-800 hover:border-sky-500'}`}
+                    >
+                        {selectMode
+                            ? selectedIds.size > 0
+                                ? `${selectedIds.size} selected`
+                                : 'Cancel'
+                            : 'Select'}
+                    </button>
+                </div>
             )}
             {/* Toolbar */}
-            <div className="flex flex-wrap gap-3 items-center mb-2 py-1">
+            <div className="flex flex-wrap gap-3 items-center mb-2 py-2">
                 <button
                     onClick={playAll}
                     className="flex items-center gap-1.5 px-3 py-1 bg-sky-500 hover:bg-sky-400 text-white rounded-full text-sm font-medium transition-colors"
@@ -793,6 +856,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                     ))}
                 </div>
             </div>
+            </div>{/* end sticky header */}
 
             {/* Playlists view */}
             {viewMode === 'playlists' && (
@@ -803,7 +867,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
             {viewMode === 'albums'
                 ? sortLetterEntries([...albumGrouped.entries()]).map(([letter, albums]) => (
                     <div key={letter} ref={el => { sectionRefs.current[letter] = el }} data-letter={letter} className="scroll-mt-24 cv-auto">
-                        <div className="sticky top-24 z-30 bg-background px-1 py-0.5 mb-1">
+                        <div className="md:sticky md:top-24 z-30 bg-background px-1 py-0.5 mb-1">
                             <span className="text-xs font-bold text-sky-500 tracking-widest">{letter}</span>
                         </div>
                         <div className={isDesktop
@@ -811,14 +875,15 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                             : "flex flex-col mb-4"
                         }>
                             {albums.map(album => (
+                                <div key={album.collectionId} data-album-id={album.collectionId}>
                                 <AlbumCard
-                                    key={album.collectionId}
                                     album={album}
                                     isCompact={!isDesktop}
                                     isActive={playContext?.id === `album:${album.collectionId}`}
                                     isPlaying={isPlaying}
                                     onClick={() => playAlbum(album)}
                                 />
+                                </div>
                             ))}
                         </div>
                     </div>
@@ -826,7 +891,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                 : viewMode === 'genres'
                 ? [...genreGrouped.entries()].map(([genre, group]) => (
                     <div key={genre} ref={el => { sectionRefs.current[genre] = el }} data-letter={letterKey(genre)} className="scroll-mt-24 cv-auto">
-                        <div className="sticky top-24 z-30 bg-background px-1 py-0.5 mb-1">
+                        <div className="md:sticky md:top-24 z-30 bg-background px-1 py-0.5 mb-1">
                             <span className="text-sm font-bold text-sky-500">{genre}</span>
                             <span className="ml-2 text-xs text-gray-400">{group.length}</span>
                         </div>
@@ -841,12 +906,13 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                     selected={current?.uuid === song.uuid}
                                     onClick={() => {
                                         if (!song.properties) return
-                                        const ctx = { label: genre, href: `${routes.library}?view=genres`, id: `genre:${genre}` }
+                                        const baseHref = `${routes.library}?view=genres`
+                                        const ctx = { label: genre, href: baseHref, id: `genre:${genre}` }
                                         const queue = group
                                             .filter(s => s.properties)
-                                            .map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached, source: ctx }))
+                                            .map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached, source: { ...ctx, href: withSong(baseHref, s.uuid) } }))
                                         play(
-                                            { uuid: song.uuid, properties: song.properties, last_position: song.last_position, last_played_at: song.last_played_at, artwork_cached: song.artwork_cached, source: ctx },
+                                            { uuid: song.uuid, properties: song.properties, last_position: song.last_position, last_played_at: song.last_played_at, artwork_cached: song.artwork_cached, source: { ...ctx, href: withSong(baseHref, song.uuid) } },
                                             queue,
                                             ctx
                                         )
@@ -874,7 +940,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                 ))
                 : sortLetterEntries([...songGrouped.entries()]).map(([letter, group]) => (
                     <div key={letter} ref={el => { sectionRefs.current[letter] = el }} data-letter={letter} className="scroll-mt-24 cv-auto">
-                        <div className="sticky top-24 z-30 bg-background px-1 py-0.5 mb-1">
+                        <div className="md:sticky md:top-24 z-30 bg-background px-1 py-0.5 mb-1">
                             <span className="text-xs font-bold text-sky-500 tracking-widest">{letter}</span>
                         </div>
                         <div className={isDesktop
@@ -892,12 +958,13 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                             handleSelect(song.uuid, e?.shiftKey)
                                             return
                                         }
-                                        const ctx = { ...VIEW_CONTEXT[viewMode], id: viewMode === 'songs' ? 'library' : viewMode }
+                                        const baseCtx = VIEW_CONTEXT[viewMode]
+                                        const ctx = { ...baseCtx, id: viewMode === 'songs' ? 'library' : viewMode }
                                         const queue = allSortedSongs
                                             .filter(s => s.properties)
-                                            .map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached, source: ctx }))
+                                            .map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached, source: { ...ctx, href: withSong(baseCtx.href, s.uuid) } }))
                                         play(
-                                            { uuid: song.uuid, properties: song.properties, last_position: song.last_position, last_played_at: song.last_played_at, artwork_cached: song.artwork_cached, source: ctx },
+                                            { uuid: song.uuid, properties: song.properties, last_position: song.last_position, last_played_at: song.last_played_at, artwork_cached: song.artwork_cached, source: { ...ctx, href: withSong(baseCtx.href, song.uuid) } },
                                             queue,
                                             ctx
                                         )

@@ -269,4 +269,66 @@ test.describe('library page', () => {
         await page.waitForTimeout(500)
         expect(dialogFired).toBe(true)
     })
+
+    // === Tier 2 per-song deep-linking (smooth scroll + highlight) ===
+
+    test('?song=<uuid> scrolls to matching song card and applies highlight animation', async ({ page }) => {
+        await page.goto(routes.library)
+        const card = page.getByTestId('song-card').first()
+        await expect(card).toBeVisible({ timeout: 10000 })
+
+        const songId = await card.getAttribute('data-song-id')
+        expect(songId).toBeTruthy()
+
+        // Navigate to library with ?song param
+        await page.goto(`/library?song=${songId}`)
+        await page.waitForTimeout(500)
+
+        // Find the matching card by data-song-id
+        const targetCard = page.locator(`[data-song-id="${songId}"]`).first()
+        await expect(targetCard).toBeVisible({ timeout: 5000 })
+
+        // Check that the card is in viewport
+        const inViewport = await targetCard.evaluate((el) => {
+            const rect = el.getBoundingClientRect()
+            return rect.top >= 0 && rect.top < window.innerHeight
+        })
+        expect(inViewport).toBe(true)
+
+        // Check that song-highlight animation is applied to the card
+        const animationStyle = await targetCard.evaluate((el) => {
+            return window.getComputedStyle(el).animation
+        })
+        expect(animationStyle).toContain('song-highlight')
+    })
+
+    test('?album=<id> scrolls to matching album and applies highlight animation', async ({ page }) => {
+        await page.goto(routes.libraryAlbums)
+        const albumBtn = page.locator('[data-album-id]').first()
+        await expect(albumBtn).toBeVisible({ timeout: 10000 })
+
+        const albumId = await albumBtn.getAttribute('data-album-id')
+        expect(albumId).toBeTruthy()
+
+        // Navigate to albums view with ?album param
+        await page.goto(`/library?view=albums&album=${albumId}`)
+        await page.waitForTimeout(500)
+
+        // Find the matching album element
+        const targetAlbum = page.locator(`[data-album-id="${albumId}"]`).first()
+        await expect(targetAlbum).toBeVisible({ timeout: 5000 })
+
+        // Check viewport
+        const inViewport = await targetAlbum.evaluate((el) => {
+            const rect = el.getBoundingClientRect()
+            return rect.top >= 0 && rect.top < window.innerHeight
+        })
+        expect(inViewport).toBe(true)
+
+        // Check animation
+        const animationStyle = await targetAlbum.evaluate((el) => {
+            return window.getComputedStyle(el).animation
+        })
+        expect(animationStyle).toContain('song-highlight')
+    })
 })

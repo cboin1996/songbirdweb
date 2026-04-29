@@ -582,6 +582,7 @@ export interface PlayerState {
   shuffle_position?: number
   manual_next?: string[]
   current_song_uuid?: string | null
+  queue_sources?: Record<string, { id: string; label: string; href: string }>
 }
 
 export async function fetchPlayerState(): Promise<PlayerState | undefined> {

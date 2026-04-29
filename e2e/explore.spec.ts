@@ -160,4 +160,31 @@ test.describe('explore page', () => {
         const html = await page.locator('main').innerText()
         expect(html).toMatch(re)
     })
+
+    // === Tier 2 per-song deep-linking (explore context) ===
+
+    test('explore: player link includes ?window=...&sort=...&song=<uuid>', async ({ page }) => {
+        // Navigate to explore with specific window and sort params
+        await page.goto('/explore?window=all&sort=plays')
+        await page.waitForTimeout(2000)
+
+        const cards = page.getByTestId('song-card')
+        if (await cards.count() === 0) {
+            test.skip()
+        }
+
+        const card = cards.first()
+        const songId = await card.getAttribute('data-song-id')
+        expect(songId).toBeTruthy()
+
+        await card.click()
+        await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
+
+        // Check the context link includes explore params + song UUID
+        const link = page.locator('a[href*="explore"]').first()
+        const href = await link.getAttribute('href')
+        expect(href).toContain('window=all')
+        expect(href).toContain('sort=plays')
+        expect(href).toContain(`song=${songId}`)
+    })
 })

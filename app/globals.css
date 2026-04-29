@@ -14,13 +14,13 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
+    --background: #030712; /* Tailwind gray-950 — matches sticky navbar/header backdrops */
     --foreground: #ededed;
   }
 }
 
-html, body {
-  overflow-x: hidden;
+html {
+  overflow-x: clip;
 }
 
 body {
