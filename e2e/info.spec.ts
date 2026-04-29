@@ -11,7 +11,8 @@ test.describe('info page', () => {
 
     test('info page accessible via navbar link', async ({ page }) => {
         await page.goto('/download')
-        const infoLink = page.locator('a[href="/info"]')
+        // Navbar may render link in compact + mobile contexts; use first match.
+        const infoLink = page.locator('a[href="/info"]').first()
         await expect(infoLink).toBeVisible({ timeout: 5000 })
         await infoLink.click()
         await expect(page).toHaveURL(/\/info/)

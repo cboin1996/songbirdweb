@@ -97,7 +97,27 @@ For tests that need a *clean* library, run `ENV=dev make dev-wipe` in songbirdap
 
 Tests document the broken behavior — a `.skip()` or `xfail` marks something for follow-up. Bug fixes go in *separate* PRs, not the test PR.
 
-(populated as we triage)
+### Real source bugs found by the harness
+
+| Severity | Test | File:line | Symptom | Likely fix |
+|---|---|---|---|---|
+| MED | `Album button switches to /download/album` | `e2e/download.spec.ts:31` | Clicking the album button on `/download` lands on `/download?mode=album` instead of `/download/album?mode=album`. Two `router.replace` calls in `Search` component race (`handleModeChange` + `useEffect` on `mode` change). | Drop the `useEffect`-driven replace; do all URL updates inside `handleModeChange`. |
+
+### Tests blocked on missing UI / refactor
+
+Marked `test.fixme()` — tests describe intended behavior but the helper or selector doesn't exist:
+
+- `bulk-select.spec.ts` — "exit select mode by clicking Cancel", "bulk add to playlist". Select mode is entered via long-press on a song card (no "Select" button). Need to drive a touch long-press in Playwright.
+- `editor.spec.ts` — "opens editor modal for Jolene", "sliders are interactive". Helper `openEditorForJolene` uses iTunes search flow (network dep + fragile kebab `title="more"`). Refactor to open editor from a song already in the user's library.
+- `import.spec.ts` — "removing a row works". Import history rows have no remove button (server-persisted jobs).
+- `offline.spec.ts` — "library loads cached songs when offline". SW is disabled in dev (`sw-register.tsx`). Test requires production build.
+
+### Watch list (flaky / timing-sensitive)
+
+- `info.spec.ts` "info page accessible via navbar link" — sometimes `a[href="/info"]` matches multiple; use `.first()` (already done).
+- `library.spec.ts:24` "artists tab updates URL" — bumped timeout, may still be flaky.
+- `playlist.spec.ts:33` "create playlist via UI then verify via API" — UI tile rendering can lag the API response; we now poll the API first then assert UI.
+- `share.spec.ts:17` "Link copied!" — depends on backend share-token POST round-trip.
 
 ## Conventions
 

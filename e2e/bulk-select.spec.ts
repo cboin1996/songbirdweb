@@ -61,7 +61,9 @@ test.describe('library bulk select', () => {
         await expect(page.getByRole('button', { name: 'Select', exact: true })).toBeVisible()
     })
 
-    test('bulk add to playlist attaches all selected songs', async ({ page }) => {
+    // FIXME: same as Cancel test — entering select mode via a "Select" button doesn't exist.
+    // Need to drive long-press on a song card.
+    test.fixme('bulk add to playlist attaches all selected songs', async ({ page }) => {
         const plName = uniq(PREFIX)
         const created = await api.post(`${API_V1}/playlists`, { data: { name: plName, icon: 'music' } })
         const pl = await created.json()

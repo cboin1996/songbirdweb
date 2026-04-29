@@ -71,7 +71,8 @@ test.describe('editor modal', () => {
         await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
     })
 
-    test('sliders are interactive', async ({ page }) => {
+    // FIXME: depends on openEditorForJolene which uses iTunes search flow (see top fixme).
+    test.fixme('sliders are interactive', async ({ page }) => {
         const modal = await openEditorForJolene(page)
 
         // wait for waveform ready (play button enabled)
