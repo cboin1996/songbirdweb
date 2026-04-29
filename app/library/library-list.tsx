@@ -120,6 +120,14 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     const [offlineReady, setOfflineReady] = useState(false)
     const [savingAll, setSavingAll] = useState(false)
     const [saveAllProgress, setSaveAllProgress] = useState({ done: 0, total: 0 })
+
+    // Warn before unloading while a save-all is in progress.
+    useEffect(() => {
+        if (!savingAll) return
+        const handler = (e: BeforeUnloadEvent) => { e.preventDefault() }
+        window.addEventListener('beforeunload', handler)
+        return () => window.removeEventListener('beforeunload', handler)
+    }, [savingAll])
     const [failedIds, setFailedIds] = useState<Set<string>>(new Set())
     const [syncPromptIds, setSyncPromptIds] = useState<string[]>([])
     const [playlists, setPlaylists] = useState<Playlist[]>([])
