@@ -1,4 +1,4 @@
-const SHELL_CACHE = 'songbird-shell-v4'
+const SHELL_CACHE = 'songbird-shell-v5'
 const ARTWORK_CACHE = 'songbird-artwork-v1'
 
 self.addEventListener('install', event => {
@@ -45,6 +45,21 @@ self.addEventListener('fetch', event => {
                     }
                     return Response.error()
                 })
+            })
+        )
+        return
+    }
+
+    // Static JS/CSS chunks: cache-first (content-addressed in prod, safe to cache forever)
+    if (url.pathname.startsWith('/_next/static/')) {
+        event.respondWith(
+            caches.open(SHELL_CACHE).then(async cache => {
+                const cached = await cache.match(event.request)
+                if (cached) return cached
+                return fetch(event.request).then(r => {
+                    if (r.ok) cache.put(event.request, r.clone())
+                    return r
+                }).catch(() => Response.error())
             })
         )
         return
