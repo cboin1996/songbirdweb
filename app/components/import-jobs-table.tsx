@@ -35,6 +35,10 @@ export default function ImportJobsTable({
 
   useImperativeHandle(tableRef, () => ({
     addJob(job: ImportJobResult, replaceId?: string) {
+      if (replaceId) {
+        const stale = intervalsRef.current.get(replaceId)
+        if (stale) { clearInterval(stale); intervalsRef.current.delete(replaceId) }
+      }
       setJobs(prev => {
         if (replaceId) {
           const idx = prev.findIndex(j => j.job_id === replaceId)
@@ -154,7 +158,7 @@ export default function ImportJobsTable({
             <thead>
               <tr className="text-left text-gray-400 border-b border-gray-200 dark:border-gray-700">
                 <th className="pb-2 pr-4 font-medium">date</th>
-                <th className="pb-2 pr-4 font-medium">file</th>
+                <th className="pb-2 pr-4 font-medium">song</th>
                 <th className="pb-2 pr-4 font-medium">status</th>
                 <th className="pb-2 font-medium">info</th>
               </tr>
@@ -165,8 +169,9 @@ export default function ImportJobsTable({
                   <td className="py-2 pr-4 text-gray-400 whitespace-nowrap text-xs">
                     {job.created_at ? new Date(job.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
                   </td>
-                  <td className="py-2 pr-4 max-w-xs truncate">
-                    {job.track_name ?? job.filename ?? <span className="text-gray-400 font-mono text-xs">{job.job_id.slice(0, 8)}…</span>}
+                  <td className="py-2 pr-4 max-w-xs">
+                    <div className="truncate">{job.track_name ?? <span className="text-gray-400">importing…</span>}</div>
+                    {job.filename && <div className="truncate text-xs text-gray-400">{job.filename}</div>}
                   </td>
                   <td className="py-2 pr-4">{statusBadge(job)}</td>
                   <td className="py-2">{infoCell(job)}</td>
