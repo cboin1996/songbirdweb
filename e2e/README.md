@@ -119,6 +119,21 @@ Marked `test.fixme()` — tests describe intended behavior but the helper or sel
 - `playlist.spec.ts:33` "create playlist via UI then verify via API" — UI tile rendering can lag the API response; we now poll the API first then assert UI.
 - `share.spec.ts:17` "Link copied!" — depends on backend share-token POST round-trip.
 
+## Status snapshot (last triage pass)
+
+Against the `keebox-beta-1` baseline:
+
+- ~47 passing, ~13 marked `.fixme()`, several flakies on the watch list
+- 1 real source bug surfaced (`Search` component double-replace race — see punch list)
+- `did not run` count is high because Playwright skips dependent tests after a worker fails; resolving the flakies should unstick most of those
+
+To get the most reliable run locally:
+
+```bash
+# Single-worker run avoids dev-server contention under parallelism
+npx playwright test --workers=1 --reporter=line
+```
+
 ## Conventions
 
 - One `describe` per spec, `beforeEach` for per-test setup (login)
