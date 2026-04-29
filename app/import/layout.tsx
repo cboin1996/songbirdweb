@@ -1,5 +1,4 @@
 import NavBar from "../components/navbar";
-import { Suspense } from "react";
 import { fetchCurrentUser } from "../lib/data";
 import { UserProvider } from "../lib/user-context";
 import OfflineGuard from "../components/offline-guard";
@@ -10,9 +9,7 @@ export default async function Layout({ children }: { children: React.ReactNode }
         <UserProvider isAdmin={user?.role === 'admin'} username={user?.username ?? ''}>
             <NavBar />
             <OfflineGuard feature="import">
-                <Suspense>
-                    {children}
-                </Suspense>
+                {children}
             </OfflineGuard>
         </UserProvider>
     )

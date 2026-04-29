@@ -1,5 +1,5 @@
 'use client'
-import { memo, useEffect, useMemo, useRef, useState } from "react"
+import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import Image from "next/image"
 import { useRouter, useSearchParams } from "next/navigation"
 import { LibrarySong, Playlist, EligibleSong, artworkUrl, songArtworkUrl, fetchLibrarySongs, fetchPlaylists, fetchPlaylistSongs, fetchEligibleSongs, fetchDrafts, publishSongs, removeFromLibrary, downloadSongToFile, addSongToPlaylist, bulkRemoveFromLibrary, bulkAddSongsToPlaylist, syncOfflineSongs, addServerOfflineSong, removeServerOfflineSong, clearServerOfflineSongs } from "../lib/data"
@@ -26,16 +26,16 @@ interface LibraryAlbum {
     songs: LibrarySong[]
 }
 
+function _subscribeDesktop(cb: () => void) {
+    const mq = window.matchMedia('(min-width: 768px)')
+    mq.addEventListener('change', cb)
+    return () => mq.removeEventListener('change', cb)
+}
+function _getDesktopSnapshot() { return window.matchMedia('(min-width: 768px)').matches }
+function _getDesktopServerSnapshot() { return false }
+
 function useIsDesktop() {
-    const [isDesktop, setIsDesktop] = useState(false)
-    useEffect(() => {
-        const mq = window.matchMedia('(min-width: 768px)')
-        setIsDesktop(mq.matches)
-        const handler = (e: MediaQueryListEvent) => setIsDesktop(e.matches)
-        mq.addEventListener('change', handler)
-        return () => mq.removeEventListener('change', handler)
-    }, [])
-    return isDesktop
+    return useSyncExternalStore(_subscribeDesktop, _getDesktopSnapshot, _getDesktopServerSnapshot)
 }
 
 function letterKey(str: string): string {
@@ -435,14 +435,35 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         setScrubLetter(null)
     }
 
-    // restore letter position on mount
+    // restore scroll position for current view from sessionStorage
     useEffect(() => {
-        const letter = searchParams.get('letter')
-        if (!letter) return
-        const id = setTimeout(() => scrollTo(letter), 150)
+        const saved = sessionStorage.getItem(`library-scroll-${viewMode}`)
+        const y = saved ? parseInt(saved, 10) : 0
+        if (isNaN(y)) return
+        const id = setTimeout(() => window.scrollTo(0, y), 150)
         return () => clearTimeout(id)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [])
+    }, [viewMode])
+
+    // default activeLetter to first present letter when content fits in viewport (nothing to scroll)
+    useEffect(() => {
+        if (activeLetter) return
+        if (document.documentElement.scrollHeight > document.documentElement.clientHeight) return
+        const first = ALPHABET.find(l => presentLetters.has(l)) ?? null
+        if (first) setActiveLetter(first)
+    }, [presentLetters]) // eslint-disable-line react-hooks/exhaustive-deps
+
+    // save scroll position per view to sessionStorage (debounced)
+    useEffect(() => {
+        let timer: ReturnType<typeof setTimeout>
+        const handler = () => {
+            clearTimeout(timer)
+            timer = setTimeout(() => {
+                sessionStorage.setItem(`library-scroll-${viewMode}`, String(window.scrollY))
+            }, 200)
+        }
+        window.addEventListener('scroll', handler, { passive: true })
+        return () => { window.removeEventListener('scroll', handler); clearTimeout(timer) }
+    }, [viewMode])
 
     // scroll to and highlight a specific song on mount (?song=<uuid>)
     useEffect(() => {
@@ -473,10 +494,6 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                     if (rafId) cancelAnimationFrame(rafId)
                     rafId = requestAnimationFrame(() => {
                         setActiveLetter(key)
-                        const p = new URLSearchParams(window.location.search)
-                        if (p.get('letter') === key) return
-                        p.set('letter', key)
-                        window.history.replaceState(null, '', `?${p.toString()}`)
                     })
                 }
             }
@@ -980,8 +997,8 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                 <div className="fixed right-0 top-1/2 -translate-y-1/2 z-50 flex items-center">
                     {/* scrub bubble */}
                     {scrubLetter && (
-                        <div className="mr-1 w-10 h-10 rounded-full bg-gray-800 dark:bg-gray-200 flex items-center justify-center shadow-lg pointer-events-none">
-                            <span className="text-lg font-bold text-white dark:text-gray-900 leading-none">{scrubLetter}</span>
+                        <div className="mr-1 w-10 h-10 rounded-full bg-gray-500 dark:bg-gray-700 flex items-center justify-center shadow-lg pointer-events-none">
+                            <span className="text-lg font-bold text-white leading-none">{scrubLetter}</span>
                         </div>
                     )}
                     <div
@@ -995,12 +1012,12 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                         {ALPHABET.map(letter => (
                             <span
                                 key={letter}
-                                className={`text-[10px] font-semibold w-7 h-5 flex items-center justify-center leading-none transition-colors ${
+                                className={`w-7 h-5 md:w-8 md:h-6 flex items-center justify-center leading-none transition-colors ${
                                     letter === (scrubLetter ?? activeLetter)
-                                        ? 'text-gray-500 dark:text-gray-400'
+                                        ? 'text-sm md:text-base font-bold text-sky-500'
                                         : presentLetters.has(letter)
-                                            ? 'text-sky-500'
-                                            : 'text-gray-200 dark:text-gray-700'
+                                            ? 'text-[10px] md:text-xs font-semibold text-sky-400 dark:text-sky-500'
+                                            : 'text-[10px] md:text-xs font-semibold text-gray-200 dark:text-gray-700'
                                 }`}
                             >
                                 {letter}

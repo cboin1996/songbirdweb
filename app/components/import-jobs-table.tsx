@@ -29,6 +29,7 @@ export default function ImportJobsTable({
   const [total, setTotal] = useState(initialTotal)
   const [counts, setCounts] = useState<Record<string, number>>(initialCounts ?? {})
   const [filter, setFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState<string | null>(null)
   const [page, setPage] = useState(0)
   const [loading, setLoading] = useState(false)
   // Session in-flight tracking — survives pagination/filter changes.
@@ -126,14 +127,15 @@ export default function ImportJobsTable({
   }
 
   const filtered = useMemo(() => {
-    if (!filter.trim()) return jobs
+    let result = statusFilter ? jobs.filter(j => j.status === statusFilter) : jobs
+    if (!filter.trim()) return result
     const q = filter.trim().toLowerCase()
-    return jobs.filter(j =>
+    return result.filter(j =>
       (j.track_name ?? '').toLowerCase().includes(q) ||
       (j.filename ?? '').toLowerCase().includes(q) ||
       j.status.toLowerCase().includes(q)
     )
-  }, [jobs, filter])
+  }, [jobs, filter, statusFilter])
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
@@ -163,7 +165,7 @@ export default function ImportJobsTable({
     if (job.status === 'duplicate' && job.duplicate_of)
       return (
         <Link href={`${routes.library}?song=${job.duplicate_of}`} className="text-amber-500 text-xs hover:underline">
-          view existing
+          original added
         </Link>
       )
     if (job.status === 'done' && job.song_id)
@@ -181,19 +183,31 @@ export default function ImportJobsTable({
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-gray-400 text-sm font-medium uppercase tracking-wide">Import history</span>
           {(counts.done ?? 0) > 0 && (
-            <span className="text-xs px-2 py-0.5 rounded-full bg-green-50 dark:bg-green-950/30 text-green-600 dark:text-green-400 border border-green-200 dark:border-green-900">
-              {counts.done} done
-            </span>
+            <button
+              data-testid="filter-done"
+              onClick={() => setStatusFilter(s => s === 'done' ? null : 'done')}
+              className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${statusFilter === 'done' ? 'bg-green-500 text-white border-green-500' : 'bg-green-50 dark:bg-green-950/30 text-green-600 dark:text-green-400 border-green-200 dark:border-green-900 hover:border-green-400'}`}
+            >
+              {counts.done} done{statusFilter === 'done' ? ' ×' : ''}
+            </button>
           )}
           {(counts.duplicate ?? 0) > 0 && (
-            <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-900">
-              {counts.duplicate} duplicate
-            </span>
+            <button
+              data-testid="filter-duplicate"
+              onClick={() => setStatusFilter(s => s === 'duplicate' ? null : 'duplicate')}
+              className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${statusFilter === 'duplicate' ? 'bg-amber-500 text-white border-amber-500' : 'bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-900 hover:border-amber-400'}`}
+            >
+              {counts.duplicate} duplicate{statusFilter === 'duplicate' ? ' ×' : ''}
+            </button>
           )}
           {(counts.failed ?? 0) > 0 && (
-            <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-900">
-              {counts.failed} failed
-            </span>
+            <button
+              data-testid="filter-failed"
+              onClick={() => setStatusFilter(s => s === 'failed' ? null : 'failed')}
+              className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${statusFilter === 'failed' ? 'bg-red-500 text-white border-red-500' : 'bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 border-red-200 dark:border-red-900 hover:border-red-400'}`}
+            >
+              {counts.failed} failed{statusFilter === 'failed' ? ' ×' : ''}
+            </button>
           )}
         </div>
         <SearchInput

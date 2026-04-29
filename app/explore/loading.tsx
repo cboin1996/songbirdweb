@@ -21,7 +21,7 @@ function SectionSkeleton({ label, count = 4 }: { label: string; count?: number }
 
 export default function Loading() {
     return (
-        <main className="p-4">
+        <div className="p-4">
             {/* toolbar skeleton */}
             <div className="sticky top-11 z-40 bg-white/90 dark:bg-gray-950/90 py-3 flex flex-col gap-3 border-b border-gray-100 dark:border-gray-800 mb-6">
                 <div className="h-8 w-full md:w-80 rounded-lg bg-gray-100 dark:bg-gray-800 animate-pulse" />
@@ -37,6 +37,6 @@ export default function Loading() {
                 <SectionSkeleton label="recently added" count={4} />
                 <SectionSkeleton label="your most played" count={4} />
             </div>
-        </main>
+        </div>
     )
 }
