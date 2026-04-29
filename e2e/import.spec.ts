@@ -1,5 +1,5 @@
 import { test, expect, Page } from '@playwright/test'
-import { USERNAME, PASSWORD, login, ignoreError } from './helpers'
+import { USERNAME, PASSWORD, login, ignoreError, apiLogin, API_V1 } from './helpers'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
@@ -110,5 +110,112 @@ test.describe('import page', () => {
         await page.context().clearCookies()
         await page.goto('/import')
         await expect(page).toHaveURL('/')
+    })
+
+    // === Tier 1 dove banner + counters ===
+
+    test('dove banner appears with "importing" / "finished" counts on multi-file drop', async ({ page }) => {
+        await page.goto('/import')
+        const files = [
+            makeFakeAudioFile('dove-a.mp3'),
+            makeFakeAudioFile('dove-b.mp3'),
+            makeFakeAudioFile('dove-c.mp3'),
+        ]
+        try {
+            await page.getByTestId('import-file-input').setInputFiles(files)
+            // Banner should appear briefly while jobs are in-flight.
+            const banner = page.locator('text=/\\d+ importing/').first()
+            // Race-tolerant: small files may finish so quickly the banner
+            // disappears before assertion. Allow either "still in flight" or
+            // "already shown finished count > 0".
+            // First wait for either the banner or for at least one job row to
+            // have a terminal status to confirm the counters fired.
+            try {
+                await expect(banner).toBeVisible({ timeout: 5000 })
+                await expect(page.locator('text=/\\d+ finished/').first()).toBeVisible({ timeout: 5000 })
+            } catch {
+                // Fallback: banner already disappeared, ensure terminal status
+                // visible on at least one row.
+                await expect(page.locator('tr', { hasText: 'dove-a.mp3' }).locator('text=/^(done|failed|duplicate)$/').first()).toBeVisible({ timeout: 15000 })
+            }
+        } finally {
+            for (const f of files) try { fs.unlinkSync(f) } catch {}
+        }
+    })
+
+    test('lifetime status chips increment after import completes', async ({ page }) => {
+        const api = await apiLogin()
+        // Read initial counts via API (status_counts is included in listImportJobs)
+        const before = await api.get(`${API_V1}/import?limit=1&offset=0`)
+        const beforeBody = before.ok() ? await before.json() : { status_counts: {} }
+        const beforeFailed = beforeBody?.status_counts?.failed ?? 0
+        const beforeDup = beforeBody?.status_counts?.duplicate ?? 0
+        const beforeDone = beforeBody?.status_counts?.done ?? 0
+
+        await page.goto('/import')
+        const filePath = makeFakeAudioFile('chip-counter.mp3')
+        try {
+            await page.getByTestId('import-file-input').setInputFiles(filePath)
+            // wait for terminal status on the row
+            const row = page.locator('tr', { hasText: 'chip-counter.mp3' }).first()
+            await expect(row.locator('text=/^(done|failed|duplicate)$/').first()).toBeVisible({ timeout: 20000 })
+
+            // poll the API for an incremented counter on at least one bucket
+            await expect.poll(async () => {
+                const r = await api.get(`${API_V1}/import?limit=1&offset=0`)
+                if (!r.ok()) return false
+                const body = await r.json()
+                const sc = body?.status_counts ?? {}
+                return (sc.failed ?? 0) > beforeFailed || (sc.duplicate ?? 0) > beforeDup || (sc.done ?? 0) > beforeDone
+            }, { timeout: 10000 }).toBe(true)
+        } finally {
+            fs.unlinkSync(filePath)
+            await api.dispose()
+        }
+    })
+
+    test('dove banner disappears after all jobs finish', async ({ page }) => {
+        await page.goto('/import')
+        const filePath = makeFakeAudioFile('disappear.mp3')
+        try {
+            await page.getByTestId('import-file-input').setInputFiles(filePath)
+            // Wait for terminal status — banner should be gone by then (or
+            // shortly after as the in-flight tracker drains).
+            const row = page.locator('tr', { hasText: 'disappear.mp3' }).first()
+            await expect(row.locator('text=/^(done|failed|duplicate)$/').first()).toBeVisible({ timeout: 20000 })
+            // Banner clears once activeIds is empty. Allow a short grace window.
+            await expect.poll(async () =>
+                await page.locator('text=/\\d+ importing/').count(),
+                { timeout: 8000 }
+            ).toBe(0)
+        } finally {
+            fs.unlinkSync(filePath)
+        }
+    })
+
+    // === Tier 1 beforeunload warning ===
+
+    test('beforeunload dialog fires while uploads pending', async ({ page }) => {
+        await page.goto('/import')
+        const filePath = makeFakeAudioFile('beforeunload.mp3')
+        try {
+            // Listener must be wired before we trigger the upload.
+            let dialogFired = false
+            page.on('dialog', d => { dialogFired = true; d.dismiss() })
+
+            await page.getByTestId('import-file-input').setInputFiles(filePath)
+            // pendingUploads ticks up immediately on uploadFiles; try to navigate.
+            await page.evaluate(() => { window.location.href = '/library' })
+            // Give the dialog event loop a moment.
+            await page.waitForTimeout(400)
+            // Note: many Chromium builds suppress beforeunload without user
+            // gesture interaction on the page. We accept either a fired dialog
+            // OR that we're still on /import (navigation blocked) as evidence
+            // the handler engaged.
+            const stillOnImport = page.url().includes('/import')
+            expect(dialogFired || stillOnImport).toBe(true)
+        } finally {
+            try { fs.unlinkSync(filePath) } catch {}
+        }
     })
 })

@@ -130,4 +130,33 @@ test.describe('explore page', () => {
         await page.waitForTimeout(2000)
         expect(errors, `Console errors: ${errors.join('\n')}`).toHaveLength(0)
     })
+
+    // === Tier 2 relative timestamps ===
+
+    test('"recently added" sort renders relative ago labels', async ({ page }) => {
+        await page.goto('/explore?sort=recent')
+        await page.waitForTimeout(1500)
+        const cards = page.getByTestId('song-card')
+        const cardCount = await cards.count()
+        test.skip(cardCount === 0, 'no recently-added cards present')
+        // Format: "added Xs ago", "Xm ago", "Xh ago", "Xd ago", "Xmo ago",
+        // "Xy ago", or "added just now".
+        const re = /(\d+)(s|m|h|d|mo|y) ago|just now/i
+        const html = await page.locator('main').innerText()
+        expect(html, `expected relative-time text in explore page: ${html}`).toMatch(re)
+    })
+
+    test('"recently played" sort renders relative ago labels (you view)', async ({ page }) => {
+        await page.goto('/explore')
+        // Recently played requires "you" view filter.
+        await page.getByRole('button', { name: 'you', exact: true }).click()
+        await page.getByRole('combobox').selectOption('recently_played')
+        await page.waitForTimeout(1500)
+        const cards = page.getByTestId('song-card')
+        const cardCount = await cards.count()
+        test.skip(cardCount === 0, 'no recently-played history')
+        const re = /(\d+)(s|m|h|d|mo|y) ago|just now/i
+        const html = await page.locator('main').innerText()
+        expect(html).toMatch(re)
+    })
 })

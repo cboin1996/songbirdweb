@@ -645,4 +645,58 @@ test.describe('editor modal', () => {
         await loopBtn.click()
         await expect(loopBtn).not.toHaveClass(/text-sky-500/)
     })
+
+    // Locks in the cut-fade-ear collision fix: when a cut already has a
+    // fade-out ear extending leftward, adding another cut should respect that
+    // ear's range and not overlap. Drag interactions on waveform regions are
+    // notoriously fragile in Playwright, so this is fixme-d while the spec
+    // sketches the intended behavior.
+    //
+    // FIXME: requires precise pointer drag on the waveform-rendered fade-out
+    // handle (no stable testid on the fade ear). When/if a `data-testid` is
+    // added (e.g. `cut-fade-out-handle`) refactor this test to drive it
+    // directly. Until then we lock in the simpler "two cuts can coexist"
+    // baseline below.
+    test.fixme('add cut → expand fade-out ear left → add second cut respects fade range', async ({ page }) => {
+        const modal = await openEditorForEditMe(page)
+        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+
+        // First cut
+        await modal.getByRole('button', { name: '+ add cut' }).click()
+        const firstRemove = modal.locator('button[title="remove cut"]').first()
+        await expect(firstRemove).toBeVisible({ timeout: 5000 })
+
+        // Expand fade-after slider on first cut to a meaningful value (proxy
+        // for dragging the ear leftward without needing the waveform handle).
+        const fadeAfter = modal.getByRole('slider', { name: 'fade after cut' }).first()
+        await fadeAfter.fill('2')
+        await fadeAfter.dispatchEvent('input')
+
+        // Add another cut — it should NOT collide with the first cut's
+        // fade-after region. We'd want to assert the new cut's start time is
+        // beyond the first cut's end + fade-after, but neither value has a
+        // stable selector. Marked fixme until we expose them.
+        await modal.getByRole('button', { name: '+ add cut' }).click()
+        await expect(modal.locator('button[title="remove cut"]')).toHaveCount(2, { timeout: 5000 })
+    })
+
+    // Companion lighter assertion that does not depend on fade ear drag UX:
+    // adding two cuts in a row does not throw and both cut rows are present.
+    test('add two cuts in sequence: both rows render without error', async ({ page }) => {
+        const errors: string[] = []
+        page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
+        page.on('pageerror', err => errors.push(err.message))
+
+        const modal = await openEditorForEditMe(page)
+        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+        errors.length = 0
+
+        await modal.getByRole('button', { name: '+ add cut' }).click()
+        await expect(modal.locator('button[title="remove cut"]')).toHaveCount(1, { timeout: 5000 })
+        await modal.getByRole('button', { name: '+ add cut' }).click()
+        await expect(modal.locator('button[title="remove cut"]')).toHaveCount(2, { timeout: 5000 })
+
+        const real = errors.filter(e => !/AbortError/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e))
+        expect(real, `Errors after adding two cuts: ${real.join('\n')}`).toHaveLength(0)
+    })
 })

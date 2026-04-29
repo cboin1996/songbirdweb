@@ -108,8 +108,13 @@ Tests document the broken behavior — a `.skip()` or `xfail` marks something fo
 Marked `test.fixme()` — tests describe intended behavior but the helper or selector doesn't exist:
 
 - `bulk-select.spec.ts` — "exit select mode by clicking Cancel", "bulk add to playlist". Select mode is entered via long-press on a song card (no "Select" button). Need to drive a touch long-press in Playwright.
+- `bulk-select.spec.ts` — "bulk Remove confirms and removes". Destructive in shared dev DB; gate behind `TEST_BULK_REMOVE` once per-test isolation exists.
+- `bulk-select.spec.ts` — "bulk Save offline triggers cache writes". Network/IndexedDB heavy; needs separate offline-suite harness.
+- `bulk-select.spec.ts` — "bulk Download triggers a download per song". Needs `page.waitForEvent('download')` orchestration.
 - `editor.spec.ts` — "opens editor modal for Jolene", "sliders are interactive". Helper `openEditorForJolene` uses iTunes search flow (network dep + fragile kebab `title="more"`). Refactor to open editor from a song already in the user's library.
+- `editor.spec.ts` — "fade-cut ear collision: add cut → expand fade-out ear left → add second cut respects fade range". Requires precise pointer drag on the waveform-rendered fade-out handle (no stable testid). Locks in the simpler "two cuts can coexist" assertion as a baseline.
 - `import.spec.ts` — "removing a row works". Import history rows have no remove button (server-persisted jobs).
+- `library.spec.ts` — "save all offline: beforeunload warning fires while in-flight". `savingAll` flag drains too quickly for a small library — beforeunload listener registers/unregisters before navigation can fire.
 - `offline.spec.ts` — "library loads cached songs when offline". SW is disabled in dev (`sw-register.tsx`). Test requires production build.
 
 ### Watch list (flaky / timing-sensitive)

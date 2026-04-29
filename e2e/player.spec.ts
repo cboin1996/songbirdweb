@@ -151,4 +151,32 @@ test.describe('player bar', () => {
 
         expect(errors, `Console errors: ${errors.join('\n')}`).toHaveLength(0)
     })
+
+    // === Tier 2 player position persistence ===
+
+    // Plays a song for ~5s, captures the track name + the m:ss displayed in
+    // the progress bar, reloads the page, then asserts the same track resumes
+    // and the progress is at least 4s in.
+    test('position persists across reload (>=4s into the same track)', async ({ page }) => {
+        await startPlayback(page)
+        const initialName = await page.getByTestId('player-track-name').first().textContent()
+        // Wait for ~5s of playback.
+        await page.waitForTimeout(5500)
+
+        await page.reload()
+
+        // Player bar reappears (last-played fallback restores playback state).
+        await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 10000 })
+        const restoredName = await page.getByTestId('player-track-name').first().textContent()
+        expect(restoredName?.trim()).toBe(initialName?.trim())
+
+        // Read the m:ss from progress text and assert >= 4s elapsed.
+        const text = await page.getByTestId('player-progress').textContent()
+        const match = text?.match(/(\d+):(\d{2})/)
+        expect(match, `progress text didn't match m:ss: ${text}`).not.toBeNull()
+        const m = parseInt(match![1])
+        const s = parseInt(match![2])
+        const totalSec = m * 60 + s
+        expect(totalSec, `expected >=4s elapsed, got ${totalSec}`).toBeGreaterThanOrEqual(4)
+    })
 })

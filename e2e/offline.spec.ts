@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, Page } from '@playwright/test'
 import { login } from './helpers'
 
 test.describe('offline mode', () => {
@@ -72,5 +72,44 @@ test.describe('offline mode', () => {
         const saveAllBtn = page.getByRole('button', { name: /save all offline/i })
         await expect(saveAllBtn).toBeVisible({ timeout: 5000 })
         await expect(saveAllBtn).toBeDisabled()
+    })
+
+    // === Tier 1 OfflineGuard pages ===
+
+    // Visit while online so the page bundles can load, then flip offline and
+    // dispatch the navigator.onLine 'offline' event so OfflineGuard re-renders.
+    async function flipOffline(page: Page) {
+        await page.context().setOffline(true)
+        await page.evaluate(() => window.dispatchEvent(new Event('offline')))
+    }
+
+    test('OfflineGuard: /explore shows empty state with go-to-library link', async ({ page }) => {
+        await page.goto('/explore')
+        await flipOffline(page)
+        await expect(page.getByText(/needs internet/i)).toBeVisible({ timeout: 5000 })
+        await expect(page.getByRole('link', { name: /go to library/i })).toBeVisible()
+    })
+
+    test('OfflineGuard: /import shows empty state with go-to-library link', async ({ page }) => {
+        await page.goto('/import')
+        await flipOffline(page)
+        await expect(page.getByText(/needs internet/i)).toBeVisible({ timeout: 5000 })
+        await expect(page.getByRole('link', { name: /go to library/i })).toBeVisible()
+    })
+
+    test('OfflineGuard: /download shows empty state with go-to-library link', async ({ page }) => {
+        await page.goto('/download')
+        await flipOffline(page)
+        await expect(page.getByText(/needs internet/i)).toBeVisible({ timeout: 5000 })
+        await expect(page.getByRole('link', { name: /go to library/i })).toBeVisible()
+    })
+
+    test('OfflineGuard: clicking "go to library" lands on /library', async ({ page }) => {
+        await page.goto('/explore')
+        await flipOffline(page)
+        const link = page.getByRole('link', { name: /go to library/i })
+        await expect(link).toBeVisible({ timeout: 5000 })
+        await link.click()
+        await expect(page).toHaveURL(/\/library/, { timeout: 5000 })
     })
 })

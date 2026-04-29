@@ -102,6 +102,97 @@ test.describe('playlists: create / add songs / delete', () => {
         expect([404, 401, 403]).toContain(r.status())
     })
 
+    // === Tier 2 reorder + icon picker ===
+
+    test('drag-reorder swaps two songs in a playlist (PATCH /songs)', async ({ page }) => {
+        const name = uniq(PREFIX)
+        const created = await api.post(`${API_V1}/playlists`, { data: { name, icon: 'music' } })
+        const pl = await created.json()
+
+        // Get two library song UUIDs and add them via API to control initial order.
+        const libRes = await api.get(`${API_V1}/songs/library`)
+        const lib = libRes.ok() ? await libRes.json() : []
+        test.skip(!Array.isArray(lib) || lib.length < 2, 'need >=2 library songs to test reorder')
+        const a = lib[0].uuid
+        const b = lib[1].uuid
+        await api.post(`${API_V1}/playlists/${pl.id}/songs`, { data: { song_uuid: a } })
+        await api.post(`${API_V1}/playlists/${pl.id}/songs`, { data: { song_uuid: b } })
+
+        // Verify initial order
+        const initial = await (await api.get(`${API_V1}/playlists/${pl.id}/songs`)).json()
+        expect(initial[0].uuid).toBe(a)
+        expect(initial[1].uuid).toBe(b)
+
+        // Open modal
+        await page.goto('/library?view=playlists')
+        const tile = page.locator('button').filter({ hasText: name }).first()
+        await expect(tile).toBeVisible({ timeout: 5000 })
+        await tile.click()
+
+        // Modal opens with reorder handles. Drag song-2 above song-1.
+        const rows = page.locator('[data-reorder-idx]')
+        await expect(rows.first()).toBeVisible({ timeout: 5000 })
+        const row0 = rows.nth(0)
+        const row1 = rows.nth(1)
+        const box0 = await row0.boundingBox()
+        const box1 = await row1.boundingBox()
+        if (!box0 || !box1) throw new Error('reorder rows not visible')
+
+        // Drag handle on row1 (the FaBars span). The handle is the first
+        // child span with class cursor-grab. Drag it to above row0.
+        const handle = row1.locator('span.cursor-grab').first()
+        const handleBox = await handle.boundingBox()
+        if (!handleBox) throw new Error('reorder handle not found')
+
+        // Manual pointer drag (handle uses onPointerDown).
+        await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2)
+        await page.mouse.down()
+        // Move into row0's area in steps so the drop-target detector picks it up.
+        await page.mouse.move(box0.x + box0.width / 2, box0.y + 5, { steps: 8 })
+        await page.mouse.up()
+
+        // API confirms swap
+        await expect.poll(async () => {
+            const r = await api.get(`${API_V1}/playlists/${pl.id}/songs`)
+            const songs = await r.json()
+            return songs[0]?.uuid === b && songs[1]?.uuid === a
+        }, { timeout: 5000 }).toBe(true)
+    })
+
+    test('icon picker: creating a playlist with non-default icon stores the choice', async ({ page }) => {
+        const name = uniq(PREFIX)
+
+        await page.goto('/library?view=playlists')
+        await page.getByRole('button', { name: /new playlist/i }).click()
+        await page.getByPlaceholder('playlist name').fill(name)
+
+        // Icon buttons render after expanding the form. Click the second icon
+        // (index 1 — `headphones`) which differs from the default `music`.
+        // The IconPicker buttons sit right under the input/create row.
+        // Cheap stable selector: pick by SVG title via locator-by-button-with-icon.
+        // The icon picker buttons have no labels. Identify via order under the form.
+        const formRoot = page.locator('form').filter({ has: page.getByPlaceholder('playlist name') })
+        const iconButtons = formRoot.locator('button[type="button"]').filter({ hasNotText: /create/i })
+        // Skip the cancel (X) button; pick second icon button by index 2 (after [cancel-X, music, headphones, ...])
+        // Actually structure: cancel-X is before iconpicker. Icon picker is its own div with 10 buttons.
+        // Safer: scope to the IconPicker (flex flex-wrap gap-1 div).
+        const iconRow = formRoot.locator('div.flex.flex-wrap')
+        const icons = iconRow.locator('button[type="button"]')
+        const iconCount = await icons.count()
+        expect(iconCount, 'icon picker should expose >=2 options').toBeGreaterThan(1)
+        await icons.nth(1).click() // pick the second icon (headphones)
+
+        await page.getByRole('button', { name: 'create', exact: true }).click()
+
+        // API confirms persisted icon != 'music'
+        await expect.poll(async () => {
+            const r = await api.get(`${API_V1}/playlists`)
+            const playlists = r.ok() ? await r.json() : []
+            const pl = playlists.find((p: any) => p.name === name)
+            return pl?.icon
+        }, { timeout: 5000 }).toBe('headphones')
+    })
+
     test('rename playlist via context menu', async ({ page }) => {
         const original = uniq(PREFIX)
         const renamed = `${original}-renamed`

@@ -1,5 +1,5 @@
 import { test, expect, Page } from '@playwright/test'
-import { USERNAME, PASSWORD, login, ignoreError } from './helpers'
+import { USERNAME, PASSWORD, login, ignoreError, apiLogin, API_V1 } from './helpers'
 
 
 test.describe('library page', () => {
@@ -134,5 +134,133 @@ test.describe('library page', () => {
         await page.goto('/library')
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
         expect(errors, `Console errors: ${errors.join('\n')}`).toHaveLength(0)
+    })
+
+    // === Tier 1 sort/group ordering ===
+
+    test('songs view: "#" group sorts last when present', async ({ page }) => {
+        // Quick API peek — only run if the user has any non-letter-leading songs.
+        const api = await apiLogin()
+        const res = await api.get(`${API_V1}/songs/library`)
+        const songs = res.ok() ? await res.json() : []
+        const hasHash = Array.isArray(songs) && songs.some((s: any) => {
+            const t = (s?.properties?.trackName ?? '').trim()
+            return t && !/^[A-Za-z]/.test(t)
+        })
+        await api.dispose()
+        test.skip(!hasHash, 'no songs starting with non-letter — # group not present')
+
+        await page.goto('/library?view=songs')
+        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
+        // Scroll to bottom of list so the last section renders.
+        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+        const sections = page.locator('[data-letter]')
+        const count = await sections.count()
+        expect(count).toBeGreaterThan(0)
+        const lastLetter = await sections.nth(count - 1).getAttribute('data-letter')
+        expect(lastLetter).toBe('#')
+    })
+
+    test('artists view: "#" group sorts last when present', async ({ page }) => {
+        const api = await apiLogin()
+        const res = await api.get(`${API_V1}/songs/library`)
+        const songs = res.ok() ? await res.json() : []
+        const hasHash = Array.isArray(songs) && songs.some((s: any) => {
+            const a = (s?.properties?.artistName ?? '').trim()
+            return a && !/^[A-Za-z]/.test(a)
+        })
+        await api.dispose()
+        test.skip(!hasHash, 'no artist starting with non-letter — # group not present')
+
+        await page.goto('/library?view=artists')
+        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
+        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+        const sections = page.locator('[data-letter]')
+        const count = await sections.count()
+        const lastLetter = await sections.nth(count - 1).getAttribute('data-letter')
+        expect(lastLetter).toBe('#')
+    })
+
+    test('albums view: "#" group sorts last when present', async ({ page }) => {
+        const api = await apiLogin()
+        const res = await api.get(`${API_V1}/songs/library`)
+        const songs = res.ok() ? await res.json() : []
+        const hasHash = Array.isArray(songs) && songs.some((s: any) => {
+            const c = (s?.properties?.collectionName ?? '').trim()
+            return c && !/^[A-Za-z]/.test(c)
+        })
+        await api.dispose()
+        test.skip(!hasHash, 'no album with non-letter name — # group not present')
+
+        await page.goto('/library?view=albums')
+        // Wait for at least one section to render.
+        await expect(page.locator('[data-letter]').first()).toBeVisible({ timeout: 10000 })
+        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+        const sections = page.locator('[data-letter]')
+        const count = await sections.count()
+        const lastLetter = await sections.nth(count - 1).getAttribute('data-letter')
+        expect(lastLetter).toBe('#')
+    })
+
+    test('genres view: "Unknown" header sorts last when present', async ({ page }) => {
+        const api = await apiLogin()
+        const res = await api.get(`${API_V1}/songs/library`)
+        const songs = res.ok() ? await res.json() : []
+        const hasUnknown = Array.isArray(songs) && songs.some((s: any) => {
+            const g = (s?.properties?.primaryGenreName ?? '').trim()
+            return !g
+        })
+        await api.dispose()
+        test.skip(!hasUnknown, 'no songs missing primaryGenreName — Unknown bucket not present')
+
+        await page.goto('/library?view=genres')
+        await expect(page.locator('[data-letter]').first()).toBeVisible({ timeout: 10000 })
+        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+        const sections = page.locator('[data-letter]')
+        const count = await sections.count()
+        // The visible header text inside the last section should literally read "Unknown".
+        const lastSection = sections.nth(count - 1)
+        await expect(lastSection.locator('text=Unknown').first()).toBeVisible()
+    })
+
+    test('albums view: name+artist fallback grouping (>1 album when library is non-trivial)', async ({ page }) => {
+        // Hard to assert directly on collectionId-less songs. Loose proxy:
+        // a non-trivial library should NOT collapse into a single album bucket.
+        const api = await apiLogin()
+        const res = await api.get(`${API_V1}/songs/library`)
+        const songs = res.ok() ? await res.json() : []
+        await api.dispose()
+        test.skip(!Array.isArray(songs) || songs.length < 4, 'library too small to test multi-album grouping')
+
+        await page.goto('/library?view=albums')
+        await expect(page.locator('[data-letter]').first()).toBeVisible({ timeout: 10000 })
+        // Albums grid: sections contain album buttons. Count buttons inside data-letter
+        // sections only (excludes toolbar/letter-rail buttons).
+        const albumButtons = page.locator('[data-letter] button')
+        const albumCount = await albumButtons.count()
+        expect(albumCount).toBeGreaterThan(1)
+    })
+
+    // === Tier 2: save-all-offline beforeunload warning ===
+
+    // FIXME: hard to time — the beforeunload listener is only registered while
+    // savingAll is true (library-list.tsx:125-130). Save-all needs to be
+    // genuinely in-flight when the navigation is attempted. The button
+    // immediately starts saving but cache writes are fast for an empty/small
+    // library, so the in-flight window is tiny. Skip when unable to keep
+    // savingAll true through the dialog setup.
+    test.fixme('save all offline: beforeunload warning fires while in-flight', async ({ page }) => {
+        await page.goto('/library')
+        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
+
+        let dialogFired = false
+        page.on('dialog', d => { dialogFired = true; d.dismiss() })
+
+        const saveAllBtn = page.getByRole('button', { name: /save all offline/i })
+        await saveAllBtn.click()
+        // Try to navigate away while save-all is running.
+        await page.evaluate(() => { window.location.href = '/explore' })
+        await page.waitForTimeout(500)
+        expect(dialogFired).toBe(true)
     })
 })

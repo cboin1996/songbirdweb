@@ -92,4 +92,79 @@ test.describe('library bulk select', () => {
             return songs.length
         }, { timeout: 5000 }).toBe(count)
     })
+
+    // === Tier 2 bulk action visibility ===
+    // The bulk action bar surfaces Save offline / Download / Remove / + Playlist.
+    // Actually invoking these in CI is heavy (audio downloads, filesystem
+    // writes, library mutation) — instead we lock in that all four buttons
+    // appear/disappear correctly with selection state.
+
+    test('bulk action bar exposes Save offline, Download, Remove, + Playlist', async ({ page }) => {
+        await page.goto('/library')
+        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
+
+        await page.getByRole('button', { name: 'Select', exact: true }).click()
+        const card = page.getByTestId('song-card').first()
+        await card.click()
+
+        await expect(page.getByRole('button', { name: 'Save offline', exact: true })).toBeVisible()
+        await expect(page.getByRole('button', { name: 'Download', exact: true })).toBeVisible()
+        await expect(page.getByRole('button', { name: 'Remove', exact: true })).toBeVisible()
+        await expect(page.getByRole('button', { name: '+ Playlist' })).toBeVisible()
+    })
+
+    test('selection count toggles accurately when clicking same card twice', async ({ page }) => {
+        await page.goto('/library')
+        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
+
+        await page.getByRole('button', { name: 'Select', exact: true }).click()
+        const card = page.getByTestId('song-card').first()
+        await card.click()
+        await expect(page.getByRole('button', { name: /1 selected/i })).toBeVisible({ timeout: 3000 })
+        // Click again → deselected, label flips back to "Cancel".
+        await card.click()
+        await expect(page.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible({ timeout: 3000 })
+    })
+
+    // FIXME: bulk Remove confirms via window.confirm() and then mutates the
+    // user's library — destructive in dev DB. Punch list: gate this test
+    // behind a TEST_BULK_REMOVE env flag once we have a per-test library
+    // isolation strategy. Test sketched here for documentation.
+    test.fixme('bulk Remove confirms and removes selected songs from library', async ({ page }) => {
+        await page.goto('/library')
+        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
+
+        await page.getByRole('button', { name: 'Select', exact: true }).click()
+        const card = page.getByTestId('song-card').first()
+        await card.click()
+
+        page.once('dialog', d => d.accept())
+        await page.getByRole('button', { name: 'Remove', exact: true }).click()
+        // Library card count decreases by 1 (or song no longer present).
+    })
+
+    // FIXME: bulk Save offline downloads each track and writes to IndexedDB —
+    // produces network traffic and can hang in CI. Functionality test belongs
+    // behind a dedicated env-gated suite. Documents the visible-button path.
+    test.fixme('bulk Save offline triggers cache writes for selected songs', async ({ page }) => {
+        await page.goto('/library')
+        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
+
+        await page.getByRole('button', { name: 'Select', exact: true }).click()
+        await page.getByTestId('song-card').first().click()
+        await page.getByRole('button', { name: 'Save offline', exact: true }).click()
+        // Would need to assert IndexedDB contents or song-card cached badge.
+    })
+
+    // FIXME: bulk Download opens browser save dialog per song — Playwright
+    // download interception is feasible but adds CI complexity. Sketch here.
+    test.fixme('bulk Download triggers a download per selected song', async ({ page }) => {
+        await page.goto('/library')
+        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
+
+        await page.getByRole('button', { name: 'Select', exact: true }).click()
+        await page.getByTestId('song-card').first().click()
+        await page.getByRole('button', { name: 'Download', exact: true }).click()
+        // Would assert page.waitForEvent('download') count.
+    })
 })
