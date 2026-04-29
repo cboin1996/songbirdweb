@@ -47,6 +47,7 @@ interface PlayerContextValue {
     insertNext: (song: PlayableSong) => void
     removeFromQueue: (index: number) => void
     reorderQueue: (fromIdx: number, toIdx: number) => void
+    showToast: (msg: string, error?: boolean) => void
 }
 
 const PlayerContext = createContext<PlayerContextValue>({
@@ -66,6 +67,7 @@ const PlayerContext = createContext<PlayerContextValue>({
     insertNext: () => {},
     removeFromQueue: () => {},
     reorderQueue: () => {},
+    showToast: () => {},
 })
 
 export function usePlayer() {
@@ -185,7 +187,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const [shuffleOrder, setShuffleOrder] = useState<number[]>([])
     const shuffleOrderRef = useRef<number[]>([])
     const shufflePosRef = useRef(0)
-    const [toast, setToast] = useState<string | null>(null)
+    const [toast, setToast] = useState<{ msg: string; error?: boolean } | null>(null)
     const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const dragFromRef = useRef<number | null>(null)
     const queueContainerRef = useRef<HTMLDivElement>(null)
@@ -193,11 +195,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const shuffleSeedRef = useRef<number | null>(null)
     const playContextRef = useRef<PlayContext | null>(null)
 
-    function showToast(msg: string) {
+    const showToast = useCallback((msg: string, error?: boolean) => {
         if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
-        setToast(msg)
+        setToast({ msg, error })
         toastTimerRef.current = setTimeout(() => setToast(null), 2500)
-    }
+    }, [])
 
     function generateShuffleOrder(currentIdx = queueIndexRef.current, existingSeed?: number) {
         const seed = existingSeed ?? (Math.random() * 0xFFFFFFFF | 0)
@@ -733,17 +735,17 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     const contextValue = useMemo(() => ({
         current, isPlaying, queue, shuffle, repeat, playContext,
-        play, pause, resume, skipNext, skipPrev, toggleShuffle, toggleRepeat, insertNext, removeFromQueue, reorderQueue,
+        play, pause, resume, skipNext, skipPrev, toggleShuffle, toggleRepeat, insertNext, removeFromQueue, reorderQueue, showToast,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }), [current, isPlaying, queue, shuffle, repeat, playContext])
+    }), [current, isPlaying, queue, shuffle, repeat, playContext, showToast])
 
     return (
         <PlayerContext.Provider value={contextValue}>
             <audio ref={audioRef} />
             {children}
             {toast && (
-                <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[60] px-4 py-2 rounded-full bg-gray-900 text-white text-xs font-medium shadow-lg pointer-events-none whitespace-nowrap">
-                    {toast}
+                <div className={`fixed bottom-24 left-1/2 -translate-x-1/2 z-[60] px-4 py-2 rounded-full text-xs font-medium shadow-lg pointer-events-none whitespace-nowrap ${toast.error ? 'bg-red-900 text-red-200' : 'bg-gray-900 text-white'}`}>
+                    {toast.msg}
                 </div>
             )}
             {current && p && !isEditorPage && (

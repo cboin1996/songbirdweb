@@ -12,7 +12,7 @@ import { useUser } from "../lib/user-context";
 import { useOnline } from "../lib/use-online";
 import CommunityBadge from "./community-badge";
 
-export default function Song({ song, selected, onClick, inLibrary: initialInLibrary, cachedOffline: initialCachedOffline, onRemove, onCacheChange, compact, rank, isPrivate, playlists, onPlaylistAdd, selectMode, isSelected, onSelect, onLongPress, showSource }: {
+export default function Song({ song, selected, onClick, inLibrary: initialInLibrary, cachedOffline: initialCachedOffline, onRemove, onCacheChange, compact, rank, isPrivate, playlists, onPlaylistAdd, selectMode, isSelected, onSelect, onLongPress, showSource, hasDraft }: {
     song: DownloadedSong,
     selected: boolean,
     onClick: (e?: React.MouseEvent) => void,
@@ -30,6 +30,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
     onSelect?: (songId: string, shiftKey?: boolean) => void,
     onLongPress?: (songId: string) => void,
     showSource?: boolean,
+    hasDraft?: boolean,
 }) {
     const { isAdmin } = useUser()
     const online = useOnline()
@@ -47,11 +48,10 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
     const [kebabOpen, setKebabOpen] = useState(false)
     const [kebabPos, setKebabPos] = useState({ top: 0, right: 0 })
     const [playlistPickerOpen, setPlaylistPickerOpen] = useState(false)
-    const [addedToPlaylist, setAddedToPlaylist] = useState<string | null>(null)
     const kebabRef = useRef<HTMLButtonElement>(null)
     const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
     const kebabJustClosed = useRef(false)
-    const { play, pause, resume, current, isPlaying, insertNext } = usePlayer()
+    const { play, pause, resume, current, isPlaying, insertNext, showToast } = usePlayer()
     const pathname = usePathname()
     function pageSource() {
         const href = typeof window !== 'undefined' ? window.location.pathname + window.location.search : pathname
@@ -240,8 +240,9 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                                         key={pl.id}
                                         onClick={async () => {
                                             if (!song.songId) return
-                                            const ok = await addSongToPlaylist(pl.id, song.songId)
-                                            if (ok) { setAddedToPlaylist(pl.name); setTimeout(() => setAddedToPlaylist(null), 2000); onPlaylistAdd?.() }
+                                            const result = await addSongToPlaylist(pl.id, song.songId)
+                                            if (result === 'duplicate') showToast(`cannot add duplicate to playlist '${pl.name}'`, true)
+                                            else if (result) { showToast(`added to ${pl.name}`); onPlaylistAdd?.() }
                                             setPlaylistPickerOpen(false)
                                             closeKebab()
                                         }}
@@ -257,8 +258,9 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                 <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
                 <button onClick={() => { closeKebab(); openEditor() }}
                     disabled={!online}
-                    className="whitespace-nowrap block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation">
+                    className={`whitespace-nowrap flex items-center justify-between w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation ${hasDraft ? 'text-amber-500' : ''}`}>
                     Edit
+                    {hasDraft && <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />}
                 </button>
             </div>
         </>,
@@ -269,7 +271,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
 
     const kebabMenu = song.songId ? (
         <div onClick={e => e.stopPropagation()}>
-            <button ref={kebabRef} data-testid="song-kebab" onClick={openKebab} title="More options" className="cursor-pointer text-gray-400 hover:text-sky-500 active:text-sky-500 p-2 -m-1 touch-manipulation">
+            <button ref={kebabRef} data-testid="song-kebab" onClick={openKebab} title="More options" className={`cursor-pointer p-2 -m-1 touch-manipulation ${hasDraft ? 'text-amber-400 hover:text-amber-500' : 'text-gray-400 hover:text-sky-500 active:text-sky-500'}`}>
                 <FaEllipsisV size={iconSz} />
             </button>
             {kebabDropdown}

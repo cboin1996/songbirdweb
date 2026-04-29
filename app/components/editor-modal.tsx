@@ -4,10 +4,11 @@ import WaveSurfer from 'wavesurfer.js'
 import RegionsPlugin from 'wavesurfer.js/plugins/regions'
 import {
   DOWNLOAD_URL, createEditJob, deleteEditDraft, Cut, EditParams, FadeEdit, fetchEditDraft,
-  pollEditJob, Properties, saveEditDraft, songArtworkUrl, tagSong, artworkUrl,
+  pollEditJob, Properties, saveEditDraft, songArtworkUrl, artworkUrl,
   addToLibrary, removeFromLibrary, uploadSongArtwork, API_V1,
+  fetchSongEligibility, SongEligibility,
 } from '../lib/data'
-import { FaPlay, FaPause, FaTimes, FaUndo, FaRedo, FaTrash, FaCut } from 'react-icons/fa'
+import { FaPlay, FaPause, FaTimes, FaUndo, FaRedo, FaTrash, FaCut, FaChevronDown } from 'react-icons/fa'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { usePlayer } from './player'
@@ -116,6 +117,7 @@ export default function EditorModal({
   const [duration, setDuration] = useState(0)
   const [draftUpdatedAt, setDraftUpdatedAt] = useState<string | null>(null)
   const [draftSaveStatus, setDraftSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
+  const [eligibility, setEligibility] = useState<SongEligibility | null>(null)
 
   // --- undo/redo ---
   const historyRef = useRef<EditParams[]>([])
@@ -247,10 +249,12 @@ export default function EditorModal({
 
   // --- properties tab ---
   const [props, setProps] = useState<Properties>(initialProperties)
-  const [propStatus, setPropStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const propsRef = useRef<Properties>(initialProperties)
+  const initialPropsRef = useRef<Properties>(initialProperties)
   const [publishAsOriginal, setPublishAsOriginal] = useState(false)
   const [artworkPreviewError, setArtworkPreviewError] = useState(false)
   const [artworkUploadStatus, setArtworkUploadStatus] = useState<'idle' | 'uploading' | 'done' | 'error'>('idle')
+  const [extraPropsOpen, setExtraPropsOpen] = useState(false)
   const artworkInputRef = useRef<HTMLInputElement>(null)
 
   const mainWaveCanvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -455,10 +459,20 @@ export default function EditorModal({
         const p = { ...draft, cuts, fades }
         setParams(p)
         if (wsReadyRef.current) { syncCutRegions(cuts); syncFadeRegions(fades) }
+        if (draft.properties_overrides) {
+          const merged = { ...initialPropsRef.current, ...draft.properties_overrides }
+          propsHydrated.current = false  // hydration shouldn't trigger autosave
+          setProps(merged)
+        }
       }
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [songId])
+
+  // fetch eligibility on mount and when active song changes
+  useEffect(() => {
+    fetchSongEligibility(activeSongId).then(e => setEligibility(e ?? null))
+  }, [activeSongId])
 
   // keep refs in sync for stale-closure-safe event handlers
   useEffect(() => { wsReadyRef.current = wsReady }, [wsReady])
@@ -509,6 +523,8 @@ export default function EditorModal({
       if (peaksRef.current && waveCtxRef.current) renderWave(peaksRef.current, waveCtxRef.current)
     })
   }, [params, renderWave])
+
+  const propsHydrated = useRef(false)
 
   // draw timeline ruler ticks when duration is known
   useEffect(() => {
@@ -568,11 +584,39 @@ export default function EditorModal({
     return () => { ro.disconnect(); if (raf !== null) cancelAnimationFrame(raf); mq.removeEventListener('change', onSchemeChange) }
   }, [duration])
 
-  // debounced auto-save
+  // diff props vs initial; null if identical (so we don't pollute the draft)
+  const propsOverridesIfChanged = useCallback((): Properties | null => {
+    const cur = propsRef.current
+    const init = initialPropsRef.current
+    const keys = Object.keys(cur) as (keyof Properties)[]
+    for (const k of keys) {
+      if (cur[k] !== init[k]) return { ...cur }
+    }
+    for (const k of Object.keys(init) as (keyof Properties)[]) {
+      if (cur[k] !== init[k]) return { ...cur }
+    }
+    return null
+  }, [])
+
+  // debounced auto-save (params + current properties_overrides)
   const scheduleSave = useCallback((p: EditParams) => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    saveTimerRef.current = setTimeout(() => saveEditDraft(activeSongIdRef.current, stripClientIds(p)), 1000)
-  }, [])
+    saveTimerRef.current = setTimeout(() => {
+      const overrides = propsOverridesIfChanged()
+      const isDefault = p.trim_start === 0 && p.trim_end === null && p.volume === 1 &&
+        p.fades.length === 0 && p.speed === 1 && !p.normalize && p.cuts.length === 0
+      if (isDefault && !overrides) return
+      saveEditDraft(activeSongIdRef.current, { ...stripClientIds(p), properties_overrides: overrides })
+        .then(() => fetchSongEligibility(activeSongIdRef.current).then(e => setEligibility(e ?? null)))
+    }, 1000)
+  }, [propsOverridesIfChanged])
+
+  // autosave when properties change (skip the initial mount + draft hydration)
+  useEffect(() => {
+    propsRef.current = props
+    if (!propsHydrated.current) { propsHydrated.current = true; return }
+    scheduleSave(paramsRef.current)
+  }, [props, scheduleSave])
 
   // init WaveSurfer
   useEffect(() => {
@@ -1781,10 +1825,16 @@ export default function EditorModal({
   }
 
   async function handleSaveDraft() {
+    const p = paramsRef.current
+    const overrides = propsOverridesIfChanged()
+    const isDefault = p.trim_start === 0 && p.trim_end === null && p.volume === 1 &&
+      p.fades.length === 0 && p.speed === 1 && !p.normalize && p.cuts.length === 0
+    if (isDefault && !overrides) return
     setDraftSaveStatus('saving')
-    await saveEditDraft(activeSongIdRef.current, stripClientIds(paramsRef.current))
+    await saveEditDraft(activeSongIdRef.current, { ...stripClientIds(p), properties_overrides: overrides })
     setDraftSaveStatus('saved')
     setTimeout(() => setDraftSaveStatus('idle'), 2000)
+    fetchSongEligibility(activeSongIdRef.current).then(e => setEligibility(e ?? null))
   }
 
   async function handleDiscard() {
@@ -1821,9 +1871,10 @@ export default function EditorModal({
 
   async function handleRestoreOriginal() {
     stopPreview()
+    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
     const restoredId = rootSongId ?? songId
     setRestoring(true)
-    await removeFromLibrary(activeSongId)
+    await Promise.all([removeFromLibrary(activeSongId), deleteEditDraft(activeSongIdRef.current)])
     await addToLibrary(restoredId)
     setRestoring(false)
     router.refresh()
@@ -1833,6 +1884,7 @@ export default function EditorModal({
   async function handleRevertLastSave() {
     if (!parentSongId) return
     stopPreview()
+    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
     setRestoring(true)
     await removeFromLibrary(activeSongId)
     await addToLibrary(parentSongId)
@@ -1844,7 +1896,12 @@ export default function EditorModal({
   async function handleSave() {
     setJobStatus('submitting')
     setJobError('')
-    const job = await createEditJob(songId, stripClientIds(paramsRef.current), overwrite)
+    const overrides = propsOverridesIfChanged()
+    const sendOverrides = overrides && overrides.artworkUrl100?.startsWith(API_V1)
+      ? { ...overrides, artworkUrl100: initialPropsRef.current.artworkUrl100 }
+      : overrides
+    const paramsToSend = { ...stripClientIds(paramsRef.current), properties_overrides: sendOverrides }
+    const job = await createEditJob(songId, paramsToSend, overwrite, isAdmin && publishAsOriginal)
     if (!job) { setJobStatus('error'); setJobError('failed to start'); return }
     setJobStatus('polling')
     if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
@@ -1865,8 +1922,7 @@ export default function EditorModal({
         setJobStatus('done')
         await deleteEditDraft(activeSongIdRef.current)
         const landId = (!overwrite && result.result_song_id) ? result.result_song_id : activeSongIdRef.current
-        router.refresh()
-        router.replace(editSongRoute(landId))
+        router.push(`${routes.library}?song=${landId}`)
       }
       if (result.status === 'failed') {
         clearInterval(pollIntervalRef.current!)
@@ -1877,31 +1933,21 @@ export default function EditorModal({
     }, 1500)
   }
 
-  async function handlePropSave() {
-    setPropStatus('saving')
-    const sendProps = props.artworkUrl100?.startsWith(API_V1)
-      ? { ...props, artworkUrl100: initialProperties.artworkUrl100 }
-      : props
-    const ok = await tagSong(activeSongId, sendProps, isAdmin && publishAsOriginal)
-    if (ok) { setPropStatus('saved'); setTimeout(() => setPropStatus('idle'), 2000) }
-    else setPropStatus('error')
-  }
-
   function paramsChanged(p: EditParams) {
     return p.trim_start !== 0 || p.trim_end !== null || p.volume !== 1 || p.fades.length > 0 || p.speed !== 1 || p.normalize || p.cuts.length > 0
   }
 
-  function handleClose() {
+  async function handleClose() {
     if (jobStatus === 'done') {
       router.push(`${routes.library}?song=${activeSongId}`)
       return
     }
-    if (paramsChanged(params) && !localStorage.getItem(DRAFT_SKIP_KEY)) {
+    const hasOverrides = Boolean(propsOverridesIfChanged())
+    if ((paramsChanged(params) || hasOverrides) && !localStorage.getItem(DRAFT_SKIP_KEY)) {
       setCloseConfirm(true)
-      closeTimerRef.current = setTimeout(() => {
-        setCloseConfirm(false)
-        router.back()
-      }, 2500)
+      await handleSaveDraft()
+      setCloseConfirm(false)
+      router.back()
     } else {
       router.back()
     }
@@ -2203,7 +2249,14 @@ export default function EditorModal({
             <Image src={artSrc} alt="" width={36} height={36} className="rounded shrink-0 object-cover" unoptimized={!!artworkCached} />
           )}
           <div className="flex-1 min-w-0">
-            <p className="font-medium truncate text-base">{props.trackName}</p>
+            <div className="flex items-center gap-2 min-w-0">
+              <p className="font-medium truncate text-base">{props.trackName}</p>
+              {eligibility !== null && (
+                <span className={`shrink-0 text-xs font-medium px-2 py-0.5 rounded-full border ${eligibility.eligible ? 'text-emerald-400 border-emerald-500/40' : 'text-amber-500 border-amber-600/40'}`}>
+                  {eligibility.eligible ? 'publish eligible' : `missing: ${eligibility.missing_fields.join(', ')}`}
+                </span>
+              )}
+            </div>
             <p className="text-sm text-sky-500 truncate">{props.artistName}</p>
             {draftUpdatedAt && (() => {
               const exp = new Date(draftUpdatedAt)
@@ -2229,7 +2282,6 @@ export default function EditorModal({
             <div className="flex items-center gap-3 shrink-0">
               <button
                 onClick={() => {
-                  if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
                   localStorage.setItem(DRAFT_SKIP_KEY, '1')
                   setCloseConfirm(false)
                   router.back()
@@ -2552,7 +2604,7 @@ export default function EditorModal({
                 <button
                   onClick={handleSaveDraft}
                   disabled={draftSaveStatus === 'saving'}
-                  className="text-sm text-gray-400 hover:text-sky-500 transition-colors disabled:opacity-40"
+                  className={`text-sm transition-colors disabled:opacity-40 ${draftSaveStatus === 'saved' ? 'text-amber-400 hover:text-amber-300' : 'text-gray-400 hover:text-sky-500'}`}
                 >
                   {draftSaveStatus === 'saving' ? 'Saving…' : draftSaveStatus === 'saved' ? 'Draft saved ✓' : 'Save Draft'}
                 </button>
@@ -2573,12 +2625,11 @@ export default function EditorModal({
                   </button>
                 )}
                 {jobStatus === 'error' && <span className="text-red-500 text-sm">{jobError}</span>}
-                {jobStatus === 'done' && <span className="text-gray-400 text-sm">added to library</span>}
               </div>
               {isAdmin && (
                 <label className="flex items-center gap-1.5 text-sm select-none cursor-pointer">
-                  <input type="checkbox" checked={overwrite} onChange={e => setOverwrite(e.target.checked)} className="accent-red-500" />
-                  <span className={overwrite ? 'text-red-400 font-medium' : 'text-gray-400'}>overwrite original</span>
+                  <input type="checkbox" checked={publishAsOriginal} onChange={e => { setPublishAsOriginal(e.target.checked); setOverwrite(e.target.checked) }} className="accent-red-500" />
+                  <span className={publishAsOriginal ? 'text-red-400 font-medium' : 'text-gray-400'}>save as original</span>
                 </label>
               )}
             </div>
@@ -2645,6 +2696,7 @@ export default function EditorModal({
                 ['trackName', 'Track name'],
                 ['artistName', 'Artist'],
                 ['collectionName', 'Album'],
+                ['collectionArtistName', 'Album artist'],
                 ['primaryGenreName', 'Genre'],
               ] as [keyof Properties, string][]
             ).map(([key, label]) => (
@@ -2659,18 +2711,13 @@ export default function EditorModal({
               </label>
             ))}
 
+            {/* artwork */}
             <label className="flex flex-col gap-1">
-              <span className="text-xs text-gray-400">Artwork URL</span>
-              <input
-                type="text"
-                value={props.artworkUrl100 ?? ''}
-                onChange={e => { setProps(p => ({ ...p, artworkUrl100: e.target.value })); setArtworkPreviewError(false) }}
-                className="rounded-lg bg-gray-100 dark:bg-gray-900 border border-transparent focus:border-sky-500 px-3 py-1.5 text-sm outline-none transition-colors"
-              />
+              <span className="text-xs text-gray-400">Artwork</span>
               {artworkPreviewSrc && (
-                <Image src={artworkPreviewSrc} alt="" width={64} height={64} className="rounded-lg mt-1 object-cover" onError={() => setArtworkPreviewError(true)} />
+                <Image src={artworkPreviewSrc} alt="" width={64} height={64} className="rounded-lg mb-1 object-cover" onError={() => setArtworkPreviewError(true)} />
               )}
-              <div className="flex items-center gap-2 mt-1">
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => artworkInputRef.current?.click()}
@@ -2707,15 +2754,6 @@ export default function EditorModal({
 
             <div className="grid grid-cols-2 gap-3">
               <label className="flex flex-col gap-1">
-                <span className="text-xs text-gray-400">Track #</span>
-                <input
-                  type="number"
-                  value={props.trackNumber ?? ''}
-                  onChange={e => setProps(p => ({ ...p, trackNumber: parseInt(e.target.value) || 0 }))}
-                  className="rounded-lg bg-gray-100 dark:bg-gray-900 border border-transparent focus:border-sky-500 px-3 py-1.5 text-sm outline-none transition-colors"
-                />
-              </label>
-              <label className="flex flex-col gap-1">
                 <span className="text-xs text-gray-400">Release date</span>
                 <input
                   type="text"
@@ -2724,20 +2762,68 @@ export default function EditorModal({
                   className="rounded-lg bg-gray-100 dark:bg-gray-900 border border-transparent focus:border-sky-500 px-3 py-1.5 text-sm outline-none transition-colors"
                 />
               </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-gray-400">Track # / of</span>
+                <div className="flex gap-1">
+                  <input
+                    type="number"
+                    value={props.trackNumber ?? ''}
+                    onChange={e => setProps(p => ({ ...p, trackNumber: parseInt(e.target.value) || 0 }))}
+                    className="w-full rounded-lg bg-gray-100 dark:bg-gray-900 border border-transparent focus:border-sky-500 px-3 py-1.5 text-sm outline-none transition-colors"
+                  />
+                  <input
+                    type="number"
+                    value={props.trackCount ?? ''}
+                    onChange={e => setProps(p => ({ ...p, trackCount: parseInt(e.target.value) || 0 }))}
+                    className="w-full rounded-lg bg-gray-100 dark:bg-gray-900 border border-transparent focus:border-sky-500 px-3 py-1.5 text-sm outline-none transition-colors"
+                  />
+                </div>
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-gray-400">Disc # / of</span>
+                <div className="flex gap-1">
+                  <input
+                    type="number"
+                    value={props.discNumber ?? ''}
+                    onChange={e => setProps(p => ({ ...p, discNumber: parseInt(e.target.value) || 0 }))}
+                    className="w-full rounded-lg bg-gray-100 dark:bg-gray-900 border border-transparent focus:border-sky-500 px-3 py-1.5 text-sm outline-none transition-colors"
+                  />
+                  <input
+                    type="number"
+                    value={props.discCount ?? ''}
+                    onChange={e => setProps(p => ({ ...p, discCount: parseInt(e.target.value) || 0 }))}
+                    className="w-full rounded-lg bg-gray-100 dark:bg-gray-900 border border-transparent focus:border-sky-500 px-3 py-1.5 text-sm outline-none transition-colors"
+                  />
+                </div>
+              </label>
             </div>
 
-            <div className="flex items-center gap-2 pt-2 flex-wrap">
-              <button onClick={handlePropSave} disabled={propStatus === 'saving'} className={btnPrimary}>
-                {propStatus === 'saving' ? 'Saving…' : propStatus === 'saved' ? 'Saved ✓' : 'Save'}
+            {/* extra / iTunes fields */}
+            <div>
+              <button
+                type="button"
+                onClick={() => setExtraPropsOpen(v => !v)}
+                className="text-xs text-gray-400 hover:text-gray-300 flex items-center gap-1 transition-colors"
+              >
+                <FaChevronDown size={8} className={`transition-transform ${extraPropsOpen ? 'rotate-180' : ''}`} />
+                extra
               </button>
-              {propStatus === 'error' && <span className="text-red-400 text-xs">save failed</span>}
-              {isAdmin && (
-                <label className="flex items-center gap-1.5 text-sm select-none cursor-pointer ml-2">
-                  <input type="checkbox" checked={publishAsOriginal} onChange={e => setPublishAsOriginal(e.target.checked)} className="accent-sky-500" />
-                  <span className="text-gray-400">publish as original</span>
-                </label>
+              {extraPropsOpen && (
+                <div className="flex flex-col gap-3 mt-3">
+                  <label className="flex flex-col gap-1">
+                    <span className="text-xs text-gray-400">Artwork URL</span>
+                    <input
+                      type="text"
+                      value={props.artworkUrl100 ?? ''}
+                      onChange={e => { setProps(p => ({ ...p, artworkUrl100: e.target.value })); setArtworkPreviewError(false) }}
+                      className="rounded-lg bg-gray-100 dark:bg-gray-900 border border-transparent focus:border-sky-500 px-3 py-1.5 text-sm outline-none transition-colors"
+                    />
+                  </label>
+                </div>
               )}
             </div>
+
+            <p className="text-xs text-gray-400 dark:text-gray-500 pt-2">Edits autosave to the draft — commit them via Save to Library on the audio tab.</p>
           </div>
 
       {/* unified region context menu — trim = add/paste/select-all; cut/fade = copy/cut/paste/remove */}

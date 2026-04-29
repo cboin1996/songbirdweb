@@ -47,6 +47,7 @@ export default function EditsBanner() {
   async function handleDelete(songId: string) {
     await deleteEditDraft(songId)
     setDrafts(prev => prev.filter(d => d.song_id !== songId))
+    window.dispatchEvent(new CustomEvent(EVENTS.draftChanged, { detail: { deleted: songId } }))
   }
 
   function handleOpen(songId: string) {

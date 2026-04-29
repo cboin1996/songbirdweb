@@ -9,7 +9,7 @@ export default function LogoutButton() {
 
     async function handleLogout() {
         await logout()
-        router.push(routes.home)
+        window.location.href = routes.home
     }
 
     return <Button text="Log out" onClick={handleLogout} />

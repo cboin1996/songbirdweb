@@ -19,6 +19,7 @@ export default function UserTable({ initialUsers, perUser }: Props) {
     const [username, setUsername] = useState('')
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
+    const [confirmPassword, setConfirmPassword] = useState('')
     const [inviteError, setInviteError] = useState('')
 
     const statsMap = Object.fromEntries(perUser.map(p => [p.user_id, p]))
@@ -51,6 +52,10 @@ export default function UserTable({ initialUsers, perUser }: Props) {
     async function handleInvite(e: React.FormEvent) {
         e.preventDefault()
         setInviteError('')
+        if (password !== confirmPassword) {
+            setInviteError('passwords do not match')
+            return
+        }
         const user = await registerUser(username, email, password)
         if (!user) {
             setInviteError('invite failed — username or email may already exist')
@@ -60,6 +65,7 @@ export default function UserTable({ initialUsers, perUser }: Props) {
         setUsername('')
         setEmail('')
         setPassword('')
+        setConfirmPassword('')
     }
 
     return (
@@ -159,7 +165,8 @@ export default function UserTable({ initialUsers, perUser }: Props) {
                         <Input placeholder="username" value={username} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setUsername(e.target.value)} />
                         <Input placeholder="email" value={email} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)} />
                         <Input placeholder="password" type="password" value={password} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPassword(e.target.value)} />
-                        <Button text="invite" disabled={!username || !email || !password} />
+                        <Input placeholder="confirm password" type="password" value={confirmPassword} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setConfirmPassword(e.target.value)} />
+                        <Button text="invite" type="submit" disabled={!username || !email || !password || !confirmPassword} />
                     </div>
                     {inviteError && <p className="text-red-500 text-sm">{inviteError}</p>}
                 </form>

@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import Image from "next/image"
 import { useRouter, useSearchParams } from "next/navigation"
-import { LibrarySong, Playlist, EligibleSong, artworkUrl, songArtworkUrl, fetchLibrarySongs, fetchPlaylists, fetchPlaylistSongs, fetchEligibleSongs, publishSongs, removeFromLibrary, downloadSongToFile, addSongToPlaylist, bulkRemoveFromLibrary, bulkAddSongsToPlaylist, syncOfflineSongs, addServerOfflineSong, removeServerOfflineSong, clearServerOfflineSongs } from "../lib/data"
+import { LibrarySong, Playlist, EligibleSong, artworkUrl, songArtworkUrl, fetchLibrarySongs, fetchPlaylists, fetchPlaylistSongs, fetchEligibleSongs, fetchDrafts, publishSongs, removeFromLibrary, downloadSongToFile, addSongToPlaylist, bulkRemoveFromLibrary, bulkAddSongsToPlaylist, syncOfflineSongs, addServerOfflineSong, removeServerOfflineSong, clearServerOfflineSongs } from "../lib/data"
 import SongPickerModal, { PickerSong } from "../components/song-picker-modal"
 import { cacheSong, uncacheSong, getCachedSongIds, cacheArtworkUrls } from "../lib/offline"
 import { useOnline } from "../lib/use-online"
@@ -109,6 +109,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     const [failedIds, setFailedIds] = useState<Set<string>>(new Set())
     const [syncPromptIds, setSyncPromptIds] = useState<string[]>([])
     const [playlists, setPlaylists] = useState<Playlist[]>([])
+    const [draftIds, setDraftIds] = useState<Set<string>>(new Set())
     const [eligibleSongs, setEligibleSongs] = useState<EligibleSong[]>([])
     const [publishModalOpen, setPublishModalOpen] = useState(false)
     const [publishing, setPublishing] = useState(false)
@@ -173,6 +174,13 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
             }
         })
         fetchPlaylists().then(setPlaylists)
+        fetchDrafts().then(d => setDraftIds(new Set(d.map(x => x.song_id))))
+        function onDraftChanged(e: Event) {
+            const deleted = (e as CustomEvent).detail?.deleted
+            if (deleted) setDraftIds(prev => { const next = new Set(prev); next.delete(deleted); return next })
+        }
+        window.addEventListener(EVENTS.draftChanged, onDraftChanged)
+        return () => window.removeEventListener(EVENTS.draftChanged, onDraftChanged)
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
@@ -804,6 +812,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                     isPrivate={!!song.owner_id || !!song.parent_song_id}
                                     playlists={playlistStubs}
                                     onPlaylistAdd={refreshPlaylists}
+                                    hasDraft={draftIds.has(song.uuid)}
                                 />
                                 </div>
                             ))}
@@ -857,6 +866,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                     isSelected={selectedIds.has(song.uuid)}
                                     onSelect={(id, shiftKey) => handleSelect(id, shiftKey)}
                                     onLongPress={(id) => { if (!selectMode) enterSelectMode(id) }}
+                                    hasDraft={draftIds.has(song.uuid)}
                                 />
                                 </div>
                             ))}

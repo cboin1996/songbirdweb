@@ -833,10 +833,11 @@ export async function fetchPlaylistSongs(id: string): Promise<PlaylistSong[]> {
   return await getCachedData<PlaylistSong[]>(`playlist-songs:${id}`) ?? []
 }
 
-export async function addSongToPlaylist(playlistId: string, songUuid: string): Promise<boolean> {
+export async function addSongToPlaylist(playlistId: string, songUuid: string): Promise<boolean | 'duplicate'> {
   try {
     const options = await buildFetchOptions('POST', { song_uuid: songUuid })
     const response = await fetch(`${API_V1}/playlists/${playlistId}/songs`, options)
+    if (response.status === 409) return 'duplicate'
     return response.ok
   } catch { return false }
 }
@@ -919,6 +920,15 @@ export interface EligibleSong {
 
 export async function fetchEligibleSongs(): Promise<EligibleSong[]> {
   return await fetchData<EligibleSong[]>({ url: `${API_V1}/library/eligible`, method: 'GET' }) ?? []
+}
+
+export interface SongEligibility {
+  eligible: boolean
+  missing_fields: string[]
+}
+
+export async function fetchSongEligibility(songId: string): Promise<SongEligibility | undefined> {
+  return await fetchData<SongEligibility>({ url: `${API_V1}/properties/${songId}/eligible`, method: 'GET' })
 }
 
 export async function publishSongs(songIds: string[]): Promise<number> {
