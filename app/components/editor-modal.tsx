@@ -248,6 +248,7 @@ export default function EditorModal({
   // --- properties tab ---
   const [props, setProps] = useState<Properties>(initialProperties)
   const [propStatus, setPropStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [publishAsOriginal, setPublishAsOriginal] = useState(false)
   const [artworkPreviewError, setArtworkPreviewError] = useState(false)
   const [artworkUploadStatus, setArtworkUploadStatus] = useState<'idle' | 'uploading' | 'done' | 'error'>('idle')
   const artworkInputRef = useRef<HTMLInputElement>(null)
@@ -1878,7 +1879,10 @@ export default function EditorModal({
 
   async function handlePropSave() {
     setPropStatus('saving')
-    const ok = await tagSong(songId, props)
+    const sendProps = props.artworkUrl100?.startsWith(API_V1)
+      ? { ...props, artworkUrl100: initialProperties.artworkUrl100 }
+      : props
+    const ok = await tagSong(activeSongId, sendProps, isAdmin && publishAsOriginal)
     if (ok) { setPropStatus('saved'); setTimeout(() => setPropStatus('idle'), 2000) }
     else setPropStatus('error')
   }
@@ -2196,7 +2200,7 @@ export default function EditorModal({
         {/* header */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 dark:border-gray-800 shrink-0">
           {artSrc && (
-            <Image src={artSrc} alt="" width={36} height={36} className="rounded shrink-0 object-cover" />
+            <Image src={artSrc} alt="" width={36} height={36} className="rounded shrink-0 object-cover" unoptimized={!!artworkCached} />
           )}
           <div className="flex-1 min-w-0">
             <p className="font-medium truncate text-base">{props.trackName}</p>
@@ -2722,11 +2726,17 @@ export default function EditorModal({
               </label>
             </div>
 
-            <div className="flex items-center gap-2 pt-2">
+            <div className="flex items-center gap-2 pt-2 flex-wrap">
               <button onClick={handlePropSave} disabled={propStatus === 'saving'} className={btnPrimary}>
                 {propStatus === 'saving' ? 'Saving…' : propStatus === 'saved' ? 'Saved ✓' : 'Save'}
               </button>
               {propStatus === 'error' && <span className="text-red-400 text-xs">save failed</span>}
+              {isAdmin && (
+                <label className="flex items-center gap-1.5 text-sm select-none cursor-pointer ml-2">
+                  <input type="checkbox" checked={publishAsOriginal} onChange={e => setPublishAsOriginal(e.target.checked)} className="accent-sky-500" />
+                  <span className="text-gray-400">publish as original</span>
+                </label>
+              )}
             </div>
           </div>
 

@@ -147,8 +147,8 @@ export default function PlaylistsView({
         if (playContext?.id === pl.id && isPlaying) { pause(); return }
         const first = playable[0]
         play(
-            { uuid: first.uuid, properties: first.properties! },
-            playable.map(s => ({ uuid: s.uuid, properties: s.properties! })),
+            { uuid: first.uuid, properties: first.properties!, artwork_cached: first.artwork_cached },
+            playable.map(s => ({ uuid: s.uuid, properties: s.properties!, artwork_cached: s.artwork_cached })),
             { label: `Playlist · ${pl.name}`, href: `${routes.library}?view=playlists`, id: pl.id }
         )
     }

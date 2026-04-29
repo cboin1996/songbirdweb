@@ -599,7 +599,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             const restoredQueue: PlayableSong[] = queueUuids
                 .map(id => libMap.get(id))
                 .filter((s): s is NonNullable<typeof s> => !!s?.properties)
-                .map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at }))
+                .map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached }))
 
             if (restoredQueue.length > 0) {
                 const safeIndex = Math.max(0, Math.min(state!.queue_index, restoredQueue.length - 1))
@@ -633,7 +633,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                     manualNextRef.current = savedManualNext
                         .map(id => libMap.get(id))
                         .filter((s): s is NonNullable<typeof s> => !!s?.properties)
-                        .map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at }))
+                        .map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached }))
                 }
                 setCurrent(song)
                 const audio = audioRef.current
@@ -654,7 +654,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                     .filter(s => s.last_played_at && s.properties)
                     .sort((a, b) => new Date(b.last_played_at!).getTime() - new Date(a.last_played_at!).getTime())[0]
                 if (last?.properties) {
-                    const song = { uuid: last.uuid, properties: last.properties, last_position: last.last_position, last_played_at: last.last_played_at }
+                    const song = { uuid: last.uuid, properties: last.properties, last_position: last.last_position, last_played_at: last.last_played_at, artwork_cached: last.artwork_cached }
                     setCurrent(song)
                     queueRef.current = [song]
                     queueIndexRef.current = 0
@@ -789,7 +789,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                                         <FaBars size={11} />
                                                     </span>
                                                     <button onClick={() => { if (isActive) { isPlaying ? pause() : audioRef.current?.play() } else { playAt(qi) } }} className="flex items-center gap-3 flex-1 text-left min-w-0">
-                                                        {(() => { const a = songArtworkUrl(song.uuid, song.artwork_cached, sp?.artworkUrl100, 200); return a ? <Image src={a} alt="" width={36} height={36} className="rounded shrink-0 object-cover" /> : <div className="w-9 h-9 rounded shrink-0 bg-gray-100 dark:bg-gray-800 flex items-center justify-center"><FaMusic size={11} className="text-gray-400" /></div> })()}
+                                                        {(() => { const a = songArtworkUrl(song.uuid, song.artwork_cached, sp?.artworkUrl100, 200); return a ? <Image src={a} alt="" width={36} height={36} className="rounded shrink-0 object-cover" unoptimized={!!song.artwork_cached} /> : <div className="w-9 h-9 rounded shrink-0 bg-gray-100 dark:bg-gray-800 flex items-center justify-center"><FaMusic size={11} className="text-gray-400" /></div> })()}
                                                         <div className="flex-1 min-w-0">
                                                             <p className={`text-sm font-medium truncate ${isActive ? 'text-sky-500' : ''}`}>{sp?.trackName ?? '—'}</p>
                                                             <p className="text-xs text-gray-400 truncate">{sp?.artistName ?? '—'}</p>
@@ -814,7 +814,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                             <div className="flex items-center gap-3 px-4 pt-3 pb-1.5 md:grid md:grid-cols-[1fr_auto_1fr]">
                                 {/* Left: artwork + track info */}
                                 <div className="flex items-center gap-3 min-w-0 flex-1 md:flex-initial">
-                                    {(() => { const a = songArtworkUrl(current?.uuid, current?.artwork_cached, p.artworkUrl100, 200); return a ? <Image src={a} alt="" width={36} height={36} className="rounded shrink-0" /> : null })()}
+                                    {(() => { const a = songArtworkUrl(current?.uuid, current?.artwork_cached, p.artworkUrl100, 200); return a ? <Image src={a} alt="" width={36} height={36} className="rounded shrink-0" unoptimized={!!current?.artwork_cached} /> : null })()}
                                     {playContext ? (
                                         <Link href={playContext.href} className="flex flex-col min-w-0 flex-1 group">
                                             <span data-testid="player-track-name" className="text-xs font-medium truncate group-hover:text-sky-500 transition-colors">{p.trackName || 'Unknown title'}</span>

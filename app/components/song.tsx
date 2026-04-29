@@ -199,7 +199,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                     className="whitespace-nowrap block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation">
                     Download
                 </button>
-                <button onClick={() => { closeKebab(); insertNext({ uuid: song.songId!, properties: song.properties }) }}
+                <button onClick={() => { closeKebab(); insertNext({ uuid: song.songId!, properties: song.properties, artwork_cached: song.artworkCached }) }}
                     className="whitespace-nowrap block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 touch-manipulation">
                     Play next
                 </button>

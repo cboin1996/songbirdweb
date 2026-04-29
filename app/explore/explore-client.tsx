@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import SearchInput from "../components/search-input"
-import { ExploreData, ExploreWindow, SongWithCount, RecentlyPlayedSong, RecentlySavedSong, fetchLibrary } from "../lib/data"
+import { ExploreData, ExploreWindow, SongWithCount, RecentlyPlayedSong, RecentlySavedSong, fetchLibrary, toSongCard, toPlayableSong } from "../lib/data"
 import { routes } from "../lib/routes"
 import { usePlayer } from "../components/player"
 import Song from "../components/song"
@@ -75,7 +75,7 @@ function SongGrid({ songs, libraryIds, sortBy, showSource }: {
     const { play, current } = usePlayer()
     const isDesktop = useIsDesktop()
     if (songs.length === 0) return <p className="text-gray-400 text-sm py-4">no data yet</p>
-    const queue = songs.filter(s => s.properties).map(s => ({ uuid: s.uuid, properties: s.properties! }))
+    const queue = songs.filter(s => s.properties).map(s => toPlayableSong(s))
     return (
         <div className={isDesktop
             ? "grid grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-2 md:gap-6"
@@ -83,14 +83,14 @@ function SongGrid({ songs, libraryIds, sortBy, showSource }: {
         }>
             {songs.map(s => {
                 if (!s.properties) return null
-                const song = { songId: s.uuid, properties: s.properties, source: ('source' in s ? s.source : undefined) ?? undefined }
+                const song = toSongCard(s)
                 const stat = itemStat(s, sortBy)
                 return (
                     <div key={s.uuid} className="flex flex-col gap-1">
                         <Song
                             song={song}
                             selected={current?.uuid === s.uuid}
-                            onClick={() => play({ uuid: s.uuid, properties: s.properties! }, queue, { label: 'Explore', href: routes.explore, id: 'explore' })}
+                            onClick={() => play(toPlayableSong(s), queue, { label: 'Explore', href: routes.explore, id: 'explore' })}
                             inLibrary={libraryIds.has(s.uuid)}
                             showSource={showSource}
                             compact={!isDesktop}

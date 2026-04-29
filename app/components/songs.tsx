@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useRef, useState } from "react";
-import { DownloadedSong, downloadSongViaUrl, downloadSongToFile, addToLibrary, fetchLibrary, tagSong } from "../lib/data";
+import { DownloadedSong, downloadSongViaUrl, downloadSongToFile, addToLibrary, fetchLibrary, tagSong, toPlayableSong } from "../lib/data";
 import { usePlayer } from "./player";
 import { routes } from "../lib/routes";
 import Song from "./song";
@@ -106,8 +106,8 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
                                 selected={song.songId ? current?.uuid === song.songId : activeIndex === globalIndex}
                                 onClick={() => {
                                     if (song.songId) {
-                                        const q = downloaded.filter(s => s.songId).map(s => ({ uuid: s.songId!, properties: s.properties }))
-                                        play({ uuid: song.songId, properties: song.properties }, q, { label: 'Downloads', href: routes.downloadSong, id: 'downloads' })
+                                        const q = downloaded.filter(s => s.songId).map(s => toPlayableSong(s))
+                                        play(toPlayableSong(song), q, { label: 'Downloads', href: routes.downloadSong, id: 'downloads' })
                                     } else {
                                         setActiveIndex(globalIndex)
                                         setStatus('idle')

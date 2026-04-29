@@ -4,10 +4,13 @@ import { startImport, listImportJobs, ImportJobResult } from '../lib/data'
 import { FaUpload } from 'react-icons/fa'
 import ImportJobsTable, { ImportJobsTableHandle } from '../components/import-jobs-table'
 import { useOnline } from '../lib/use-online'
+import { useUser } from '../lib/user-context'
 
 export default function ImportPage() {
   const online = useOnline()
+  const { isAdmin } = useUser()
   const [dragging, setDragging] = useState(false)
+  const [asOriginal, setAsOriginal] = useState(false)
   const [initialJobs, setInitialJobs] = useState<ImportJobResult[]>([])
   const [initialTotal, setInitialTotal] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -31,13 +34,13 @@ export default function ImportPage() {
           created_at: new Date().toISOString(),
         }
         tableRef.current?.addJob(optimistic)
-        const job = await startImport(file)
+        const job = await startImport(file, isAdmin && asOriginal)
         if (job) {
           tableRef.current?.addJob(job, tempId)
         }
       }))
     }
-  }, [])
+  }, [isAdmin, asOriginal])
 
   function onDrop(e: React.DragEvent) {
     e.preventDefault()
@@ -76,6 +79,18 @@ export default function ImportPage() {
           data-testid="import-file-input"
         />
       </div>
+
+      {isAdmin && (
+        <label className="flex items-center gap-2 self-start cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={asOriginal}
+            onChange={e => setAsOriginal(e.target.checked)}
+            className="accent-sky-500"
+          />
+          <span className="text-sm text-gray-500 dark:text-gray-400">import as original</span>
+        </label>
+      )}
 
       <ImportJobsTable initialJobs={initialJobs} total={initialTotal} tableRef={tableRef} />
     </main>

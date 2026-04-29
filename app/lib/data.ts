@@ -215,25 +215,28 @@ export interface SongWithCount {
   properties: Properties | null
   count: number
   source?: string | null
+  artwork_cached?: boolean
 }
 
 export interface RecentlyPlayedSong {
   uuid: string
   properties: Properties | null
   last_played_at: string
+  artwork_cached?: boolean
 }
 
 export interface RecentlySavedSong {
   uuid: string
   properties: Properties | null
   added_at: string
+  artwork_cached?: boolean
 }
 
 export interface ExploreData {
   most_played: SongWithCount[]
   most_downloaded: SongWithCount[]
   most_libraryed: SongWithCount[]
-  recently_added: { uuid: string; url: string; properties: Properties | null; added_at: string; source?: string | null }[]
+  recently_added: { uuid: string; url: string; properties: Properties | null; added_at: string; source?: string | null; artwork_cached?: boolean }[]
   your_most_played: SongWithCount[]
   your_most_downloaded: SongWithCount[]
   your_recently_saved: RecentlySavedSong[]
@@ -284,6 +287,44 @@ export interface DownloadedSong {
   rootSongId?: string | null;
   source?: string | null;
   owner_id?: string | null;
+}
+
+type SongLike = {
+  uuid?: string
+  songId?: string
+  properties?: Properties | null
+  artwork_cached?: boolean
+  artworkCached?: boolean
+  source?: string | null
+  owner_id?: string | null
+  parent_song_id?: string | null
+  parentSongId?: string | null
+  root_song_id?: string | null
+  rootSongId?: string | null
+  last_position?: number
+  last_played_at?: string | null
+}
+
+export function toSongCard(raw: SongLike): DownloadedSong {
+  return {
+    songId: raw.uuid ?? raw.songId,
+    properties: raw.properties!,
+    artworkCached: raw.artwork_cached ?? raw.artworkCached,
+    source: raw.source,
+    owner_id: raw.owner_id,
+    parentSongId: raw.parent_song_id ?? raw.parentSongId,
+    rootSongId: raw.root_song_id ?? raw.rootSongId,
+  }
+}
+
+export function toPlayableSong(raw: SongLike): PlayableSong {
+  return {
+    uuid: (raw.uuid ?? raw.songId)!,
+    properties: raw.properties!,
+    artwork_cached: raw.artwork_cached ?? raw.artworkCached,
+    last_position: raw.last_position,
+    last_played_at: raw.last_played_at,
+  }
 }
 
 export function artworkUrl(url: string, size: number): string {
@@ -393,6 +434,7 @@ interface IndexedProperties {
   url: string;
   owner_id: string | null;
   source: string | null;
+  artwork_cached: boolean;
 }
 
 export async function fetchPropertiesFromIndex(
@@ -404,7 +446,7 @@ export async function fetchPropertiesFromIndex(
     method: "GET",
   });
   if (result === undefined) return undefined;
-  return result.map(song => ({ songId: song.uuid, properties: song.properties, owner_id: song.owner_id, source: song.source }));
+  return result.map(song => ({ songId: song.uuid, properties: song.properties, owner_id: song.owner_id, source: song.source, artworkCached: song.artwork_cached }));
 }
 
 interface TaggingResponse {
@@ -606,11 +648,12 @@ export interface ImportJobResult {
   created_at?: string
 }
 
-export async function startImport(file: File): Promise<ImportJobResult | undefined> {
+export async function startImport(file: File, asOriginal = false): Promise<ImportJobResult | undefined> {
   try {
     const formData = new FormData()
     formData.append('file', file)
-    const response = await fetch(`${API_V1}/import`, { method: 'POST', body: formData, credentials: 'include' })
+    const url = asOriginal ? `${API_V1}/import?as_original=true` : `${API_V1}/import`
+    const response = await fetch(url, { method: 'POST', body: formData, credentials: 'include' })
     if (!response.ok) return undefined
     return response.json()
   } catch {
@@ -650,11 +693,12 @@ export async function changePassword(currentPassword: string, newPassword: strin
 export async function tagSong(
   songId: string,
   properties: Properties,
+  asOriginal = false,
 ): Promise<TaggingResponse | undefined> {
   return fetchData<TaggingResponse>({
     url: `${TAGGING_URL}`,
     method: "PUT",
-    body: { properties, song_id: songId },
+    body: { properties, song_id: songId, as_original: asOriginal },
   });
 }
 
