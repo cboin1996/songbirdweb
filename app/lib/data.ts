@@ -159,6 +159,7 @@ export interface PlayableSong {
   last_position?: number
   last_played_at?: string | null
   artwork_cached?: boolean
+  source?: { label: string; href: string; id: string } | null
 }
 
 export interface LibrarySong {
@@ -202,6 +203,11 @@ export async function fetchLibrarySongs(): Promise<LibrarySong[]> {
     return await getCachedData<LibrarySong[]>('library-songs') ?? []
   }
   return []
+}
+
+export async function fetchSongById(id: string): Promise<PlayableSong | undefined> {
+  const raw = await fetchData<SongLike>({ url: `${API_V1}/songs/${id}`, method: 'GET', silentStatuses: [404] })
+  return raw ? toPlayableSong(raw) : undefined
 }
 
 export async function fetchAllSongs(): Promise<LibrarySong[]> {
@@ -317,13 +323,14 @@ export function toSongCard(raw: SongLike): DownloadedSong {
   }
 }
 
-export function toPlayableSong(raw: SongLike): PlayableSong {
+export function toPlayableSong(raw: SongLike, source?: { label: string; href: string; id: string } | null): PlayableSong {
   return {
     uuid: (raw.uuid ?? raw.songId)!,
     properties: raw.properties!,
     artwork_cached: raw.artwork_cached ?? raw.artworkCached,
     last_position: raw.last_position,
     last_played_at: raw.last_played_at,
+    source: source ?? null,
   }
 }
 
@@ -725,6 +732,7 @@ export interface EditParams {
   speed: number
   normalize: boolean
   cuts: Cut[]
+  properties_overrides?: Properties | null
 }
 
 export interface EditJobResponse {
@@ -738,11 +746,12 @@ export async function createEditJob(
   songId: string,
   params: EditParams,
   overwrite = false,
+  asOriginal = false,
 ): Promise<EditJobResponse | undefined> {
   return fetchData<EditJobResponse>({
     url: `${API_V1}/edit/songs/${songId}`,
     method: 'POST',
-    body: { params, overwrite },
+    body: { params, overwrite, as_original: asOriginal },
   })
 }
 

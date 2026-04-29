@@ -6,7 +6,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { FaPause, FaPlay, FaStepBackward, FaStepForward, FaRandom, FaRedo, FaList, FaTimes, FaVolumeUp, FaVolumeMute, FaBars, FaMusic } from "react-icons/fa"
 import Spinner from "./spinner"
-import { DOWNLOAD_URL, PlayableSong, artworkUrl, songArtworkUrl, fetchLibrarySongs, fetchPlayerState, recordPlay, savePlayerState, updatePosition } from "../lib/data"
+import { DOWNLOAD_URL, PlayableSong, artworkUrl, songArtworkUrl, fetchLibrarySongs, fetchPlayerState, fetchSongById, recordPlay, savePlayerState, updatePosition } from "../lib/data"
 import { getSongFile } from "../lib/offline"
 import Slider from "./slider"
 
@@ -263,14 +263,18 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     function play(song: PlayableSong, newQueue?: PlayableSong[], context?: PlayContext) {
         hasUserPlayedRef.current = true
-        const q = newQueue ?? [song]
+        const baseQueue = newQueue ?? [song]
+        const q = context !== undefined
+            ? baseQueue.map(s => ({ ...s, source: s.source ?? context }))
+            : baseQueue
         const idx = Math.max(0, q.findIndex(s => s.uuid === song.uuid))
+        const playingSong = q[idx] ?? song
         queueRef.current = q
         queueIndexRef.current = idx
         manualNextRef.current = []
         setQueue(q)
         if (shuffleRef.current) generateShuffleOrder(idx)
-        loadSong(song, true)
+        loadSong(playingSong, true)
         if (context !== undefined) {
             setPlayContext(context)
             playContextRef.current = context
@@ -279,6 +283,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     }
 
     function insertNext(song: PlayableSong) {
+        if (queueRef.current.some(s => s.uuid === song.uuid)) {
+            showToast('Already in queue')
+            return
+        }
         const q = [...queueRef.current]
         const insertAt = queueIndexRef.current + 1 + manualNextRef.current.length
         q.splice(insertAt, 0, song)
@@ -414,6 +422,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 current_song_uuid: queueRef.current[queueIndexRef.current]?.uuid ?? null,
             }
             try { localStorage.setItem('playerState', JSON.stringify(state)) } catch {}
+            // Per-song source map — local only; not sent to API
+            try {
+                const sources: Record<string, PlayContext> = {}
+                for (const s of queueRef.current) if (s.source) sources[s.uuid] = s.source
+                for (const s of manualNextRef.current) if (s.source) sources[s.uuid] = s.source
+                localStorage.setItem('playerSources', JSON.stringify(sources))
+            } catch {}
             savePlayerState(state)
         }, 2000)
     }
@@ -586,6 +601,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             } catch {}
             const state = serverState ?? localState
 
+            let sourceMap: Record<string, PlayContext> = {}
+            try {
+                const raw = localStorage.getItem('playerSources')
+                if (raw) sourceMap = JSON.parse(raw)
+            } catch {}
+
             if (state) {
                 setShuffle(state.shuffle)
                 shuffleRef.current = state.shuffle
@@ -596,10 +617,20 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             if (hasUserPlayedRef.current) return
 
             const queueUuids = state?.queue ?? []
-            const restoredQueue: PlayableSong[] = queueUuids
-                .map(id => libMap.get(id))
-                .filter((s): s is NonNullable<typeof s> => !!s?.properties)
-                .map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached }))
+            const resolveUuids = async (uuids: string[]): Promise<PlayableSong[]> => {
+                const results: PlayableSong[] = []
+                for (const id of uuids) {
+                    const lib = libMap.get(id)
+                    if (lib?.properties) {
+                        results.push({ uuid: lib.uuid, properties: lib.properties!, last_position: lib.last_position, last_played_at: lib.last_played_at, artwork_cached: lib.artwork_cached, source: sourceMap[id] ?? null })
+                    } else {
+                        const fetched = await fetchSongById(id)
+                        if (fetched) results.push({ ...fetched, source: sourceMap[id] ?? null })
+                    }
+                }
+                return results
+            }
+            const restoredQueue = await resolveUuids(queueUuids)
 
             if (restoredQueue.length > 0) {
                 const safeIndex = Math.max(0, Math.min(state!.queue_index, restoredQueue.length - 1))
@@ -630,10 +661,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 // Restore manual_next queue
                 const savedManualNext = (state as { manual_next?: string[] }).manual_next ?? []
                 if (savedManualNext.length > 0) {
-                    manualNextRef.current = savedManualNext
-                        .map(id => libMap.get(id))
-                        .filter((s): s is NonNullable<typeof s> => !!s?.properties)
-                        .map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached }))
+                    manualNextRef.current = await resolveUuids(savedManualNext)
                 }
                 setCurrent(song)
                 const audio = audioRef.current
@@ -654,7 +682,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                     .filter(s => s.last_played_at && s.properties)
                     .sort((a, b) => new Date(b.last_played_at!).getTime() - new Date(a.last_played_at!).getTime())[0]
                 if (last?.properties) {
-                    const song = { uuid: last.uuid, properties: last.properties, last_position: last.last_position, last_played_at: last.last_played_at, artwork_cached: last.artwork_cached }
+                    const song = { uuid: last.uuid, properties: last.properties, last_position: last.last_position, last_played_at: last.last_played_at, artwork_cached: last.artwork_cached, source: sourceMap[last.uuid] ?? null }
                     setCurrent(song)
                     queueRef.current = [song]
                     queueIndexRef.current = 0
@@ -714,7 +742,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             <audio ref={audioRef} />
             {children}
             {toast && (
-                <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[60] px-4 py-2 rounded-full bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-xs font-medium shadow-lg pointer-events-none whitespace-nowrap">
+                <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[60] px-4 py-2 rounded-full bg-gray-900 text-white text-xs font-medium shadow-lg pointer-events-none whitespace-nowrap">
                     {toast}
                 </div>
             )}
@@ -796,6 +824,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                                         </div>
                                                         {isActive && (isPlaying ? <FaPause size={9} className="text-sky-500 shrink-0" /> : <FaPlay size={9} className="text-sky-500 shrink-0" />)}
                                                     </button>
+                                                    {song.source && (
+                                                        <Link href={song.source.href} onClick={e => e.stopPropagation()} className="text-xs text-gray-400 hover:text-sky-500 truncate max-w-[80px] shrink-0">
+                                                            {song.source.label}
+                                                        </Link>
+                                                    )}
                                                     <button onClick={() => removeFromQueue(qi)} className="shrink-0 text-gray-300 dark:text-gray-600 hover:text-red-400 transition-colors p-1">
                                                         <FaTimes size={10} />
                                                     </button>
@@ -815,18 +848,21 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                 {/* Left: artwork + track info */}
                                 <div className="flex items-center gap-3 min-w-0 flex-1 md:flex-initial">
                                     {(() => { const a = songArtworkUrl(current?.uuid, current?.artwork_cached, p.artworkUrl100, 200); return a ? <Image src={a} alt="" width={36} height={36} className="rounded shrink-0" unoptimized={!!current?.artwork_cached} /> : null })()}
-                                    {playContext ? (
-                                        <Link href={playContext.href} className="flex flex-col min-w-0 flex-1 group">
-                                            <span data-testid="player-track-name" className="text-xs font-medium truncate group-hover:text-sky-500 transition-colors">{p.trackName || 'Unknown title'}</span>
-                                            <span className="text-xs text-sky-500 truncate">{p.artistName || 'Unknown artist'}</span>
-                                            <span className="text-xs text-gray-400 truncate hidden md:block">from {playContext.label}</span>
-                                        </Link>
-                                    ) : (
-                                        <div className="flex flex-col min-w-0 flex-1">
-                                            <span data-testid="player-track-name" className="text-xs font-medium truncate">{p.trackName || 'Unknown title'}</span>
-                                            <span className="text-xs text-sky-500 truncate">{p.artistName || 'Unknown artist'}</span>
-                                        </div>
-                                    )}
+                                    {(() => {
+                                        const ctx = current?.source ?? playContext
+                                        return ctx ? (
+                                            <Link href={ctx.href} className="flex flex-col min-w-0 flex-1 group">
+                                                <span data-testid="player-track-name" className="text-xs font-medium truncate group-hover:text-sky-500 transition-colors">{p.trackName || 'Unknown title'}</span>
+                                                <span className="text-xs text-sky-500 truncate">{p.artistName || 'Unknown artist'}</span>
+                                                <span className="text-xs text-gray-400 truncate hidden md:block">from {ctx.label}</span>
+                                            </Link>
+                                        ) : (
+                                            <div className="flex flex-col min-w-0 flex-1">
+                                                <span data-testid="player-track-name" className="text-xs font-medium truncate">{p.trackName || 'Unknown title'}</span>
+                                                <span className="text-xs text-sky-500 truncate">{p.artistName || 'Unknown artist'}</span>
+                                            </div>
+                                        )
+                                    })()}
                                 </div>
 
                                 {/* Center: transport (desktop only — on mobile lives in right section) */}

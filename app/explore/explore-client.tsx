@@ -75,7 +75,8 @@ function SongGrid({ songs, libraryIds, sortBy, showSource }: {
     const { play, current } = usePlayer()
     const isDesktop = useIsDesktop()
     if (songs.length === 0) return <p className="text-gray-400 text-sm py-4">no data yet</p>
-    const queue = songs.filter(s => s.properties).map(s => toPlayableSong(s))
+    const exploreCtx = { label: 'Explore', href: routes.explore, id: 'explore' }
+    const queue = songs.filter(s => s.properties).map(s => toPlayableSong(s, exploreCtx))
     return (
         <div className={isDesktop
             ? "grid grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-2 md:gap-6"
@@ -90,7 +91,7 @@ function SongGrid({ songs, libraryIds, sortBy, showSource }: {
                         <Song
                             song={song}
                             selected={current?.uuid === s.uuid}
-                            onClick={() => play(toPlayableSong(s), queue, { label: 'Explore', href: routes.explore, id: 'explore' })}
+                            onClick={() => play(toPlayableSong(s, exploreCtx), queue, exploreCtx)}
                             inLibrary={libraryIds.has(s.uuid)}
                             showSource={showSource}
                             compact={!isDesktop}

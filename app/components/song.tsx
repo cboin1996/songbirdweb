@@ -1,6 +1,6 @@
 'use client'
 import { useRef, useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { createPortal } from "react-dom";
 import { addToLibrary, removeFromLibrary, downloadSongToFile, createShareToken, DownloadedSong, songArtworkUrl, artworkUrl, addSongToPlaylist, addServerOfflineSong, removeServerOfflineSong } from "../lib/data";
 import { cacheSong, uncacheSong } from "../lib/offline";
@@ -52,6 +52,13 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
     const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
     const kebabJustClosed = useRef(false)
     const { play, pause, resume, current, isPlaying, insertNext } = usePlayer()
+    const pathname = usePathname()
+    function pageSource() {
+        const href = typeof window !== 'undefined' ? window.location.pathname + window.location.search : pathname
+        return pathname.includes('/explore') ? { label: 'Explore', href, id: 'explore' }
+            : pathname.includes('/download') ? { label: 'Downloads', href, id: 'downloads' }
+            : { label: 'Library', href, id: 'library' }
+    }
     const isCurrentSong = current?.uuid === song.songId
     const [artworkFailed, setArtworkFailed] = useState(false)
     useEffect(() => { setArtworkFailed(false) }, [song.songId])
@@ -199,8 +206,9 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                     className="whitespace-nowrap block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation">
                     Download
                 </button>
-                <button onClick={() => { closeKebab(); insertNext({ uuid: song.songId!, properties: song.properties, artwork_cached: song.artworkCached }) }}
-                    className="whitespace-nowrap block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 touch-manipulation">
+                <button onClick={() => { closeKebab(); insertNext({ uuid: song.songId!, properties: song.properties, artwork_cached: song.artworkCached, source: pageSource() }) }}
+                    disabled={isCurrentSong}
+                    className="whitespace-nowrap block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation">
                     Play next
                 </button>
                 <button onClick={() => { closeKebab(); handleShare() }}

@@ -454,21 +454,22 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
             const allAlbumSongs = [...albumGrouped.values()].flat().flatMap(a => a.songs)
             const first = allAlbumSongs[0]
             if (!first?.properties) return
-            const queue = allAlbumSongs.filter(s => s.properties).map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached }))
-            play({ uuid: first.uuid, properties: first.properties, last_position: first.last_position, last_played_at: first.last_played_at, artwork_cached: first.artwork_cached }, queue, ctx)
+            const queue = allAlbumSongs.filter(s => s.properties).map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached, source: ctx }))
+            play({ uuid: first.uuid, properties: first.properties, last_position: first.last_position, last_played_at: first.last_played_at, artwork_cached: first.artwork_cached, source: ctx }, queue, ctx)
         } else {
             const first = allSortedSongs[0]
             if (!first?.properties) return
-            const queue = allSortedSongs.filter(s => s.properties).map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached }))
-            play({ uuid: first.uuid, properties: first.properties, last_position: first.last_position, last_played_at: first.last_played_at, artwork_cached: first.artwork_cached }, queue, ctx)
+            const queue = allSortedSongs.filter(s => s.properties).map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached, source: ctx }))
+            play({ uuid: first.uuid, properties: first.properties, last_position: first.last_position, last_played_at: first.last_played_at, artwork_cached: first.artwork_cached, source: ctx }, queue, ctx)
         }
     }
 
     function playAlbum(album: LibraryAlbum) {
         const first = album.songs[0]
         if (!first?.properties) return
-        const queue = album.songs.filter(s => s.properties).map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached }))
-        play({ uuid: first.uuid, properties: first.properties, last_position: first.last_position, last_played_at: first.last_played_at, artwork_cached: first.artwork_cached }, queue, { label: album.collectionName, href: `${routes.library}?view=albums`, id: `album:${album.collectionId}` })
+        const ctx = { label: album.collectionName, href: `${routes.library}?view=albums`, id: `album:${album.collectionId}` }
+        const queue = album.songs.filter(s => s.properties).map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached, source: ctx }))
+        play({ uuid: first.uuid, properties: first.properties, last_position: first.last_position, last_played_at: first.last_played_at, artwork_cached: first.artwork_cached, source: ctx }, queue, ctx)
     }
 
     function enterSelectMode(songId?: string) {
@@ -780,13 +781,14 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                     selected={current?.uuid === song.uuid}
                                     onClick={() => {
                                         if (!song.properties) return
+                                        const ctx = { label: genre, href: `${routes.library}?view=genres`, id: `genre:${genre}` }
                                         const queue = group
                                             .filter(s => s.properties)
-                                            .map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached }))
+                                            .map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached, source: ctx }))
                                         play(
-                                            { uuid: song.uuid, properties: song.properties, last_position: song.last_position, last_played_at: song.last_played_at, artwork_cached: song.artwork_cached },
+                                            { uuid: song.uuid, properties: song.properties, last_position: song.last_position, last_played_at: song.last_played_at, artwork_cached: song.artwork_cached, source: ctx },
                                             queue,
-                                            { label: genre, href: `${routes.library}?view=genres`, id: `genre:${genre}` }
+                                            ctx
                                         )
                                     }}
                                     inLibrary={true}
@@ -828,13 +830,14 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                             handleSelect(song.uuid, e?.shiftKey)
                                             return
                                         }
+                                        const ctx = { ...VIEW_CONTEXT[viewMode], id: viewMode === 'songs' ? 'library' : viewMode }
                                         const queue = allSortedSongs
                                             .filter(s => s.properties)
-                                            .map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached }))
+                                            .map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached, source: ctx }))
                                         play(
-                                            { uuid: song.uuid, properties: song.properties, last_position: song.last_position, last_played_at: song.last_played_at, artwork_cached: song.artwork_cached },
+                                            { uuid: song.uuid, properties: song.properties, last_position: song.last_position, last_played_at: song.last_played_at, artwork_cached: song.artwork_cached, source: ctx },
                                             queue,
-                                            { ...VIEW_CONTEXT[viewMode], id: viewMode === 'songs' ? 'library' : viewMode }
+                                            ctx
                                         )
                                     }}
                                     inLibrary={true}
