@@ -1301,7 +1301,10 @@ export default function EditorModal({
     const trimStart = p.trim_start
     const trimEnd = p.trim_end ?? duration
     const span = Math.min(10, trimEnd - trimStart)
-    const obstacles = [...p.fades, ...p.cuts].sort((a, b) => a.start - b.start)
+    const obstacles = [
+      ...p.fades,
+      ...p.cuts.map(c => ({ ...c, start: c.start - (c.fade_out ?? 0), end: c.end + (c.fade_in ?? 0) })),
+    ].sort((a, b) => a.start - b.start)
     const cursor = wsRef.current?.getCurrentTime() ?? (trimStart + trimEnd) / 2
     let start = Math.max(trimStart, Math.min(trimEnd - span, cursor - span / 2))
     for (let i = 0; i <= obstacles.length; i++) {
@@ -1358,7 +1361,10 @@ export default function EditorModal({
     const p = paramsRef.current
     const trimStart = p.trim_start
     const trimEnd = p.trim_end ?? duration
-    const obstacles = [...p.fades, ...p.cuts].sort((a, b) => a.start - b.start)
+    const obstacles = [
+      ...p.fades,
+      ...p.cuts.map(c => ({ ...c, start: c.start - (c.fade_out ?? 0), end: c.end + (c.fade_in ?? 0) })),
+    ].sort((a, b) => a.start - b.start)
     let start: number, end: number
     if (type === 'in') {
       start = trimStart
@@ -1386,9 +1392,20 @@ export default function EditorModal({
     const trimStart = p.trim_start
     const trimEnd = p.trim_end ?? duration
     const span = Math.min(10, trimEnd - trimStart)
-    const start = Math.max(trimStart, Math.min(trimEnd - span, time - span / 2))
+    const obstacles = [
+      ...p.fades,
+      ...p.cuts.map(c => ({ ...c, start: c.start - (c.fade_out ?? 0), end: c.end + (c.fade_in ?? 0) })),
+    ].sort((a, b) => a.start - b.start)
+    let start = Math.max(trimStart, Math.min(trimEnd - span, time - span / 2))
+    for (let i = 0; i <= obstacles.length; i++) {
+      const end = Math.min(trimEnd, start + span)
+      if (end - start < MIN_REGION_DUR) return
+      const hit = obstacles.find(o => start < o.end && end > o.start)
+      if (!hit) break
+      start = hit.end + OBSTACLE_GAP
+    }
     const end = Math.min(trimEnd, start + span)
-    if (end - start < 0.5) return
+    if (end - start < MIN_REGION_DUR) return
     const id = crypto.randomUUID()
     pushHistory(p)
     regionsRef.current?.addRegion({ id, start, end, color: 'transparent', drag: true, resize: true })

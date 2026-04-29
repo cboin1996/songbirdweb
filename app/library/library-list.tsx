@@ -111,6 +111,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     const [playlists, setPlaylists] = useState<Playlist[]>([])
     const [draftIds, setDraftIds] = useState<Set<string>>(new Set())
     const [eligibleSongs, setEligibleSongs] = useState<EligibleSong[]>([])
+    const eligibleIds = useMemo(() => new Set(eligibleSongs.filter(s => s.eligible).map(s => s.uuid)), [eligibleSongs])
     const [publishModalOpen, setPublishModalOpen] = useState(false)
     const [publishing, setPublishing] = useState(false)
     const [offlineSyncModalOpen, setOfflineSyncModalOpen] = useState(false)
@@ -154,7 +155,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
 
     useEffect(() => {
         if (navigator.onLine) refreshSongs()
-        if (navigator.onLine) fetchEligibleSongs().then(e => setEligibleCount(e.filter(s => s.eligible).length))
+        if (navigator.onLine) fetchEligibleSongs().then(e => { setEligibleSongs(e); setEligibleCount(e.filter(s => s.eligible).length) })
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
@@ -724,8 +725,9 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                     <button
                         onClick={openPublishModal}
                         disabled={!online}
-                        className="flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors disabled:opacity-50 text-gray-400 hover:text-sky-500 border border-gray-200 dark:border-gray-800 hover:border-sky-500"
+                        className="flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors disabled:opacity-50 text-emerald-400 hover:text-emerald-300 border border-emerald-500/40 hover:border-emerald-400"
                     >
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                         publish eligible ({eligibleCount})
                     </button>
                 )}
@@ -813,6 +815,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                     playlists={playlistStubs}
                                     onPlaylistAdd={refreshPlaylists}
                                     hasDraft={draftIds.has(song.uuid)}
+                                    isEligible={eligibleIds.has(song.uuid)}
                                 />
                                 </div>
                             ))}
@@ -867,6 +870,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                     onSelect={(id, shiftKey) => handleSelect(id, shiftKey)}
                                     onLongPress={(id) => { if (!selectMode) enterSelectMode(id) }}
                                     hasDraft={draftIds.has(song.uuid)}
+                                    isEligible={eligibleIds.has(song.uuid)}
                                 />
                                 </div>
                             ))}

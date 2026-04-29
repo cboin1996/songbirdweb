@@ -12,7 +12,7 @@ import { useUser } from "../lib/user-context";
 import { useOnline } from "../lib/use-online";
 import CommunityBadge from "./community-badge";
 
-export default function Song({ song, selected, onClick, inLibrary: initialInLibrary, cachedOffline: initialCachedOffline, onRemove, onCacheChange, compact, rank, isPrivate, playlists, onPlaylistAdd, selectMode, isSelected, onSelect, onLongPress, showSource, hasDraft }: {
+export default function Song({ song, selected, onClick, inLibrary: initialInLibrary, cachedOffline: initialCachedOffline, onRemove, onCacheChange, compact, rank, isPrivate, playlists, onPlaylistAdd, selectMode, isSelected, onSelect, onLongPress, showSource, hasDraft, isEligible }: {
     song: DownloadedSong,
     selected: boolean,
     onClick: (e?: React.MouseEvent) => void,
@@ -31,6 +31,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
     onLongPress?: (songId: string) => void,
     showSource?: boolean,
     hasDraft?: boolean,
+    isEligible?: boolean,
 }) {
     const { isAdmin } = useUser()
     const online = useOnline()
@@ -349,6 +350,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                             {isPrivate && <FaLock size={9} className="text-gray-400 shrink-0" />}
                             {song.properties.trackName || 'Unknown title'}
                             {showSource && song.source === 'community' && <CommunityBadge />}
+                            {isEligible && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" title="publish eligible" />}
                         </span>
                         <span className="text-xs text-sky-500 truncate">{song.properties.artistName || 'Unknown artist'} · {song.properties.collectionName || 'Unknown album'}</span>
                     </div>
@@ -391,6 +393,7 @@ export default function Song({ song, selected, onClick, inLibrary: initialInLibr
                                 {isPrivate && <FaLock size={12} className="text-gray-400 shrink-0" />}
                                 {song.properties.trackName || 'Unknown title'}
                                 {showSource && song.source === 'community' && <CommunityBadge />}
+                                {isEligible && <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" title="publish eligible" />}
                             </span>
                             <span className="font-medium text-sky-500 text-left truncate">{`${song.properties.artistName || 'Unknown artist'} · ${song.properties.collectionName || 'Unknown album'}`}</span>
                             <span className="flex gap-2 font-medium text-gray-500">
