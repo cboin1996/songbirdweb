@@ -1,3 +1,4 @@
+import { routes } from './routes'
 import { test, expect, APIRequestContext } from '@playwright/test'
 import { login, apiLogin, uniq, purgePlaylistsByPrefix, API_V1 } from './helpers'
 
@@ -31,7 +32,7 @@ test.describe('library bulk select', () => {
     })
 
     test('Select button enters select mode and reveals bulk action bar', async ({ page }) => {
-        await page.goto('/library')
+        await page.goto(routes.library)
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
 
         await page.getByRole('button', { name: 'Select', exact: true }).click()
@@ -50,7 +51,7 @@ test.describe('library bulk select', () => {
     // FIXME: select mode is entered via long-press on a song card, not via a "Select" button.
     // Need to drive a touch long-press in Playwright to set this up. Punch list in e2e/README.md.
     test.fixme('exit select mode by clicking Cancel', async ({ page }) => {
-        await page.goto('/library')
+        await page.goto(routes.library)
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
 
         const selectBtn = page.getByRole('button', { name: 'Select', exact: true })
@@ -68,7 +69,7 @@ test.describe('library bulk select', () => {
         const created = await api.post(`${API_V1}/playlists`, { data: { name: plName, icon: 'music' } })
         const pl = await created.json()
 
-        await page.goto('/library')
+        await page.goto(routes.library)
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
 
         await page.getByRole('button', { name: 'Select', exact: true }).click()
@@ -100,7 +101,7 @@ test.describe('library bulk select', () => {
     // appear/disappear correctly with selection state.
 
     test('bulk action bar exposes Save offline, Download, Remove, + Playlist', async ({ page }) => {
-        await page.goto('/library')
+        await page.goto(routes.library)
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
 
         await page.getByRole('button', { name: 'Select', exact: true }).click()
@@ -114,7 +115,7 @@ test.describe('library bulk select', () => {
     })
 
     test('selection count toggles accurately when clicking same card twice', async ({ page }) => {
-        await page.goto('/library')
+        await page.goto(routes.library)
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
 
         await page.getByRole('button', { name: 'Select', exact: true }).click()
@@ -131,7 +132,7 @@ test.describe('library bulk select', () => {
     // behind a TEST_BULK_REMOVE env flag once we have a per-test library
     // isolation strategy. Test sketched here for documentation.
     test.fixme('bulk Remove confirms and removes selected songs from library', async ({ page }) => {
-        await page.goto('/library')
+        await page.goto(routes.library)
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
 
         await page.getByRole('button', { name: 'Select', exact: true }).click()
@@ -147,7 +148,7 @@ test.describe('library bulk select', () => {
     // produces network traffic and can hang in CI. Functionality test belongs
     // behind a dedicated env-gated suite. Documents the visible-button path.
     test.fixme('bulk Save offline triggers cache writes for selected songs', async ({ page }) => {
-        await page.goto('/library')
+        await page.goto(routes.library)
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
 
         await page.getByRole('button', { name: 'Select', exact: true }).click()
@@ -159,7 +160,7 @@ test.describe('library bulk select', () => {
     // FIXME: bulk Download opens browser save dialog per song — Playwright
     // download interception is feasible but adds CI complexity. Sketch here.
     test.fixme('bulk Download triggers a download per selected song', async ({ page }) => {
-        await page.goto('/library')
+        await page.goto(routes.library)
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
 
         await page.getByRole('button', { name: 'Select', exact: true }).click()

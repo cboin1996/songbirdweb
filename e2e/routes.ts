@@ -1,0 +1,17 @@
+export const routes = {
+    home: '/',
+    download: '/download',
+    downloadSong: '/download/song',
+    downloadUrl: '/download/url',
+    library: '/library',
+    librarySongs: '/library?view=songs',
+    libraryArtists: '/library?view=artists',
+    libraryAlbums: '/library?view=albums',
+    libraryGenres: '/library?view=genres',
+    libraryPlaylists: '/library?view=playlists',
+    explore: '/explore',
+    import: '/import',
+    admin: '/admin',
+    settings: '/settings',
+    info: '/info',
+} as const

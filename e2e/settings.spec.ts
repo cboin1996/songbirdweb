@@ -1,3 +1,4 @@
+import { routes } from './routes'
 import { test, expect } from '@playwright/test'
 
 const API_BASE = `http://${process.env.NEXT_PUBLIC_API_HOST ?? 'localhost'}:8000/v1`
@@ -10,7 +11,7 @@ let testUserId: string
 
 async function loginAs(page: any, username: string, password: string) {
     await page.context().clearCookies()
-    await page.goto('/')
+    await page.goto(routes.home)
     const ok = await page.evaluate(
         async ({ url, u, p }: { url: string; u: string; p: string }) => {
             const resp = await fetch(url, {
@@ -24,7 +25,7 @@ async function loginAs(page: any, username: string, password: string) {
         { url: `${API_BASE}/auth/login`, u: username, p: password },
     )
     if (!ok) throw new Error(`Login failed for ${username}`)
-    await page.goto('/download')
+    await page.goto(routes.download)
     await expect(page).toHaveURL(/\/download/, { timeout: 10000 })
 }
 
@@ -58,7 +59,7 @@ test.describe('settings - change password', () => {
 
     test('wrong current password shows error', async ({ page }) => {
         await loginAs(page, TEST_USER, TEST_INITIAL_PW)
-        await page.goto('/settings')
+        await page.goto(routes.settings)
         await page.getByPlaceholder('current password').fill('wrongpassword')
         await page.getByPlaceholder('new password', { exact: true }).fill(TEST_NEW_PW)
         await page.getByPlaceholder('confirm new password').fill(TEST_NEW_PW)
@@ -68,7 +69,7 @@ test.describe('settings - change password', () => {
 
     test('correct password change succeeds', async ({ page }) => {
         await loginAs(page, TEST_USER, TEST_INITIAL_PW)
-        await page.goto('/settings')
+        await page.goto(routes.settings)
         await page.getByPlaceholder('current password').fill(TEST_INITIAL_PW)
         await page.getByPlaceholder('new password', { exact: true }).fill(TEST_NEW_PW)
         await page.getByPlaceholder('confirm new password').fill(TEST_NEW_PW)

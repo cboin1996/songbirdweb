@@ -1,3 +1,4 @@
+import { routes } from './routes'
 import { test, expect, Page } from '@playwright/test'
 import { USERNAME, PASSWORD, login, ignoreError, apiLogin, API_V1 } from './helpers'
 import path from 'path'
@@ -36,7 +37,7 @@ test.describe('import page', () => {
     })
 
     test('dropzone visible with correct prompt text', async ({ page }) => {
-        await page.goto('/import')
+        await page.goto(routes.import)
         const dropzone = page.getByTestId('import-dropzone')
         await expect(dropzone).toBeVisible()
         await expect(dropzone).toContainText('.mp3')
@@ -45,7 +46,7 @@ test.describe('import page', () => {
     })
 
     test('click dropzone opens file picker', async ({ page }) => {
-        await page.goto('/import')
+        await page.goto(routes.import)
         const [fileChooser] = await Promise.all([
             page.waitForEvent('filechooser'),
             page.getByTestId('import-dropzone').click(),
@@ -54,7 +55,7 @@ test.describe('import page', () => {
     })
 
     test('file input accepts multiple files', async ({ page }) => {
-        await page.goto('/import')
+        await page.goto(routes.import)
         const input = page.getByTestId('import-file-input')
         // Check the multiple attribute is present
         await expect(input).toHaveAttribute('multiple', '')
@@ -62,7 +63,7 @@ test.describe('import page', () => {
     })
 
     test('uploading a file shows row with status', async ({ page }) => {
-        await page.goto('/import')
+        await page.goto(routes.import)
         const filePath = makeFakeAudioFile('test-song.mp3')
         try {
             await page.getByTestId('import-file-input').setInputFiles(filePath)
@@ -77,7 +78,7 @@ test.describe('import page', () => {
     })
 
     test('uploading multiple files shows multiple rows', async ({ page }) => {
-        await page.goto('/import')
+        await page.goto(routes.import)
         const file1 = makeFakeAudioFile('song-a.mp3')
         const file2 = makeFakeAudioFile('song-b.mp3')
         try {
@@ -93,7 +94,7 @@ test.describe('import page', () => {
     // FIXME: there is no "remove a row" UI in the import history table currently —
     // rows are server-persisted import jobs, not transient client state. Punch list.
     test.fixme('removing a row works', async ({ page }) => {
-        await page.goto('/import')
+        await page.goto(routes.import)
         const filePath = makeFakeAudioFile('removable.mp3')
         try {
             await page.getByTestId('import-file-input').setInputFiles(filePath)
@@ -108,14 +109,14 @@ test.describe('import page', () => {
 
     test('unauthenticated user is redirected from /import', async ({ page }) => {
         await page.context().clearCookies()
-        await page.goto('/import')
+        await page.goto(routes.import)
         await expect(page).toHaveURL('/')
     })
 
     // === Tier 1 dove banner + counters ===
 
     test('dove banner appears with "importing" / "finished" counts on multi-file drop', async ({ page }) => {
-        await page.goto('/import')
+        await page.goto(routes.import)
         const files = [
             makeFakeAudioFile('dove-a.mp3'),
             makeFakeAudioFile('dove-b.mp3'),
@@ -152,7 +153,7 @@ test.describe('import page', () => {
         const beforeDup = beforeBody?.status_counts?.duplicate ?? 0
         const beforeDone = beforeBody?.status_counts?.done ?? 0
 
-        await page.goto('/import')
+        await page.goto(routes.import)
         const filePath = makeFakeAudioFile('chip-counter.mp3')
         try {
             await page.getByTestId('import-file-input').setInputFiles(filePath)
@@ -175,7 +176,7 @@ test.describe('import page', () => {
     })
 
     test('dove banner disappears after all jobs finish', async ({ page }) => {
-        await page.goto('/import')
+        await page.goto(routes.import)
         const filePath = makeFakeAudioFile('disappear.mp3')
         try {
             await page.getByTestId('import-file-input').setInputFiles(filePath)
@@ -195,8 +196,54 @@ test.describe('import page', () => {
 
     // === Tier 1 beforeunload warning ===
 
+    // === Status badge filter ===
+
+    test('clicking a status badge filters table to that status', async ({ page }) => {
+        await page.goto(routes.import)
+        const filePath = makeFakeAudioFile('filter-badge-test.mp3')
+        try {
+            await page.getByTestId('import-file-input').setInputFiles(filePath)
+            const row = page.locator('tr', { hasText: 'filter-badge-test.mp3' }).first()
+            await expect(row.locator('text=/^(done|failed|duplicate)$/').first()).toBeVisible({ timeout: 20000 })
+
+            // The failed badge should now be visible — click it to filter
+            const failedBadge = page.getByTestId('filter-failed')
+            await expect(failedBadge).toBeVisible({ timeout: 5000 })
+            await failedBadge.click()
+
+            // All visible rows must be failed
+            const statusCells = page.locator('tbody tr td:nth-child(3)')
+            const count = await statusCells.count()
+            expect(count).toBeGreaterThan(0)
+            for (let i = 0; i < count; i++) {
+                await expect(statusCells.nth(i)).toContainText('failed')
+            }
+
+            // Badge shows active state (× appended)
+            await expect(failedBadge).toContainText('×')
+
+            // Click again to clear
+            await failedBadge.click()
+            await expect(failedBadge).not.toContainText('×')
+        } finally {
+            fs.unlinkSync(filePath)
+        }
+    })
+
+    test('duplicate row shows "original added" link', async ({ page }) => {
+        await page.goto(routes.import)
+        // Upload a seeded fixture song — already in DB so it triggers duplicate detection
+        const fixturePath = path.join(__dirname, 'fixtures/songs/Nothing Else Matters.mp3')
+        await page.getByTestId('import-file-input').setInputFiles(fixturePath)
+
+        const row = page.locator('tr').filter({ hasText: /Nothing Else Matters/i }).first()
+        await expect(row).toBeVisible({ timeout: 5000 })
+        await expect(row.locator('text=duplicate')).toBeVisible({ timeout: 20000 })
+        await expect(row.locator('a', { hasText: 'original added' })).toBeVisible()
+    })
+
     test('beforeunload dialog fires while uploads pending', async ({ page }) => {
-        await page.goto('/import')
+        await page.goto(routes.import)
         const filePath = makeFakeAudioFile('beforeunload.mp3')
         try {
             // Listener must be wired before we trigger the upload.

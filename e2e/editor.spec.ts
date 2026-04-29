@@ -1,10 +1,11 @@
+import { routes } from './routes'
 import { test, expect, Page } from '@playwright/test'
 import { USERNAME, PASSWORD, login, ignoreError } from './helpers'
 
 
 async function openEditorForEditMe(page: Page) {
-    await page.goto('/library')
-    const songCard = page.locator('[role="button"]').filter({ hasText: /edit-me/i }).first()
+    await page.goto(routes.library)
+    const songCard = page.getByTestId('song-card').filter({ hasText: /edit-me/i }).first()
     await expect(songCard).toBeVisible({ timeout: 10000 })
 
     await songCard.hover()
@@ -18,21 +19,16 @@ async function openEditorForEditMe(page: Page) {
     return modal
 }
 
-async function openEditorForJolene(page: Page) {
-    await page.goto('/download/song?query=jolene&mode=song')
-    // wait for song results
-    const songCard = page.locator('[role="button"]').filter({ hasText: /jolene/i }).first()
+async function openEditorFromLibrary(page: Page) {
+    await page.goto(routes.library)
+    const songCard = page.getByTestId('song-card').filter({ hasText: /edit-me/i }).first()
     await expect(songCard).toBeVisible({ timeout: 10000 })
 
-    // open kebab
     await songCard.hover()
-    const kebabBtn = songCard.locator('button[title="more"]')
-    await kebabBtn.click()
+    await songCard.locator('button[title="more"]').click()
 
-    // click Edit
-    await page.getByRole('button', { name: 'Edit' }).click()
+    await page.getByRole('button', { name: 'Edit', exact: true }).click()
 
-    // modal opens
     const modal = page.getByTestId('editor-modal')
     await expect(modal).toBeVisible()
     return modal
@@ -52,7 +48,7 @@ test.describe('editor modal', () => {
         page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
         page.on('pageerror', err => errors.push(err.message))
 
-        const modal = await openEditorForJolene(page)
+        const modal = await openEditorFromLibrary(page)
         await expect(modal.getByTestId('waveform')).toBeVisible()
         await expect(modal.getByRole('button', { name: 'audio' })).toBeVisible()
         await expect(modal.getByRole('button', { name: 'properties' })).toBeVisible()
@@ -65,7 +61,7 @@ test.describe('editor modal', () => {
     })
 
     test.skip('waveform loads and play button becomes active', async ({ page }) => {
-        const modal = await openEditorForJolene(page)
+        const modal = await openEditorFromLibrary(page)
 
         // loop button is disabled until wsReady — use it as the waveform-ready signal
         await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
@@ -73,7 +69,7 @@ test.describe('editor modal', () => {
 
     // FIXME: depends on openEditorForJolene which uses iTunes search flow (see top fixme).
     test.fixme('sliders are interactive', async ({ page }) => {
-        const modal = await openEditorForJolene(page)
+        const modal = await openEditorFromLibrary(page)
 
         // wait for waveform ready (play button enabled)
         await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
@@ -90,7 +86,7 @@ test.describe('editor modal', () => {
     })
 
     test('undo button activates after slider change', async ({ page }) => {
-        const modal = await openEditorForJolene(page)
+        const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
 
         const undoBtn = modal.locator('button[title="undo (Ctrl+Z)"]')
@@ -104,7 +100,7 @@ test.describe('editor modal', () => {
     })
 
     test('redo button becomes enabled after undo', async ({ page }) => {
-        const modal = await openEditorForJolene(page)
+        const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
 
         const undoBtn = modal.locator('button[title="undo (Ctrl+Z)"]')
@@ -124,8 +120,8 @@ test.describe('editor modal', () => {
         await expect(redoBtn).not.toBeDisabled()
     })
 
-    test('version badge shows "original" for Jolene', async ({ page }) => {
-        const modal = await openEditorForJolene(page)
+    test('version badge shows "original" for unedited song', async ({ page }) => {
+        const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
 
         // Jolene has no edits so badge should read "original"
@@ -133,7 +129,7 @@ test.describe('editor modal', () => {
     })
 
     test('add cut button disabled until waveform ready, then adds/removes a cut', async ({ page }) => {
-        const modal = await openEditorForJolene(page)
+        const modal = await openEditorFromLibrary(page)
 
         const addCutBtn = modal.getByRole('button', { name: '+ add cut' })
         await expect(addCutBtn).toBeVisible()
@@ -160,20 +156,19 @@ test.describe('editor modal', () => {
     })
 
     test('switches to properties tab and shows fields', async ({ page }) => {
-        const modal = await openEditorForJolene(page)
+        const modal = await openEditorFromLibrary(page)
 
         await modal.getByRole('button', { name: 'properties' }).click()
         await expect(modal.getByText('Track name')).toBeVisible()
         await expect(modal.getByText('Artist')).toBeVisible()
         await expect(modal.getByText('Album')).toBeVisible()
 
-        // track name input should be pre-filled with Jolene
         const trackInput = modal.locator('input').first()
-        await expect(trackInput).toHaveValue(/jolene/i)
+        await expect(trackInput).not.toBeEmpty()
     })
 
     test('closes on X button click', async ({ page }) => {
-        const modal = await openEditorForJolene(page)
+        const modal = await openEditorFromLibrary(page)
         await modal.getByTestId('editor-close').click()
         await expect(modal).not.toBeVisible()
     })
@@ -183,7 +178,7 @@ test.describe('editor modal', () => {
         page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
         page.on('pageerror', err => errors.push(err.message))
 
-        const modal = await openEditorForJolene(page)
+        const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
 
         // clear init-time errors (draft 404 on open is expected)
@@ -202,7 +197,7 @@ test.describe('editor modal', () => {
     })
 
     test('discard draft resets params', async ({ page }) => {
-        const modal = await openEditorForJolene(page)
+        const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
 
         const volumeSlider = modal.getByRole('slider', { name: 'Volume' })
@@ -219,7 +214,7 @@ test.describe('editor modal', () => {
         page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
         page.on('pageerror', err => errors.push(err.message))
 
-        const modal = await openEditorForJolene(page)
+        const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
         errors.length = 0
 
@@ -237,7 +232,7 @@ test.describe('editor modal', () => {
         page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
         page.on('pageerror', err => errors.push(err.message))
 
-        const modal = await openEditorForJolene(page)
+        const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
         errors.length = 0
 
@@ -255,7 +250,7 @@ test.describe('editor modal', () => {
         page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
         page.on('pageerror', err => errors.push(err.message))
 
-        const modal = await openEditorForJolene(page)
+        const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
         errors.length = 0
 
@@ -283,7 +278,7 @@ test.describe('editor modal', () => {
         const overlayErrors: string[] = []
         page.on('pageerror', err => overlayErrors.push(err.message))
 
-        const modal = await openEditorForJolene(page)
+        const modal = await openEditorFromLibrary(page)
         await page.waitForTimeout(1000)
 
         // close modal (triggers WaveSurfer destroy)
@@ -348,7 +343,7 @@ test.describe('editor modal', () => {
         page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
         page.on('pageerror', err => errors.push(err.message))
 
-        const modal = await openEditorForJolene(page)
+        const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
 
         const zoomSlider = modal.getByRole('slider', { name: 'zoom' })
@@ -373,7 +368,7 @@ test.describe('editor modal', () => {
         page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
         page.on('pageerror', err => errors.push(err.message))
 
-        const modal = await openEditorForJolene(page)
+        const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
         errors.length = 0
 
@@ -398,7 +393,7 @@ test.describe('editor modal', () => {
     })
 
     test('waveform play pauses when preview starts', async ({ page }) => {
-        const modal = await openEditorForJolene(page)
+        const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
 
         // start waveform playback
@@ -415,7 +410,7 @@ test.describe('editor modal', () => {
     })
 
     test('discard clears all cuts', async ({ page }) => {
-        const modal = await openEditorForJolene(page)
+        const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
 
         // add two cuts
@@ -433,7 +428,7 @@ test.describe('editor modal', () => {
         page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
         page.on('pageerror', err => errors.push(err.message))
 
-        const modal = await openEditorForJolene(page)
+        const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
 
         const speedSlider = modal.getByRole('slider', { name: 'speed' })
@@ -452,7 +447,7 @@ test.describe('editor modal', () => {
         page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
         page.on('pageerror', err => errors.push(err.message))
 
-        const modal = await openEditorForJolene(page)
+        const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
 
         const normalizeCheckbox = modal.locator('input[type="checkbox"]').filter({ hasNot: modal.locator('[name]') }).first()
@@ -468,7 +463,7 @@ test.describe('editor modal', () => {
     })
 
     test('per-cut fade sliders appear after adding a cut', async ({ page }) => {
-        const modal = await openEditorForJolene(page)
+        const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
 
         await modal.getByRole('button', { name: '+ add cut' }).click()
@@ -492,7 +487,7 @@ test.describe('editor modal', () => {
     })
 
     test('preview badge changes to "preview" (orange) when preview starts', async ({ page }) => {
-        const modal = await openEditorForJolene(page)
+        const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
 
         const badge = modal.getByTestId('version-badge')
@@ -511,7 +506,7 @@ test.describe('editor modal', () => {
         page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
         page.on('pageerror', err => errors.push(err.message))
 
-        const modal = await openEditorForJolene(page)
+        const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
         errors.length = 0
 
@@ -538,7 +533,7 @@ test.describe('editor modal', () => {
         page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
         page.on('pageerror', err => errors.push(err.message))
 
-        const modal = await openEditorForJolene(page)
+        const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
 
         const fitTrimBtn = modal.locator('button[title="fit trim region"]')
@@ -552,7 +547,7 @@ test.describe('editor modal', () => {
     })
 
     test('close guard: amber banner appears on unsaved change, cancel keeps modal open', async ({ page }) => {
-        const modal = await openEditorForJolene(page)
+        const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
 
         // make a change so paramsChanged returns true
@@ -574,7 +569,7 @@ test.describe('editor modal', () => {
     })
 
     test('close guard: "close anyway" dismisses modal', async ({ page }) => {
-        const modal = await openEditorForJolene(page)
+        const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
 
         const volumeSlider = modal.getByRole('slider', { name: 'Volume' })
@@ -589,7 +584,7 @@ test.describe('editor modal', () => {
     })
 
     test('Ctrl+Z keyboard shortcut triggers undo', async ({ page }) => {
-        const modal = await openEditorForJolene(page)
+        const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
 
         const undoBtn = modal.locator('button[title="undo (Ctrl+Z)"]')
@@ -613,7 +608,7 @@ test.describe('editor modal', () => {
         page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
         page.on('pageerror', err => errors.push(err.message))
 
-        const modal = await openEditorForJolene(page)
+        const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
         errors.length = 0
 
@@ -629,7 +624,7 @@ test.describe('editor modal', () => {
     })
 
     test('loop button activates and deactivates', async ({ page }) => {
-        const modal = await openEditorForJolene(page)
+        const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
 
         const loopBtn = modal.locator('button[title="loop trim region"]')

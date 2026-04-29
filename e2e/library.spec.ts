@@ -1,3 +1,4 @@
+import { routes } from './routes'
 import { test, expect, Page } from '@playwright/test'
 import { USERNAME, PASSWORD, login, ignoreError, apiLogin, API_V1 } from './helpers'
 
@@ -10,78 +11,83 @@ test.describe('library page', () => {
     })
 
     test('page loads and shows song cards', async ({ page }) => {
-        await page.goto('/library')
+        await page.goto(routes.library)
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
     })
 
     test('default view is songs tab (active state)', async ({ page }) => {
-        await page.goto('/library')
+        await page.goto(routes.library)
         const songsBtn = page.getByRole('button', { name: 'songs', exact: true })
         await expect(songsBtn).toBeVisible({ timeout: 5000 })
         await expect(songsBtn).toHaveClass(/bg-sky-500/)
     })
 
     test('artists tab updates URL', async ({ page }) => {
-        await page.goto('/library')
+        await page.goto(routes.library)
+        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
         await page.getByRole('button', { name: 'artists', exact: true }).click()
         await expect(page).toHaveURL(/view=artists/, { timeout: 10000 })
     })
 
     test('albums tab updates URL', async ({ page }) => {
-        await page.goto('/library')
+        await page.goto(routes.library)
+        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
         await page.getByRole('button', { name: 'albums', exact: true }).click()
         await expect(page).toHaveURL(/view=albums/)
     })
 
     test('genres tab updates URL', async ({ page }) => {
-        await page.goto('/library')
+        await page.goto(routes.library)
+        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
         await page.getByRole('button', { name: 'genres', exact: true }).click()
         await expect(page).toHaveURL(/view=genres/)
     })
 
     test('songs tab switches back and becomes active', async ({ page }) => {
-        await page.goto('/library?view=albums')
+        await page.goto(routes.libraryAlbums)
+        await expect(page.locator('[data-letter]').first()).toBeVisible({ timeout: 10000 })
         const songsBtn = page.getByRole('button', { name: 'songs', exact: true })
         await songsBtn.click()
         await expect(page).toHaveURL(/view=songs/)
         await expect(songsBtn).toHaveClass(/bg-sky-500/)
     })
 
-    test('A-Z letter button updates URL', async ({ page }) => {
-        await page.goto('/library')
+    test('A-Z letter rail updates URL on click', async ({ page }) => {
+        await page.goto(routes.library)
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
-        // find an enabled letter button
-        const enabledLetter = page.locator('button').filter({ hasNotText: /songs|artists|albums|genres|play|save|offline/ }).filter({ has: page.locator(':scope:not([disabled])') }).first()
-        const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')
-        for (const letter of letters) {
-            const btn = page.getByRole('button', { name: letter, exact: true })
-            if (await btn.isEnabled()) {
-                await btn.click()
-                await expect(page).toHaveURL(new RegExp(`letter=${letter}`))
-                break
-            }
-        }
+
+        // The letter rail is a pointer-event div (not buttons) fixed on the right edge.
+        // Use the first data-letter section to know a present letter, then click its span in the rail.
+        const sections = page.locator('[data-letter]')
+        await expect(sections.first()).toBeVisible({ timeout: 5000 })
+        const letter = await sections.first().getAttribute('data-letter')
+        if (!letter) return
+
+        const rail = page.locator('div.touch-none.select-none.cursor-pointer')
+        const letterSpan = rail.locator('span').filter({ hasText: new RegExp(`^${letter}$`) })
+        await letterSpan.click()
+        await expect(page).toHaveURL(new RegExp(`letter=${letter}`), { timeout: 5000 })
     })
 
     test('play all button is visible', async ({ page }) => {
-        await page.goto('/library')
+        await page.goto(routes.library)
         await expect(page.getByRole('button', { name: 'play all', exact: true })).toBeVisible({ timeout: 5000 })
     })
 
     test('save all offline button is visible', async ({ page }) => {
-        await page.goto('/library')
+        await page.goto(routes.library)
         await expect(page.getByRole('button', { name: /save all offline/i })).toBeVisible({ timeout: 5000 })
     })
 
     test('song card: library bookmark button visible', async ({ page }) => {
-        await page.goto('/library')
+        await page.goto(routes.library)
         const card = page.getByTestId('song-card').first()
         await expect(card).toBeVisible({ timeout: 10000 })
         await expect(card.getByTestId('song-library-toggle')).toBeVisible()
     })
 
     test('song card: kebab button visible on hover', async ({ page }) => {
-        await page.goto('/library')
+        await page.goto(routes.library)
         const card = page.getByTestId('song-card').first()
         await expect(card).toBeVisible({ timeout: 10000 })
         await card.hover()
@@ -89,7 +95,7 @@ test.describe('library page', () => {
     })
 
     test('kebab menu shows Download, Play next, Edit, Copy share link options', async ({ page }) => {
-        await page.goto('/library')
+        await page.goto(routes.library)
         const card = page.getByTestId('song-card').first()
         await expect(card).toBeVisible({ timeout: 10000 })
         await card.hover()
@@ -108,7 +114,7 @@ test.describe('library page', () => {
         const errors: string[] = []
         page.on('pageerror', err => { if (!ignoreError(err.message)) errors.push(err.message) })
 
-        await page.goto('/library')
+        await page.goto(routes.library)
         const card = page.getByTestId('song-card').first()
         await expect(card).toBeVisible({ timeout: 10000 })
         await card.click()
@@ -119,7 +125,7 @@ test.describe('library page', () => {
     })
 
     test('play button on card starts player', async ({ page }) => {
-        await page.goto('/library')
+        await page.goto(routes.library)
         const card = page.getByTestId('song-card').first()
         await expect(card).toBeVisible({ timeout: 10000 })
         await card.getByTestId('song-play').click()
@@ -131,7 +137,7 @@ test.describe('library page', () => {
         page.on('console', msg => { if (msg.type() === 'error' && !ignoreError(msg.text())) errors.push(msg.text()) })
         page.on('pageerror', err => { if (!ignoreError(err.message)) errors.push(err.message) })
 
-        await page.goto('/library')
+        await page.goto(routes.library)
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
         expect(errors, `Console errors: ${errors.join('\n')}`).toHaveLength(0)
     })
@@ -150,7 +156,7 @@ test.describe('library page', () => {
         await api.dispose()
         test.skip(!hasHash, 'no songs starting with non-letter — # group not present')
 
-        await page.goto('/library?view=songs')
+        await page.goto(routes.librarySongs)
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
         // Scroll to bottom of list so the last section renders.
         await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
@@ -172,7 +178,7 @@ test.describe('library page', () => {
         await api.dispose()
         test.skip(!hasHash, 'no artist starting with non-letter — # group not present')
 
-        await page.goto('/library?view=artists')
+        await page.goto(routes.libraryArtists)
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
         await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
         const sections = page.locator('[data-letter]')
@@ -192,7 +198,7 @@ test.describe('library page', () => {
         await api.dispose()
         test.skip(!hasHash, 'no album with non-letter name — # group not present')
 
-        await page.goto('/library?view=albums')
+        await page.goto(routes.libraryAlbums)
         // Wait for at least one section to render.
         await expect(page.locator('[data-letter]').first()).toBeVisible({ timeout: 10000 })
         await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
@@ -213,7 +219,7 @@ test.describe('library page', () => {
         await api.dispose()
         test.skip(!hasUnknown, 'no songs missing primaryGenreName — Unknown bucket not present')
 
-        await page.goto('/library?view=genres')
+        await page.goto(routes.libraryGenres)
         await expect(page.locator('[data-letter]').first()).toBeVisible({ timeout: 10000 })
         await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
         const sections = page.locator('[data-letter]')
@@ -232,7 +238,7 @@ test.describe('library page', () => {
         await api.dispose()
         test.skip(!Array.isArray(songs) || songs.length < 4, 'library too small to test multi-album grouping')
 
-        await page.goto('/library?view=albums')
+        await page.goto(routes.libraryAlbums)
         await expect(page.locator('[data-letter]').first()).toBeVisible({ timeout: 10000 })
         // Albums grid: sections contain album buttons. Count buttons inside data-letter
         // sections only (excludes toolbar/letter-rail buttons).
@@ -250,7 +256,7 @@ test.describe('library page', () => {
     // library, so the in-flight window is tiny. Skip when unable to keep
     // savingAll true through the dialog setup.
     test.fixme('save all offline: beforeunload warning fires while in-flight', async ({ page }) => {
-        await page.goto('/library')
+        await page.goto(routes.library)
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
 
         let dialogFired = false

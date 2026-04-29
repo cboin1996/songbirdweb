@@ -1,3 +1,4 @@
+import { routes } from './routes'
 import { test, expect } from '@playwright/test'
 import { login, ignoreError } from './helpers'
 
@@ -15,7 +16,7 @@ test.describe('smoke: login → library → play', () => {
         await login(page)
 
         // navigate to library — at least one song card must render
-        await page.goto('/library')
+        await page.goto(routes.library)
         const card = page.getByTestId('song-card').first()
         await expect(card).toBeVisible({ timeout: 10000 })
 

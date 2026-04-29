@@ -1,3 +1,4 @@
+import { routes } from './routes'
 import { test, expect } from '@playwright/test'
 import { login, apiLogin, pickFirstLibrarySong, API_V1, ignoreError } from './helpers'
 
@@ -18,7 +19,7 @@ test.describe('share links', () => {
         // grant clipboard so navigator.clipboard.writeText doesn't reject
         await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
 
-        await page.goto('/library')
+        await page.goto(routes.library)
         const card = page.getByTestId('song-card').first()
         await expect(card).toBeVisible({ timeout: 10000 })
 

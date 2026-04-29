@@ -1,3 +1,4 @@
+import { routes } from './routes'
 import { test, expect, APIRequestContext } from '@playwright/test'
 import { login, apiLogin, uniq, purgePlaylistsByPrefix, pickFirstLibrarySong, API_V1 } from './helpers'
 
@@ -33,7 +34,7 @@ test.describe('playlists: create / add songs / delete', () => {
     test('create playlist via UI then verify via API', async ({ page }) => {
         const name = uniq(PREFIX)
 
-        await page.goto('/library?view=playlists')
+        await page.goto(routes.libraryPlaylists)
         await page.getByRole('button', { name: /new playlist/i }).click()
         await page.getByPlaceholder('playlist name').fill(name)
         await page.getByRole('button', { name: 'create', exact: true }).click()
@@ -59,7 +60,7 @@ test.describe('playlists: create / add songs / delete', () => {
         const song = await pickFirstLibrarySong(api)
         test.skip(!song, 'library is empty — cannot test add-to-playlist')
 
-        await page.goto('/library')
+        await page.goto(routes.library)
         const card = page.getByTestId('song-card').first()
         await expect(card).toBeVisible({ timeout: 10000 })
 
@@ -85,7 +86,7 @@ test.describe('playlists: create / add songs / delete', () => {
         const created = await api.post(`${API_V1}/playlists`, { data: { name, icon: 'music' } })
         const pl = await created.json()
 
-        await page.goto('/library?view=playlists')
+        await page.goto(routes.libraryPlaylists)
         const tile = page.locator('button').filter({ hasText: name }).first()
         await expect(tile).toBeVisible({ timeout: 5000 })
 
@@ -124,7 +125,7 @@ test.describe('playlists: create / add songs / delete', () => {
         expect(initial[1].uuid).toBe(b)
 
         // Open modal
-        await page.goto('/library?view=playlists')
+        await page.goto(routes.libraryPlaylists)
         const tile = page.locator('button').filter({ hasText: name }).first()
         await expect(tile).toBeVisible({ timeout: 5000 })
         await tile.click()
@@ -162,7 +163,7 @@ test.describe('playlists: create / add songs / delete', () => {
     test('icon picker: creating a playlist with non-default icon stores the choice', async ({ page }) => {
         const name = uniq(PREFIX)
 
-        await page.goto('/library?view=playlists')
+        await page.goto(routes.libraryPlaylists)
         await page.getByRole('button', { name: /new playlist/i }).click()
         await page.getByPlaceholder('playlist name').fill(name)
 
@@ -199,7 +200,7 @@ test.describe('playlists: create / add songs / delete', () => {
         const created = await api.post(`${API_V1}/playlists`, { data: { name: original, icon: 'music' } })
         const pl = await created.json()
 
-        await page.goto('/library?view=playlists')
+        await page.goto(routes.libraryPlaylists)
         const tile = page.locator('button').filter({ hasText: original }).first()
         await expect(tile).toBeVisible({ timeout: 5000 })
 

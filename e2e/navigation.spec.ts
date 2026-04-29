@@ -1,3 +1,4 @@
+import { routes } from './routes'
 import { test, expect } from '@playwright/test'
 import { login, ignoreError } from './helpers'
 
@@ -6,12 +7,12 @@ import { login, ignoreError } from './helpers'
 // not throw. This is the cheapest regression net for "I broke routing".
 
 const ROUTES = [
-    { path: '/download', anchor: /song|album|url/i },
-    { path: '/library',  anchor: /play all|library/i },
-    { path: '/explore',  anchor: /today|this week|all time/i },
-    { path: '/import',   anchor: /\.mp3|drag/i },
-    { path: '/settings', anchor: /password|settings/i },
-    { path: '/info',     anchor: /about/i },
+    { path: routes.download, anchor: /song|album|url/i },
+    { path: routes.library,  anchor: /play all|library/i },
+    { path: routes.explore,  anchor: /today|this week|all time/i },
+    { path: routes.import,   anchor: /\.mp3|drag/i },
+    { path: routes.settings, anchor: /password|settings/i },
+    { path: routes.info,     anchor: /about/i },
 ] as const
 
 test.describe('navigation: every authenticated page loads', () => {
@@ -36,7 +37,7 @@ test.describe('navigation: every authenticated page loads', () => {
     }
 
     test('navbar links are visible and clickable', async ({ page }) => {
-        await page.goto('/download')
+        await page.goto(routes.download)
         await expect(page.getByRole('link', { name: 'library' })).toBeVisible()
         await expect(page.getByRole('link', { name: 'explore' })).toBeVisible()
         await expect(page.getByRole('link', { name: 'import' })).toBeVisible()

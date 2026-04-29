@@ -1,3 +1,4 @@
+import { routes } from './routes'
 import { test, expect } from '@playwright/test'
 import { login, ignoreError } from './helpers'
 
@@ -14,7 +15,7 @@ test.describe('player queue', () => {
     })
 
     test('queue panel opens with songs after starting playback from library', async ({ page }) => {
-        await page.goto('/library')
+        await page.goto(routes.library)
         const cards = page.getByTestId('song-card')
         await expect(cards.first()).toBeVisible({ timeout: 10000 })
         test.skip((await cards.count()) < 2, 'need at least 2 library songs to verify queue')
@@ -31,7 +32,7 @@ test.describe('player queue', () => {
         const errors: string[] = []
         page.on('pageerror', err => { if (!ignoreError(err.message)) errors.push(err.message) })
 
-        await page.goto('/library')
+        await page.goto(routes.library)
         const cards = page.getByTestId('song-card')
         await expect(cards.first()).toBeVisible({ timeout: 10000 })
         test.skip((await cards.count()) < 2, 'need at least 2 library songs to test play-next')
@@ -59,7 +60,7 @@ test.describe('player queue', () => {
     })
 
     test('skip-next button advances when queue has multiple tracks', async ({ page }) => {
-        await page.goto('/library')
+        await page.goto(routes.library)
         const cards = page.getByTestId('song-card')
         await expect(cards.first()).toBeVisible({ timeout: 10000 })
         test.skip((await cards.count()) < 2, 'need at least 2 library songs to test skip')

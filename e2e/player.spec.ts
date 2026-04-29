@@ -1,9 +1,10 @@
+import { routes } from './routes'
 import { test, expect, Page } from '@playwright/test'
 import { USERNAME, PASSWORD, login, ignoreError } from './helpers'
 
 
 async function startPlayback(page: Page) {
-    await page.goto('/library')
+    await page.goto(routes.library)
     const card = page.getByTestId('song-card').first()
     await expect(card).toBeVisible({ timeout: 10000 })
     await card.click()
@@ -18,7 +19,7 @@ test.describe('player bar', () => {
     })
 
     test('player bar appears after clicking a song', async ({ page }) => {
-        await page.goto('/library')
+        await page.goto(routes.library)
         const card = page.getByTestId('song-card').first()
         await expect(card).toBeVisible({ timeout: 10000 })
         await card.click()
@@ -26,7 +27,7 @@ test.describe('player bar', () => {
     })
 
     test('player shows track name of clicked song', async ({ page }) => {
-        await page.goto('/library')
+        await page.goto(routes.library)
         // pick the first card that has a non-empty track name displayed
         const card = page.getByTestId('song-card').filter({ hasText: /\w/ }).first()
         await expect(card).toBeVisible({ timeout: 10000 })
@@ -57,7 +58,7 @@ test.describe('player bar', () => {
     test('shuffle button toggles active class', async ({ page }) => {
         await startPlayback(page)
         // Player has compact + full bars in the DOM (one hidden via CSS at desktop/mobile breakpoint).
-        const btn = page.getByTestId('player-shuffle').first()
+        const btn = page.getByTestId('player-shuffle').filter({ visible: true }).first()
         await expect(btn).toBeVisible()
 
         const before = await btn.getAttribute('class')
@@ -70,21 +71,30 @@ test.describe('player bar', () => {
         await btn.click()
     })
 
-    test('repeat cycles off → all → one → off', async ({ page }) => {
+    test('repeat cycles off → one → all → off', async ({ page }) => {
         await startPlayback(page)
-        const btn = page.getByTestId('player-repeat').first()
+        const btn = page.getByTestId('player-repeat').filter({ visible: true }).first()
         await expect(btn).toBeVisible()
 
-        // off → all
+        // Reset to 'off' state (player persists last state, initial is 'all')
+        for (let i = 0; i < 3; i++) {
+            const cls = await btn.getAttribute('class') ?? ''
+            if (cls.includes('text-gray-400')) break
+            await btn.click()
+            await page.waitForTimeout(100)
+        }
+
+        // off → one (shows "1" superscript)
         await btn.click()
         await expect(btn).toHaveClass(/text-sky-500/, { timeout: 2000 })
-        await expect(btn.locator('span')).not.toBeVisible()
-
-        // all → one (shows "1" superscript)
-        await btn.click()
         await expect(btn.locator('span')).toBeVisible({ timeout: 2000 })
 
-        // one → off
+        // one → all (superscript disappears)
+        await btn.click()
+        await expect(btn).toHaveClass(/text-sky-500/, { timeout: 2000 })
+        await expect(btn.locator('span')).toHaveCount(0)
+
+        // all → off
         await btn.click()
         await expect(btn).toHaveClass(/text-gray-400/, { timeout: 2000 })
     })
@@ -134,7 +144,7 @@ test.describe('player bar', () => {
     })
 
     test('player shows "from Library" context link', async ({ page }) => {
-        await page.goto('/library')
+        await page.goto(routes.library)
         const card = page.getByTestId('song-card').first()
         await expect(card).toBeVisible({ timeout: 10000 })
         await card.click()

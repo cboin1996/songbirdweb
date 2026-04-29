@@ -1,3 +1,4 @@
+import { routes } from './routes'
 import { test, expect, Page } from '@playwright/test'
 import { login } from './helpers'
 
@@ -13,7 +14,7 @@ test.describe('offline mode', () => {
     })
 
     test('offline banner is hidden when online', async ({ page }) => {
-        await page.goto('/library')
+        await page.goto(routes.library)
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
         const banner = page.locator('.bg-amber-400')
         await expect(banner).toHaveCount(0)
@@ -22,7 +23,7 @@ test.describe('offline mode', () => {
     test('offline banner is shown when offline', async ({ page }) => {
         // Visit while online so the page assets/state load, then flip offline
         // (setOffline before goto blocks the initial navigation).
-        await page.goto('/library')
+        await page.goto(routes.library)
         await page.context().setOffline(true)
         // Trigger the navigator.onLine event the OfflineBanner listens to.
         await page.evaluate(() => window.dispatchEvent(new Event('offline')))
@@ -35,7 +36,7 @@ test.describe('offline mode', () => {
     // so an offline reload can't be served by the SW shell cache. Test only meaningful against a
     // production build (npm run build && npm start). Punch list.
     test.fixme('library loads cached songs when offline', async ({ page }) => {
-        await page.goto('/library')
+        await page.goto(routes.library)
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
         await page.context().setOffline(true)
         await page.reload()
@@ -44,7 +45,7 @@ test.describe('offline mode', () => {
 
     test('kebab menu actions are disabled when offline', async ({ page }) => {
         await page.context().setOffline(true)
-        await page.goto('/library')
+        await page.goto(routes.library)
         const card = page.getByTestId('song-card').first()
         await expect(card).toBeVisible({ timeout: 10000 })
         await card.hover()
@@ -58,7 +59,7 @@ test.describe('offline mode', () => {
 
     test('import dropzone is disabled when offline', async ({ page }) => {
         await page.context().setOffline(true)
-        await page.goto('/import')
+        await page.goto(routes.import)
         const dropzone = page.getByTestId('import-dropzone')
         await expect(dropzone).toBeVisible({ timeout: 5000 })
         await expect(dropzone).toHaveClass(/opacity-40/)
@@ -67,7 +68,7 @@ test.describe('offline mode', () => {
 
     test('save all offline button is disabled when offline', async ({ page }) => {
         await page.context().setOffline(true)
-        await page.goto('/library')
+        await page.goto(routes.library)
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
         const saveAllBtn = page.getByRole('button', { name: /save all offline/i })
         await expect(saveAllBtn).toBeVisible({ timeout: 5000 })
@@ -84,28 +85,28 @@ test.describe('offline mode', () => {
     }
 
     test('OfflineGuard: /explore shows empty state with go-to-library link', async ({ page }) => {
-        await page.goto('/explore')
+        await page.goto(routes.explore)
         await flipOffline(page)
         await expect(page.getByText(/needs internet/i)).toBeVisible({ timeout: 5000 })
         await expect(page.getByRole('link', { name: /go to library/i })).toBeVisible()
     })
 
     test('OfflineGuard: /import shows empty state with go-to-library link', async ({ page }) => {
-        await page.goto('/import')
+        await page.goto(routes.import)
         await flipOffline(page)
         await expect(page.getByText(/needs internet/i)).toBeVisible({ timeout: 5000 })
         await expect(page.getByRole('link', { name: /go to library/i })).toBeVisible()
     })
 
     test('OfflineGuard: /download shows empty state with go-to-library link', async ({ page }) => {
-        await page.goto('/download')
+        await page.goto(routes.download)
         await flipOffline(page)
         await expect(page.getByText(/needs internet/i)).toBeVisible({ timeout: 5000 })
         await expect(page.getByRole('link', { name: /go to library/i })).toBeVisible()
     })
 
     test('OfflineGuard: clicking "go to library" lands on /library', async ({ page }) => {
-        await page.goto('/explore')
+        await page.goto(routes.explore)
         await flipOffline(page)
         const link = page.getByRole('link', { name: /go to library/i })
         await expect(link).toBeVisible({ timeout: 5000 })

@@ -1,3 +1,4 @@
+import { routes } from './routes'
 import { test, expect, Page } from '@playwright/test'
 import { USERNAME, PASSWORD, login, ignoreError } from './helpers'
 
@@ -11,19 +12,19 @@ test.describe('download page', () => {
 
     test('unauthenticated user is redirected to root', async ({ page }) => {
         await page.context().clearCookies()
-        await page.goto('/download')
+        await page.goto(routes.download)
         await expect(page).toHaveURL('/')
     })
 
     test('download page shows song, album, URL options', async ({ page }) => {
-        await page.goto('/download')
+        await page.goto(routes.download)
         await expect(page.getByRole('button', { name: 'song', exact: true })).toBeVisible({ timeout: 5000 })
         await expect(page.getByRole('button', { name: 'album', exact: true })).toBeVisible()
         await expect(page.getByRole('button', { name: 'url', exact: true })).toBeVisible()
     })
 
     test('Song button switches to /download/song', async ({ page }) => {
-        await page.goto('/download')
+        await page.goto(routes.download)
         await page.getByRole('button', { name: 'song', exact: true }).click()
         await expect(page).toHaveURL(/\/download\/song/)
     })
@@ -32,13 +33,13 @@ test.describe('download page', () => {
     // (handleModeChange + useEffect on mode change), so URL ends as `/download?mode=album`
     // instead of `/download/album?mode=album`. Track in punch list.
     test.fixme('Album button switches to /download/album', async ({ page }) => {
-        await page.goto('/download')
+        await page.goto(routes.download)
         await page.getByRole('button', { name: 'album', exact: true }).click()
         await expect(page).toHaveURL(/\/download\/album/)
     })
 
     test('URL button switches to /download/url', async ({ page }) => {
-        await page.goto('/download')
+        await page.goto(routes.download)
         await page.getByRole('button', { name: 'url', exact: true }).click()
         await expect(page).toHaveURL(/\/download\/url/)
     })
@@ -97,7 +98,7 @@ test.describe('download page', () => {
     // --- URL download sub-page ---
 
     test('URL sub-page: status message is present', async ({ page }) => {
-        await page.goto('/download/url')
+        await page.goto(routes.downloadUrl)
         await expect(page.getByText('enter a url')).toBeVisible({ timeout: 5000 })
     })
 
@@ -106,7 +107,7 @@ test.describe('download page', () => {
         page.on('console', msg => { if (msg.type() === 'error' && !ignoreError(msg.text())) errors.push(msg.text()) })
         page.on('pageerror', err => { if (!ignoreError(err.message)) errors.push(err.message) })
 
-        await page.goto('/download')
+        await page.goto(routes.download)
         await page.waitForTimeout(1000)
         expect(errors, `Console errors: ${errors.join('\n')}`).toHaveLength(0)
     })

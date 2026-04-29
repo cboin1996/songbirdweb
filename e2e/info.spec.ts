@@ -1,3 +1,4 @@
+import { routes } from './routes'
 import { test, expect, Page } from '@playwright/test'
 import { USERNAME, PASSWORD, login, ignoreError } from './helpers'
 
@@ -10,7 +11,7 @@ test.describe('info page', () => {
     })
 
     test('info page accessible via navbar link', async ({ page }) => {
-        await page.goto('/download')
+        await page.goto(routes.download)
         // Navbar may render link in compact + mobile contexts; use first match.
         const infoLink = page.locator('a[href="/info"]').first()
         await expect(infoLink).toBeVisible({ timeout: 5000 })
@@ -19,26 +20,26 @@ test.describe('info page', () => {
     })
 
     test('page loads with "about" heading', async ({ page }) => {
-        await page.goto('/info')
+        await page.goto(routes.info)
         await expect(page.getByText('about')).toBeVisible({ timeout: 10000 })
     })
 
     test('three version cards visible: songbirdweb, songbirdapi, songbirdcore', async ({ page }) => {
-        await page.goto('/info')
+        await page.goto(routes.info)
         await expect(page.getByText(/songbirdweb/i)).toBeVisible({ timeout: 10000 })
         await expect(page.getByText(/songbirdapi/i)).toBeVisible()
         await expect(page.getByText(/songbirdcore/i)).toBeVisible()
     })
 
     test('each card shows a version string', async ({ page }) => {
-        await page.goto('/info')
+        await page.goto(routes.info)
         // version strings match "vX.Y.Z" or "unknown"
         const versionText = page.locator('text=/v\\d+\\.\\d+|unknown/')
         await expect(versionText.first()).toBeVisible({ timeout: 10000 })
     })
 
     test('each card has a GitHub bug report link', async ({ page }) => {
-        await page.goto('/info')
+        await page.goto(routes.info)
         const githubLinks = page.locator('a[href*="github.com/cboin1996"]')
         await expect(githubLinks.first()).toBeVisible({ timeout: 10000 })
         const count = await githubLinks.count()
@@ -47,7 +48,7 @@ test.describe('info page', () => {
     })
 
     test('bug report links open to github.com issues', async ({ page }) => {
-        await page.goto('/info')
+        await page.goto(routes.info)
         const firstLink = page.locator('a[href*="github.com/cboin1996"]').first()
         await expect(firstLink).toBeVisible({ timeout: 5000 })
         const href = await firstLink.getAttribute('href')
@@ -55,14 +56,14 @@ test.describe('info page', () => {
     })
 
     test('all three repo links present', async ({ page }) => {
-        await page.goto('/info')
+        await page.goto(routes.info)
         await expect(page.locator('a[href*="songbirdweb"]')).toBeVisible({ timeout: 5000 })
         await expect(page.locator('a[href*="songbirdapi"]')).toBeVisible()
         await expect(page.locator('a[href*="songbirdcore"]')).toBeVisible()
     })
 
     test('version cards have border styling (rendered)', async ({ page }) => {
-        await page.goto('/info')
+        await page.goto(routes.info)
         // cards are divs with rounded-lg border classes
         const cards = page.locator('.rounded-lg.border')
         await expect(cards.first()).toBeVisible({ timeout: 5000 })
@@ -75,7 +76,7 @@ test.describe('info page', () => {
         page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
         page.on('pageerror', err => errors.push(err.message))
 
-        await page.goto('/info')
+        await page.goto(routes.info)
         await page.waitForTimeout(1000)
 
         const realErrors = errors.filter(e => !ignoreError(e))

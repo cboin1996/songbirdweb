@@ -1,3 +1,4 @@
+import { routes } from './routes'
 import { test, expect, Page } from '@playwright/test'
 import { USERNAME, PASSWORD, login, ignoreError } from './helpers'
 
@@ -10,38 +11,38 @@ test.describe('explore page', () => {
     })
 
     test('page loads without crashing', async ({ page }) => {
-        await page.goto('/explore')
+        await page.goto(routes.explore)
         await expect(page.locator('main')).toBeVisible({ timeout: 10000 })
     })
 
     test('window tabs visible: today, week, all time', async ({ page }) => {
-        await page.goto('/explore')
+        await page.goto(routes.explore)
         await expect(page.getByRole('button', { name: 'today', exact: true })).toBeVisible({ timeout: 5000 })
         await expect(page.getByRole('button', { name: 'week', exact: true })).toBeVisible()
         await expect(page.getByRole('button', { name: 'all time', exact: true })).toBeVisible()
     })
 
     test('"today" tab updates URL to window=day', async ({ page }) => {
-        await page.goto('/explore')
+        await page.goto(routes.explore)
         await page.getByRole('button', { name: 'today', exact: true }).click()
         await expect(page).toHaveURL(/window=day/)
     })
 
     test('"all time" tab updates URL to window=all', async ({ page }) => {
-        await page.goto('/explore')
+        await page.goto(routes.explore)
         await page.getByRole('button', { name: 'all time', exact: true }).click()
         await expect(page).toHaveURL(/window=all/)
     })
 
     test('"week" tab updates URL to window=week', async ({ page }) => {
-        await page.goto('/explore')
+        await page.goto(routes.explore)
         await page.getByRole('button', { name: 'today', exact: true }).click()
         await page.getByRole('button', { name: 'week', exact: true }).click()
         await expect(page).toHaveURL(/window=week/)
     })
 
     test('sort dropdown contains: most played, most downloaded, most saved', async ({ page }) => {
-        await page.goto('/explore')
+        await page.goto(routes.explore)
         // Sort was redesigned from buttons to a <select> dropdown.
         const sort = page.getByRole('combobox')
         await expect(sort).toBeVisible({ timeout: 5000 })
@@ -52,19 +53,19 @@ test.describe('explore page', () => {
     })
 
     test('"most downloaded" sort updates URL to sort=downloads', async ({ page }) => {
-        await page.goto('/explore')
+        await page.goto(routes.explore)
         await page.getByRole('combobox').selectOption('downloads')
         await expect(page).toHaveURL(/sort=downloads/)
     })
 
     test('"most saved" sort updates URL to sort=saves', async ({ page }) => {
-        await page.goto('/explore')
+        await page.goto(routes.explore)
         await page.getByRole('combobox').selectOption('saves')
         await expect(page).toHaveURL(/sort=saves/)
     })
 
     test('"recently played" sort updates URL', async ({ page }) => {
-        await page.goto('/explore')
+        await page.goto(routes.explore)
         // Recently played only appears when viewFilter === 'you'
         await page.getByRole('button', { name: 'you', exact: true }).click()
         await page.getByRole('combobox').selectOption('recently_played')
@@ -72,7 +73,7 @@ test.describe('explore page', () => {
     })
 
     test('search input is visible', async ({ page }) => {
-        await page.goto('/explore')
+        await page.goto(routes.explore)
         // Placeholder was simplified to just "search…" when toolbar was redesigned.
         await expect(page.getByPlaceholder(/search/i)).toBeVisible({ timeout: 5000 })
     })
@@ -81,8 +82,8 @@ test.describe('explore page', () => {
         const errors: string[] = []
         page.on('pageerror', err => { if (!ignoreError(err.message)) errors.push(err.message) })
 
-        await page.goto('/explore')
-        const input = page.getByPlaceholder(/search by track or artist/i)
+        await page.goto(routes.explore)
+        const input = page.getByPlaceholder(/search/i)
         await expect(input).toBeVisible({ timeout: 5000 })
         await input.fill('jolene')
         await expect(page).toHaveURL(/q=jolene/, { timeout: 3000 })
@@ -92,7 +93,7 @@ test.describe('explore page', () => {
 
     test('clearing search removes q param from URL', async ({ page }) => {
         await page.goto('/explore?q=jolene')
-        const input = page.getByPlaceholder(/search by track or artist/i)
+        const input = page.getByPlaceholder(/search/i)
         await expect(input).toBeVisible({ timeout: 5000 })
         await input.clear()
         await expect(page).not.toHaveURL(/q=/, { timeout: 3000 })
@@ -126,7 +127,7 @@ test.describe('explore page', () => {
         page.on('console', msg => { if (msg.type() === 'error' && !ignoreError(msg.text())) errors.push(msg.text()) })
         page.on('pageerror', err => { if (!ignoreError(err.message)) errors.push(err.message) })
 
-        await page.goto('/explore')
+        await page.goto(routes.explore)
         await page.waitForTimeout(2000)
         expect(errors, `Console errors: ${errors.join('\n')}`).toHaveLength(0)
     })
@@ -147,7 +148,7 @@ test.describe('explore page', () => {
     })
 
     test('"recently played" sort renders relative ago labels (you view)', async ({ page }) => {
-        await page.goto('/explore')
+        await page.goto(routes.explore)
         // Recently played requires "you" view filter.
         await page.getByRole('button', { name: 'you', exact: true }).click()
         await page.getByRole('combobox').selectOption('recently_played')
