@@ -10,7 +10,7 @@ This doc maps the contexts and the most state-heavy components. For the page/rou
 
 ## `PlayerProvider` — `app/components/player.tsx`
 
-Mounted once in `app/layout.tsx` so a single `<audio>` element survives every navigation. Owns queue, current song, shuffle/repeat, and persists all of it to the server (`/v1/player/state`) and (best-effort) localStorage so a hard reload restores instantly while the server fetch is in flight.
+Mounted once in `app/layout.tsx` so a single `<audio>` element survives every navigation. Owns queue, current song, shuffle/repeat, queue sources, and persists all of it to the server (`/v1/player/state`). No longer uses localStorage — state is server-authoritative.
 
 ### Public API — `usePlayer()`
 
@@ -42,8 +42,9 @@ interface PlayerContextValue {
 |---|---|
 | `audioRef` | The single `<audio>` element. |
 | `queueRef`, `queueIndexRef` | Source of truth for queue + index; mirrored to React state for renders. Stable callbacks read refs to avoid stale closures. |
+| `queueSourcesRef` | Array of `QueueSource` objects ({ label, href, id }) — persisted to server so the player knows what context triggered the current queue (e.g., "all songs", "artist X"). |
 | `manualNextRef` | Songs that were inserted via `insertNext` — they play before the natural queue order resumes. Persisted server-side so reload preserves them. |
-| `shuffleOrderRef`, `shuffleSeedRef`, `shufflePosRef` | Pre-computed shuffle order (Mulberry32-seeded) so the queue panel can show upcoming songs deterministically. The seed is persisted; reload reproduces the same order. |
+| `shuffleOrderRef`, `shuffleSeedRef`, `shufflePosRef` | Pre-computed shuffle order (Mulberry32-seeded) so the queue panel can show upcoming songs deterministically. The seed is persisted; reload reproduces the same order. Toggling shuffle off+on preserves seed; drag in shuffled mode reorders shuffleOrder without reseeding. |
 | `loadGenRef` | Generation counter; every `loadSong` call bumps it. Late awaits check `gen !== loadGenRef.current` and bail to avoid a stale OPFS swap clobbering a newer song. |
 | `blobUrlRef` | The current OPFS blob URL (revoked on next load to avoid leaks). |
 | `pendingPosition` | Resume position to seek to once `loadedmetadata` fires. |
@@ -53,7 +54,7 @@ interface PlayerContextValue {
 
 ### Persistence schedule
 
-- **Queue + shuffle + repeat:** `scheduleSave()` debounces a `PUT /v1/player/state` after every queue mutation.
+- **Queue + shuffle + repeat + queue_sources:** `scheduleSave()` debounces a `PUT /v1/player/state` after every queue mutation. On page load, `GET /v1/player/state` restores the entire state from the server (queue sources are now server-of-truth, not localStorage).
 - **Position (`last_position` on `user_songs`):** `PATCH /v1/library/{id}/position` every 10 s while playing and on pause.
 - **Play event:** `POST /v1/songs/{id}/play` after 30 s of continuous play.
 
@@ -81,6 +82,7 @@ Big component because library is the central UX. State lives entirely in this cl
 | State | Type | Updates when |
 |---|---|---|
 | `songs` | `LibrarySong[]` | initial hydration, `EVENTS.songRemoved`, post-publish refetch, post-bulk-remove |
+| `scrollPos` | `number` | sessionStorage-backed scroll position; restored on navigation back, cleared on reload |
 | `cachedIds` | `Set<string>` | OPFS scan on mount, after each per-song download, on `EVENTS.offlineCleared`, after `Save all offline` |
 | `offlineReady` | `boolean` | true after first successful OPFS scan |
 | `savingAll` / `saveAllProgress` | flags + counter | during the bulk "save all offline" flow |
@@ -94,7 +96,7 @@ Big component because library is the central UX. State lives entirely in this cl
 | `offlineSyncModalOpen` | flag | cross-device sync modal lifecycle |
 | `selectMode`, `selectedIds`, `lastSelectedId` | bulk-select state | toggled by the toolbar; range select works via shift-click + drag |
 | `bulkLoading`, `bulkPlaylistPicking` | flags | during bulk remove / bulk-add-to-playlist |
-| `activeLetter`, `scrubLetter` | alpha-scrub state | desktop scroll uses `activeLetter`; mobile scrubber sets `scrubLetter` while dragging |
+| `activeLetter`, `scrubLetter` | alpha-scrub state | desktop scroll position updates `activeLetter` on scroll; mobile scrubber sets `scrubLetter` while dragging (URL not used) |
 
 ### Cross-component events
 

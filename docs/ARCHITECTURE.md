@@ -46,6 +46,18 @@ Why dev needs the proxy: when the browser fetches `localhost:8000/v1/...` direct
 
 > **Image gotcha:** `next/image` cannot optimize URLs that are rewritten by the proxy. Cached-artwork images that resolve to a blob URL or a rewritten path use `unoptimized` to skip the optimizer. See the `useLocalArt` patterns in `app/library/library-list.tsx`.
 
+## Deep-linking within views
+
+Routes that show song lists (`/library`, `/explore`, `/songs`) support per-song deep-linking via query parameters:
+
+- **Songs/Artists/Genres/Playlists views:** `?song=<uuid>` scrolls to and highlights the song on page load. Scroll position is restored on back-button.
+- **Albums view:** `?album=<id>` scrolls to and highlights the album.
+- **Explore view:** `?window=day|week|all&sort=<field>&view=<layout>&song=<uuid>` restores the full explore state + scroll position.
+
+Handlers in `library-list.tsx` and `explore-client.tsx` watch the URL and call `scrollTo()` after render. Scroll positions are restored from `sessionStorage` keyed by view name to survive back/forward but clear on page reload.
+
+Active letter rail (desktop only) is computed from scroll position, not URL.
+
 ## `middleware.ts`
 
 The Next middleware runs on every request that isn't in the negative matcher (`_next/static`, `_next/image`, `favicon.ico`, `sw.js`, `manifest.json`, app icons). Logic:
@@ -59,13 +71,23 @@ The Next middleware runs on every request that isn't in the negative matcher (`_
 
 This is the only place token refresh happens at the SSR boundary — the client also does its own refresh-on-401 in `app/lib/data.ts` (`tryRefresh`), deduplicated via `refreshPromise`.
 
+## Surface variables + theming
+
+All UI surfaces (navbar, library toolbar, explore header, player, download panel) use `bg-[var(--background)]/90 backdrop-blur` for consistency. The CSS variable `--background` is set to `rgb(3 7 18)` (gray-950) in `app/globals.css`. This creates a shared visual identity across the app.
+
+Mobile UI has been compacted: larger card sizes, artwork, and player transport buttons for easier touch targeting.
+
+## Media Session API
+
+The player integrates with the OS-level media session for lock-screen controls on iOS/Android. Artwork is provided in multiple sizes (small, large) via `navigator.mediaSession.metadata` to accommodate different platform requirements.
+
 ## Service worker — `public/sw.js`
 
 Registered by `app/components/sw-register.tsx` only in `process.env.NODE_ENV === 'production'`. In dev, the registrar **unregisters** any prior SW so stale chunks don't break HMR.
 
 Caches:
 
-- `songbird-shell-v6` — `/offline`, `/`, `/library` precached on install. Fetch handler:
+- `songbird-shell-v7` — `/offline`, `/`, `/library` precached on install. Fetch handler:
   - Static `_next/static/*` → cache-first (chunks are content-addressed, safe to cache forever).
   - RSC payloads (`?_rsc=`) → network-first, cache by pathname for offline RSC fetches.
   - Page navigations → network-first; cache 200s; on network failure fall back to cached page or `/offline`.
