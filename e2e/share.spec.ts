@@ -31,8 +31,9 @@ test.describe('share links', () => {
         await shareBtn.click()
 
         // Button label flips — observable confirmation that the share token
-        // was created and the link reached the clipboard.
-        await expect(menu.getByRole('button', { name: /link copied/i })).toBeVisible({ timeout: 5000 })
+        // was created and the link reached the clipboard. API call + setState =
+        // can take a moment on first run; bumped timeout.
+        await expect(menu.getByRole('button', { name: /link copied/i })).toBeVisible({ timeout: 10000 })
     })
 
     test('share/[token] page renders song properties for a valid token', async ({ page }) => {

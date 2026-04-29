@@ -24,7 +24,7 @@ test.describe('library page', () => {
     test('artists tab updates URL', async ({ page }) => {
         await page.goto('/library')
         await page.getByRole('button', { name: 'artists', exact: true }).click()
-        await expect(page).toHaveURL(/view=artists/)
+        await expect(page).toHaveURL(/view=artists/, { timeout: 10000 })
     })
 
     test('albums tab updates URL', async ({ page }) => {

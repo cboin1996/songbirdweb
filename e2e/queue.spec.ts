@@ -69,7 +69,7 @@ test.describe('player queue', () => {
         const trackNameEl = page.getByTestId('player-track-name').first()
         const beforeName = (await trackNameEl.textContent())?.trim() ?? ''
 
-        await page.getByTestId('player-next').click()
+        await page.getByTestId('player-next').first().click()
         // wait for the player to settle on the new track
         await expect.poll(async () => (await trackNameEl.textContent())?.trim(), { timeout: 5000 }).not.toBe(beforeName)
     })

@@ -77,7 +77,7 @@ test.describe('info page', () => {
         await page.goto('/info')
         await page.waitForTimeout(1000)
 
-        const realErrors = errors.filter(e => !/AbortError/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e))
+        const realErrors = errors.filter(e => !ignoreError(e))
         expect(realErrors, `Console errors: ${realErrors.join('\n')}`).toHaveLength(0)
     })
 })

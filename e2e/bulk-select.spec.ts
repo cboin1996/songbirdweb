@@ -47,7 +47,9 @@ test.describe('library bulk select', () => {
         await expect(page.getByRole('button', { name: 'Remove', exact: true })).toBeVisible()
     })
 
-    test('exit select mode by clicking Cancel', async ({ page }) => {
+    // FIXME: select mode is entered via long-press on a song card, not via a "Select" button.
+    // Need to drive a touch long-press in Playwright to set this up. Punch list in e2e/README.md.
+    test.fixme('exit select mode by clicking Cancel', async ({ page }) => {
         await page.goto('/library')
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
 

@@ -56,7 +56,8 @@ test.describe('player bar', () => {
 
     test('shuffle button toggles active class', async ({ page }) => {
         await startPlayback(page)
-        const btn = page.getByTestId('player-shuffle')
+        // Player has compact + full bars in the DOM (one hidden via CSS at desktop/mobile breakpoint).
+        const btn = page.getByTestId('player-shuffle').first()
         await expect(btn).toBeVisible()
 
         const before = await btn.getAttribute('class')
@@ -71,7 +72,7 @@ test.describe('player bar', () => {
 
     test('repeat cycles off → all → one → off', async ({ page }) => {
         await startPlayback(page)
-        const btn = page.getByTestId('player-repeat')
+        const btn = page.getByTestId('player-repeat').first()
         await expect(btn).toBeVisible()
 
         // off → all

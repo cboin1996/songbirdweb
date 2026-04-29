@@ -14,10 +14,10 @@ test.describe('explore page', () => {
         await expect(page.locator('main')).toBeVisible({ timeout: 10000 })
     })
 
-    test('window tabs visible: today, this week, all time', async ({ page }) => {
+    test('window tabs visible: today, week, all time', async ({ page }) => {
         await page.goto('/explore')
         await expect(page.getByRole('button', { name: 'today', exact: true })).toBeVisible({ timeout: 5000 })
-        await expect(page.getByRole('button', { name: 'this week', exact: true })).toBeVisible()
+        await expect(page.getByRole('button', { name: 'week', exact: true })).toBeVisible()
         await expect(page.getByRole('button', { name: 'all time', exact: true })).toBeVisible()
     })
 
@@ -33,41 +33,48 @@ test.describe('explore page', () => {
         await expect(page).toHaveURL(/window=all/)
     })
 
-    test('"this week" tab updates URL to window=week', async ({ page }) => {
+    test('"week" tab updates URL to window=week', async ({ page }) => {
         await page.goto('/explore')
         await page.getByRole('button', { name: 'today', exact: true }).click()
-        await page.getByRole('button', { name: 'this week', exact: true }).click()
+        await page.getByRole('button', { name: 'week', exact: true }).click()
         await expect(page).toHaveURL(/window=week/)
     })
 
-    test('sort tabs visible: most played, most downloaded, most saved', async ({ page }) => {
+    test('sort dropdown contains: most played, most downloaded, most saved', async ({ page }) => {
         await page.goto('/explore')
-        await expect(page.getByRole('button', { name: 'most played', exact: true })).toBeVisible({ timeout: 5000 })
-        await expect(page.getByRole('button', { name: 'most downloaded', exact: true })).toBeVisible()
-        await expect(page.getByRole('button', { name: 'most saved', exact: true })).toBeVisible()
+        // Sort was redesigned from buttons to a <select> dropdown.
+        const sort = page.getByRole('combobox')
+        await expect(sort).toBeVisible({ timeout: 5000 })
+        const opts = sort.locator('option')
+        await expect(opts.filter({ hasText: 'most played' })).toHaveCount(1)
+        await expect(opts.filter({ hasText: 'most downloaded' })).toHaveCount(1)
+        await expect(opts.filter({ hasText: 'most saved' })).toHaveCount(1)
     })
 
     test('"most downloaded" sort updates URL to sort=downloads', async ({ page }) => {
         await page.goto('/explore')
-        await page.getByRole('button', { name: 'most downloaded', exact: true }).click()
+        await page.getByRole('combobox').selectOption('downloads')
         await expect(page).toHaveURL(/sort=downloads/)
     })
 
     test('"most saved" sort updates URL to sort=saves', async ({ page }) => {
         await page.goto('/explore')
-        await page.getByRole('button', { name: 'most saved', exact: true }).click()
+        await page.getByRole('combobox').selectOption('saves')
         await expect(page).toHaveURL(/sort=saves/)
     })
 
     test('"recently played" sort updates URL', async ({ page }) => {
         await page.goto('/explore')
-        await page.getByRole('button', { name: 'recently played', exact: true }).click()
+        // Recently played only appears when viewFilter === 'you'
+        await page.getByRole('button', { name: 'you', exact: true }).click()
+        await page.getByRole('combobox').selectOption('recently_played')
         await expect(page).toHaveURL(/sort=recently_played/)
     })
 
     test('search input is visible', async ({ page }) => {
         await page.goto('/explore')
-        await expect(page.getByPlaceholder(/search by track or artist/i)).toBeVisible({ timeout: 5000 })
+        // Placeholder was simplified to just "search…" when toolbar was redesigned.
+        await expect(page.getByPlaceholder(/search/i)).toBeVisible({ timeout: 5000 })
     })
 
     test('search filters results and updates URL', async ({ page }) => {

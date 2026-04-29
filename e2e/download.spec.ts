@@ -17,26 +17,26 @@ test.describe('download page', () => {
 
     test('download page shows song, album, URL options', async ({ page }) => {
         await page.goto('/download')
-        await expect(page.locator('a[href="/download/song"]')).toBeVisible({ timeout: 5000 })
-        await expect(page.locator('a[href="/download/album"]')).toBeVisible()
-        await expect(page.locator('a[href="/download/url"]')).toBeVisible()
+        await expect(page.getByRole('button', { name: 'song', exact: true })).toBeVisible({ timeout: 5000 })
+        await expect(page.getByRole('button', { name: 'album', exact: true })).toBeVisible()
+        await expect(page.getByRole('button', { name: 'url', exact: true })).toBeVisible()
     })
 
-    test('Song link navigates to /download/song', async ({ page }) => {
+    test('Song button switches to /download/song', async ({ page }) => {
         await page.goto('/download')
-        await page.locator('a[href="/download/song"]').click()
+        await page.getByRole('button', { name: 'song', exact: true }).click()
         await expect(page).toHaveURL(/\/download\/song/)
     })
 
-    test('Album link navigates to /download/album', async ({ page }) => {
+    test('Album button switches to /download/album', async ({ page }) => {
         await page.goto('/download')
-        await page.locator('a[href="/download/album"]').click()
+        await page.getByRole('button', { name: 'album', exact: true }).click()
         await expect(page).toHaveURL(/\/download\/album/)
     })
 
-    test('URL link navigates to /download/url', async ({ page }) => {
+    test('URL button switches to /download/url', async ({ page }) => {
         await page.goto('/download')
-        await page.locator('a[href="/download/url"]').click()
+        await page.getByRole('button', { name: 'url', exact: true }).click()
         await expect(page).toHaveURL(/\/download\/url/)
     })
 

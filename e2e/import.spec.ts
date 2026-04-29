@@ -61,17 +61,16 @@ test.describe('import page', () => {
         await expect(input).toHaveAttribute('accept', '.mp3,.m4a')
     })
 
-    test('uploading a file shows row with spinner then result', async ({ page }) => {
+    test('uploading a file shows row with status', async ({ page }) => {
         await page.goto('/import')
         const filePath = makeFakeAudioFile('test-song.mp3')
         try {
             await page.getByTestId('import-file-input').setInputFiles(filePath)
-            // Row should appear immediately with the filename
-            const row = page.getByTestId('import-file-row').first()
-            await expect(row).toBeVisible({ timeout: 3000 })
-            await expect(row).toContainText('test-song.mp3')
-            // Wait for done or error — fake mp3 may fail processing but job still completes
-            await expect(row.locator('p.text-emerald-500, p.text-red-500').first()).toBeVisible({ timeout: 15000 })
+            // Row appears with filename — table row containing the filename text.
+            const row = page.locator('tr', { hasText: 'test-song.mp3' }).first()
+            await expect(row).toBeVisible({ timeout: 5000 })
+            // Wait for terminal status (done | failed | duplicate). Fake mp3 will likely fail.
+            await expect(row.locator('text=/^(done|failed|duplicate)$/').first()).toBeVisible({ timeout: 20000 })
         } finally {
             fs.unlinkSync(filePath)
         }
@@ -83,22 +82,25 @@ test.describe('import page', () => {
         const file2 = makeFakeAudioFile('song-b.mp3')
         try {
             await page.getByTestId('import-file-input').setInputFiles([file1, file2])
-            await expect(page.getByTestId('import-file-row')).toHaveCount(2, { timeout: 3000 })
+            await expect(page.locator('tr', { hasText: 'song-a.mp3' })).toHaveCount(1, { timeout: 5000 })
+            await expect(page.locator('tr', { hasText: 'song-b.mp3' })).toHaveCount(1, { timeout: 5000 })
         } finally {
             fs.unlinkSync(file1)
             fs.unlinkSync(file2)
         }
     })
 
-    test('removing a row works', async ({ page }) => {
+    // FIXME: there is no "remove a row" UI in the import history table currently —
+    // rows are server-persisted import jobs, not transient client state. Punch list.
+    test.fixme('removing a row works', async ({ page }) => {
         await page.goto('/import')
         const filePath = makeFakeAudioFile('removable.mp3')
         try {
             await page.getByTestId('import-file-input').setInputFiles(filePath)
-            const row = page.getByTestId('import-file-row').first()
+            const row = page.locator('tr', { hasText: 'removable.mp3' }).first()
             await expect(row).toBeVisible({ timeout: 3000 })
             await row.getByTitle('remove').click()
-            await expect(page.getByTestId('import-file-row')).toHaveCount(0)
+            await expect(page.locator('tr', { hasText: 'removable.mp3' })).toHaveCount(0)
         } finally {
             fs.unlinkSync(filePath)
         }

@@ -16,7 +16,9 @@ test.describe('admin page', () => {
 
     test('system stats section renders', async ({ page }) => {
         await page.goto('/admin')
-        await expect(page.getByText('system')).toBeVisible({ timeout: 10000 })
+        // Page shows numbered stat cards labeled songs / users / active share tokens.
+        await expect(page.getByText('songs', { exact: true })).toBeVisible({ timeout: 10000 })
+        await expect(page.getByText('users', { exact: true })).toBeVisible()
     })
 
     test('disk stats show used / free / total', async ({ page }) => {

@@ -2,7 +2,11 @@ import { Page, expect, APIRequestContext, request as pwRequest } from '@playwrig
 
 export const USERNAME = process.env.TEST_USERNAME!
 export const PASSWORD = process.env.TEST_PASSWORD!
-export const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8000'
+// .env.local sets NEXT_PUBLIC_API_BASE_URL='' (empty) so the browser uses
+// relative URLs in dev. Tests call the API directly from outside the browser
+// and need an absolute URL — use `||` so empty string also falls through.
+// For non-local envs, set E2E_API_BASE_URL to override.
+export const API_BASE = process.env.E2E_API_BASE_URL || process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000'
 export const API_V1 = `${API_BASE}/v1`
 
 export function ignoreError(msg: string) {

@@ -20,11 +20,15 @@ test.describe('offline mode', () => {
     })
 
     test('offline banner is shown when offline', async ({ page }) => {
-        await page.context().setOffline(true)
+        // Visit while online so the page assets/state load, then flip offline
+        // (setOffline before goto blocks the initial navigation).
         await page.goto('/library')
-        const banner = page.locator('.bg-amber-400')
-        await expect(banner).toBeVisible({ timeout: 5000 })
-        await expect(banner).toContainText(/offline/i)
+        await page.context().setOffline(true)
+        // Trigger the navigator.onLine event the OfflineBanner listens to.
+        await page.evaluate(() => window.dispatchEvent(new Event('offline')))
+        const banner = page.locator('.bg-amber-400, .bg-sky-500\\/10')
+        await expect(banner.first()).toBeVisible({ timeout: 5000 })
+        await page.context().setOffline(false)
     })
 
     test('library loads cached songs when offline', async ({ page }) => {

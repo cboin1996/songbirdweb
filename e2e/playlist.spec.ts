@@ -38,14 +38,15 @@ test.describe('playlists: create / add songs / delete', () => {
         await page.getByPlaceholder('playlist name').fill(name)
         await page.getByRole('button', { name: 'create', exact: true }).click()
 
-        // UI: tile with this playlist name should appear
-        await expect(page.getByText(name).first()).toBeVisible({ timeout: 5000 })
+        // API: confirm it exists (most reliable indicator that UI submitted)
+        await expect.poll(async () => {
+            const res = await api.get(`${API_V1}/playlists`)
+            const playlists = await res.json()
+            return playlists.some((p: any) => p.name === name)
+        }, { timeout: 10000 }).toBe(true)
 
-        // API: confirm it exists
-        const res = await api.get(`${API_V1}/playlists`)
-        const playlists = await res.json()
-        const created = playlists.find((p: any) => p.name === name)
-        expect(created, 'playlist not present in API after UI create').toBeTruthy()
+        // UI: tile with this playlist name should appear after refresh.
+        await expect(page.getByText(name).first()).toBeVisible({ timeout: 10000 })
     })
 
     test('add a song to a playlist from the kebab menu', async ({ page }) => {
