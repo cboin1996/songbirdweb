@@ -1,4 +1,4 @@
-const SHELL_CACHE = 'songbird-shell-v5'
+const SHELL_CACHE = 'songbird-shell-v6'
 const ARTWORK_CACHE = 'songbird-artwork-v1'
 
 self.addEventListener('install', event => {
@@ -45,6 +45,21 @@ self.addEventListener('fetch', event => {
                     }
                     return Response.error()
                 })
+            })
+        )
+        return
+    }
+
+    // Local artwork API: cache-first, store on network success
+    if (url.pathname.match(/^\/v1\/songs\/[^/]+\/artwork\//)) {
+        event.respondWith(
+            caches.open(ARTWORK_CACHE).then(async cache => {
+                const cached = await cache.match(event.request)
+                if (cached) return cached
+                return fetch(event.request).then(r => {
+                    if (r.ok) cache.put(event.request, r.clone())
+                    return r
+                }).catch(() => Response.error())
             })
         )
         return

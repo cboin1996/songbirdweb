@@ -7,7 +7,7 @@ import { usePathname } from "next/navigation"
 import { FaPause, FaPlay, FaStepBackward, FaStepForward, FaRandom, FaRedo, FaList, FaTimes, FaVolumeUp, FaVolumeMute, FaBars, FaMusic } from "react-icons/fa"
 import Spinner from "./spinner"
 import { DOWNLOAD_URL, PlayableSong, artworkUrl, songArtworkUrl, fetchLibrarySongs, fetchPlayerState, fetchSongById, recordPlay, savePlayerState, updatePosition } from "../lib/data"
-import { getSongFile } from "../lib/offline"
+import { getSongFile, cacheArtworkUrls } from "../lib/offline"
 import Slider from "./slider"
 
 export type RepeatMode = 'off' | 'one' | 'all'
@@ -634,12 +634,22 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             }
             const restoredQueue = await resolveUuids(queueUuids)
 
+            const warmArtworkCache = (songs: PlayableSong[]) => {
+                const urls = songs.flatMap(s => [
+                    s.properties?.artworkUrl100 ? artworkUrl(s.properties.artworkUrl100, 400) : null,
+                    s.artwork_cached ? songArtworkUrl(s.uuid, true, undefined, 200) : null,
+                    s.artwork_cached ? songArtworkUrl(s.uuid, true, undefined, 400) : null,
+                ].filter((u): u is string => !!u))
+                if (urls.length) cacheArtworkUrls(urls)
+            }
+
             if (restoredQueue.length > 0) {
                 const safeIndex = Math.max(0, Math.min(state!.queue_index, restoredQueue.length - 1))
                 const song = restoredQueue[safeIndex]
                 queueRef.current = restoredQueue
                 queueIndexRef.current = safeIndex
                 setQueue(restoredQueue)
+                warmArtworkCache(restoredQueue)
                 if (state?.shuffle) {
                     const seed = (state as { shuffle_seed?: number | null }).shuffle_seed
                     const savedPos = (state as { shuffle_position?: number }).shuffle_position ?? 0
@@ -689,6 +699,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                     queueRef.current = [song]
                     queueIndexRef.current = 0
                     setQueue([song])
+                    warmArtworkCache([song])
                     const audio = audioRef.current
                     if (audio) {
                         pendingPosition.current = last.last_position ?? 0

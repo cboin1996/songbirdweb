@@ -700,28 +700,24 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
             )}
             {/* Toolbar */}
             <div className="flex flex-wrap gap-3 items-center mb-2 py-1">
-                {viewMode !== 'playlists' && (
-                    <button
-                        onClick={playAll}
-                        className="flex items-center gap-1.5 px-3 py-1 bg-sky-500 hover:bg-sky-400 text-white rounded-full text-sm font-medium transition-colors"
-                    >
-                        <FaPlay size={9} />
-                        play all
-                    </button>
-                )}
+                <button
+                    onClick={playAll}
+                    className="flex items-center gap-1.5 px-3 py-1 bg-sky-500 hover:bg-sky-400 text-white rounded-full text-sm font-medium transition-colors"
+                >
+                    <FaPlay size={9} />
+                    play all
+                </button>
                 <EditsBanner />
-                {viewMode !== 'playlists' && (
-                    <button
-                        onClick={saveAllOffline}
-                        disabled={savingAll || !online}
-                        title={!online ? 'go online to save songs for offline listening' : 'save all songs for offline listening'}
-                        className="flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-gray-400 hover:text-sky-500 border border-gray-200 dark:border-gray-800 hover:border-sky-500"
-                    >
-                        <FaCloudDownloadAlt size={12} />
-                        {savingAll ? `saving ${saveAllProgress.done}/${saveAllProgress.total}…` : !online ? 'offline' : 'save all offline'}
-                    </button>
-                )}
-                {eligibleCount > 0 && viewMode !== 'playlists' && (
+                <button
+                    onClick={saveAllOffline}
+                    disabled={savingAll || !online}
+                    title={!online ? 'go online to save songs for offline listening' : 'save all songs for offline listening'}
+                    className="flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-gray-400 hover:text-sky-500 border border-gray-200 dark:border-gray-800 hover:border-sky-500"
+                >
+                    <FaCloudDownloadAlt size={12} />
+                    {savingAll ? `saving ${saveAllProgress.done}/${saveAllProgress.total}…` : !online ? 'offline' : 'save all offline'}
+                </button>
+                {eligibleCount > 0 && (
                     <button
                         onClick={openPublishModal}
                         disabled={!online}
@@ -731,7 +727,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                         publish eligible ({eligibleCount})
                     </button>
                 )}
-                <div className="flex gap-1">
+                <div className="flex gap-1 ml-auto">
                     {(['songs', 'artists', 'albums', 'genres', 'playlists'] as ViewMode[]).map(v => (
                         <button
                             key={v}

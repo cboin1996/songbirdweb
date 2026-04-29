@@ -1,5 +1,6 @@
 'use client'
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
     Playlist, PlaylistSong,
     createPlaylist, renamePlaylist, deletePlaylist,
@@ -82,6 +83,10 @@ export default function PlaylistsView({
     const [renameValue, setRenameValue] = useState('')
     const [renameIcon, setRenameIcon] = useState('music')
 
+    // context menu
+    const [menuPl, setMenuPl] = useState<Playlist | null>(null)
+    const [menuPos, setMenuPos] = useState({ top: 0, left: 0 })
+
     async function openModal(pl: Playlist) {
         setLoadingId(pl.id)
         const songs = await fetchPlaylistSongs(pl.id)
@@ -123,6 +128,32 @@ export default function PlaylistsView({
         if (!confirm(`Delete "${modalPlaylist.name}"?`)) return
         await deletePlaylist(modalPlaylist.id)
         closeModal()
+        onRefresh()
+    }
+
+    function openContextMenu(pl: Playlist, e: React.MouseEvent) {
+        e.preventDefault()
+        e.stopPropagation()
+        const menuW = 140
+        setMenuPos({
+            top: e.clientY + 4,
+            left: Math.min(e.clientX, window.innerWidth - menuW - 4),
+        })
+        setMenuPl(pl)
+    }
+
+    async function startRename(pl: Playlist) {
+        setMenuPl(null)
+        await openModal(pl)
+        setRenameValue(pl.name)
+        setRenameIcon(pl.icon ?? 'music')
+        setRenaming(true)
+    }
+
+    async function deleteFromMenu(pl: Playlist) {
+        setMenuPl(null)
+        if (!confirm(`Delete "${pl.name}"?`)) return
+        await deletePlaylist(pl.id)
         onRefresh()
     }
 
@@ -245,6 +276,7 @@ export default function PlaylistsView({
                         <button
                             key={pl.id}
                             onClick={() => openModal(pl)}
+                            onContextMenu={e => openContextMenu(pl, e)}
                             className="group flex flex-col gap-2 rounded-lg p-2 text-left transition-colors hover:bg-gray-100 dark:hover:bg-gray-900"
                         >
                             <div className={`relative w-full aspect-square rounded-lg flex items-center justify-center ${plBg(pl.id)} ${loadingId === pl.id ? 'opacity-60' : ''}`}>
@@ -289,6 +321,36 @@ export default function PlaylistsView({
                 onReorder={handleReorder}
                 emptyState="no songs — add via ⋮ on any song"
             />
+
+            {menuPl && typeof document !== 'undefined' && createPortal(
+                <>
+                    <div className="fixed inset-0 z-40" onClick={() => setMenuPl(null)} />
+                    <div
+                        className="fixed z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl py-1"
+                        style={{ top: menuPos.top, left: menuPos.left }}
+                    >
+                        <button
+                            onClick={() => startRename(menuPl)}
+                            className="whitespace-nowrap block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700"
+                        >
+                            Rename
+                        </button>
+                        <button
+                            onClick={() => { const pl = menuPl; setMenuPl(null); openModal(pl) }}
+                            className="whitespace-nowrap block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700"
+                        >
+                            Edit
+                        </button>
+                        <button
+                            onClick={() => deleteFromMenu(menuPl)}
+                            className="whitespace-nowrap block w-full text-left px-3 py-2 text-sm text-red-500 hover:bg-gray-100 dark:hover:bg-gray-700"
+                        >
+                            Delete
+                        </button>
+                    </div>
+                </>,
+                document.body
+            )}
         </div>
     )
 }
