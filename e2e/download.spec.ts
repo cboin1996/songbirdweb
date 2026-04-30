@@ -150,7 +150,7 @@ test.describe('download page', () => {
         } finally {
             // Cleanup: delete the downloaded song via API
             if (songUuid) {
-                await api.delete(`/v1/songs/${songUuid}`)
+                await api.delete(`/v1/library/${songUuid}`)
             }
             await api.dispose()
         }
@@ -206,7 +206,7 @@ test.describe('download page', () => {
         } finally {
             // Cleanup: delete all downloaded songs via API
             for (const uuid of songUuids) {
-                await api.delete(`/v1/songs/${uuid}`)
+                await api.delete(`/v1/library/${uuid}`)
             }
             await api.dispose()
         }
@@ -257,7 +257,7 @@ test.describe('download page', () => {
         } finally {
             // Cleanup: delete the downloaded song via API
             if (songUuid) {
-                await api.delete(`/v1/songs/${songUuid}`)
+                await api.delete(`/v1/library/${songUuid}`)
             }
             await api.dispose()
         }

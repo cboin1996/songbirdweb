@@ -111,33 +111,38 @@ async function globalSetup() {
     }
     await admin.dispose()
 
-    // --- Test user: login, seed library, purge stale playlists ---
+    // --- Test user: login, RESET library + playlists to known seed state ---
     const ctx = await request.newContext({ baseURL: API_BASE })
     const testLogin = await ctx.post(`${API_V1}/auth/login`, {
         data: { username: TEST_USER, password: TEST_PASS },
     })
     if (!testLogin.ok()) throw new Error(`Test user login failed: ${testLogin.status()}`)
 
-    // Seed library via import fixtures (idempotent — duplicates just add to library).
+    // Purge all songs from test user's library so seeding is deterministic each run.
     const libRes = await ctx.get(`${API_V1}/songs/library`)
     const lib = libRes.ok() ? await libRes.json() : []
-    if (!Array.isArray(lib) || lib.length === 0) {
-        console.log(`[global-setup] seeding library from fixtures…`)
-        for (const filename of SEED_FILES) {
-            await importAndWait(ctx, path.join(FIXTURES_DIR, filename))
+    if (Array.isArray(lib) && lib.length > 0) {
+        const song_ids = lib.map((s: any) => s.uuid).filter(Boolean)
+        if (song_ids.length > 0) {
+            await ctx.delete(`${API_V1}/library/bulk`, { data: { song_ids } })
+            console.log(`[global-setup] purged ${song_ids.length} songs from test user library`)
         }
     }
 
-    // Purge stale e2e playlists.
+    // Purge ALL playlists on the test user (dedicated account — anything there is e2e cruft).
     const plRes = await ctx.get(`${API_V1}/playlists`)
     const playlists = plRes.ok() ? await plRes.json() : []
     let purged = 0
     for (const pl of playlists) {
-        if (typeof pl?.name === 'string' && (pl.name.startsWith('e2e-') || pl.name.startsWith('pw-test-'))) {
-            if ((await ctx.delete(`${API_V1}/playlists/${pl.id}`)).ok()) purged++
-        }
+        if ((await ctx.delete(`${API_V1}/playlists/${pl.id}`)).ok()) purged++
     }
-    if (purged > 0) console.log(`[global-setup] purged ${purged} stale e2e playlists`)
+    if (purged > 0) console.log(`[global-setup] purged ${purged} playlists on test user`)
+
+    // Re-seed library from fixtures.
+    console.log(`[global-setup] seeding library from fixtures…`)
+    for (const filename of SEED_FILES) {
+        await importAndWait(ctx, path.join(FIXTURES_DIR, filename))
+    }
 
     // Persist storage state (cookies) for test user to avoid per-test login.
     const authDir = path.resolve(__dirname, '.auth')
