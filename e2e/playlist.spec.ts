@@ -81,10 +81,7 @@ test.describe('playlists: create / add songs / delete', () => {
         }, { timeout: 5000 }).toBe(1)
     })
 
-    // FIXME: right-click + context-menu portal flow is finicky in headless. The portal renders
-    // via createPortal and the Delete button may collide with a Delete in the rename/edit modal
-    // if a prior test left state. Pre-existing flake. Stable alternative: delete via the modal.
-    test.fixme('delete playlist via context menu', async ({ page }) => {
+    test('delete playlist via context menu', async ({ page }) => {
         const name = uniq(PREFIX)
         const created = await api.post(`${API_V1}/playlists`, { data: { name, icon: 'music' } })
         const pl = await created.json()
@@ -93,13 +90,14 @@ test.describe('playlists: create / add songs / delete', () => {
         const tile = page.locator('button').filter({ hasText: name }).first()
         await expect(tile).toBeVisible({ timeout: 5000 })
 
-        // playlists view uses a confirm() dialog — auto-accept it
+        // confirm() auto-accept
         page.once('dialog', d => d.accept())
         await tile.click({ button: 'right' })
-        // Wait for context menu to appear before clicking Delete
-        const deleteBtn = page.getByRole('button', { name: 'Delete', exact: true })
-        await expect(deleteBtn).toBeVisible({ timeout: 3000 })
-        await deleteBtn.click()
+        // Scope Delete to the context-menu portal (rounded-lg shadow-xl py-1 fixed div)
+        // to avoid collisions with the modal's Delete button if any other test left it open.
+        const contextMenu = page.locator('div.fixed.z-50.shadow-xl').first()
+        await expect(contextMenu).toBeVisible({ timeout: 3000 })
+        await contextMenu.getByRole('button', { name: 'Delete', exact: true }).click()
 
         // Tile should disappear
         await expect(page.locator('button').filter({ hasText: name })).toHaveCount(0, { timeout: 5000 })

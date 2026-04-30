@@ -29,18 +29,13 @@ test.describe('download page', () => {
         await expect(page).toHaveURL(/\/download\/song/)
     })
 
-    // FIXME: real source bug — `Search` component has two router.replace calls racing
-    // (handleModeChange + useEffect on mode change), so URL ends as `/download?mode=album`
-    // instead of `/download/album?mode=album`. Track in punch list.
-    test.fixme('Album button switches to /download/album', async ({ page }) => {
+    test('Album button switches to /download/album', async ({ page }) => {
         await page.goto(routes.download)
         await page.getByRole('button', { name: 'album', exact: true }).click()
         await expect(page).toHaveURL(/\/download\/album/)
     })
 
-    // FIXME: same routing race as album button — router.push() racing with useEffect
-    // causes URL to end as `/download?mode=url` instead of `/download/url?mode=url`
-    test.fixme('URL button switches to /download/url', async ({ page }) => {
+    test('URL button switches to /download/url', async ({ page }) => {
         await page.goto(routes.download)
         await page.getByRole('button', { name: 'url', exact: true }).click()
         await expect(page).toHaveURL(/\/download\/url/)

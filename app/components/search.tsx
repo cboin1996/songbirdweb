@@ -1,6 +1,6 @@
 'use client'
 import { usePathname, useSearchParams, useRouter } from "next/navigation"
-import { useEffect, useRef, useState } from "react"
+import { useRef, useState } from "react"
 import { FaSearch, FaTimes } from 'react-icons/fa'
 import { routes } from '../lib/routes'
 
@@ -24,12 +24,6 @@ export default function Search() {
 
     const [text, setText] = useState(searchParams.get('query') ?? '')
     const [mode, setMode] = useState<Mode>((searchParams.get('mode') as Mode) ?? 'song')
-
-    useEffect(() => {
-        const params = new URLSearchParams(searchParams)
-        params.set('mode', mode)
-        replace(`${pathname}?${params.toString()}`)
-    }, [mode])
 
     function handleSubmit(e: React.FormEvent) {
         e.preventDefault()

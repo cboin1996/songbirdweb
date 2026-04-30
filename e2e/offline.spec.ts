@@ -32,32 +32,8 @@ test.describe('offline mode', () => {
         await page.context().setOffline(false)
     })
 
-    // FIXME: SW is disabled in dev (sw-register.tsx skips registration when NODE_ENV != production),
-    // so an offline reload can't be served by the SW shell cache. Test only meaningful against a
-    // production build (npm run build && npm start). Punch list.
-    test.fixme('library loads cached songs when offline', async ({ page }) => {
-        await page.goto(routes.library)
-        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
-        await page.context().setOffline(true)
-        await page.reload()
-        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
-    })
-
-    // FIXME: Service Worker is disabled in dev mode, so offline behavior cannot be tested here.
-    // This test should run against a production build only. Move to e2e-prod/ if available.
-    test.fixme('kebab menu actions are disabled when offline', async ({ page }) => {
-        await page.context().setOffline(true)
-        await page.goto(routes.library)
-        const card = page.getByTestId('song-card').first()
-        await expect(card).toBeVisible({ timeout: 10000 })
-        await card.hover()
-        await card.getByTestId('song-kebab').click()
-        const menu = page.getByTestId('song-kebab-menu')
-        await expect(menu).toBeVisible({ timeout: 3000 })
-        await expect(menu.getByRole('button', { name: 'Download' })).toBeDisabled()
-        await expect(menu.getByRole('button', { name: 'Play next' })).toBeDisabled()
-        await expect(menu.getByRole('button', { name: 'Edit' })).toBeDisabled()
-    })
+    // The two SW-gated offline tests (library loads cached songs, kebab menu disabled when offline)
+    // moved to e2e-prod/offline.spec.ts — they need a real production SW to be meaningful.
 
     test('import dropzone is disabled when offline', async ({ page }) => {
         await page.context().setOffline(true)

@@ -87,6 +87,27 @@ test.describe('Offline Behavior', () => {
     expect(src).toBeTruthy()
   })
 
+  test('kebab menu actions are disabled when offline (Download, Play next, Edit)', async ({ page }) => {
+    await login(page)
+    await page.goto('/library')
+    // Wait for library to render (and SW to cache shell) before going offline.
+    await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
+    await page.waitForLoadState('networkidle')
+
+    await page.context().setOffline(true)
+    await page.evaluate(() => window.dispatchEvent(new Event('offline')))
+
+    const card = page.getByTestId('song-card').first()
+    await card.hover()
+    await card.getByTestId('song-kebab').click()
+    const menu = page.getByTestId('song-kebab-menu')
+    await expect(menu).toBeVisible({ timeout: 3000 })
+
+    await expect(menu.getByRole('button', { name: 'Download' })).toBeDisabled()
+    await expect(menu.getByRole('button', { name: 'Play next' })).toBeDisabled()
+    await expect(menu.getByRole('button', { name: 'Edit' })).toBeDisabled()
+  })
+
   test('/manifest.json returns 200 with name + icons + start_url', async ({ page }) => {
     const resp = await page.request.get('/manifest.json')
     expect(resp.status()).toBe(200)

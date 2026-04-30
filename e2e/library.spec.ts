@@ -247,30 +247,12 @@ test.describe('library page', () => {
         expect(albumCount).toBeGreaterThan(1)
     })
 
-    // === Tier 2: save-all-offline beforeunload warning ===
+    // 'save all offline: beforeunload warning fires while in-flight' deleted — browsers
+    // suppress synthetic beforeunload dialogs without a real user gesture, and the
+    // in-flight save-all window is too small to deterministically catch in tests.
+    // Verified manually instead.
 
-    // FIXME: hard to time — the beforeunload listener is only registered while
-    // savingAll is true (library-list.tsx:125-130). Save-all needs to be
-    // genuinely in-flight when the navigation is attempted. The button
-    // immediately starts saving but cache writes are fast for an empty/small
-    // library, so the in-flight window is tiny. Skip when unable to keep
-    // savingAll true through the dialog setup.
-    test.fixme('save all offline: beforeunload warning fires while in-flight', async ({ page }) => {
-        await page.goto(routes.library)
-        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
-
-        let dialogFired = false
-        page.on('dialog', d => { dialogFired = true; d.dismiss() })
-
-        const saveAllBtn = page.getByRole('button', { name: /save all offline/i })
-        await saveAllBtn.click()
-        // Try to navigate away while save-all is running.
-        await page.evaluate(() => { window.location.href = '/explore' })
-        await page.waitForTimeout(500)
-        expect(dialogFired).toBe(true)
-    })
-
-    // === Tier 2 per-song deep-linking (smooth scroll + highlight) ===
+    // === Tier 2 per-song deep-linking (scroll + highlight) ===
 
     test('?song=<uuid> scrolls to matching song card and applies highlight animation', async ({ page }) => {
         await page.goto(routes.library)
@@ -416,15 +398,10 @@ test.describe('library page', () => {
         expect(activePx).toBeGreaterThan(inactivePx)
     })
 
-    // === Tier 2 scroll position and editor save flow ===
-
-    test.fixme('editor save → library scrolls to and highlights edited song', async ({ page }) => {
-        // This test requires navigating to /songs/<uuid>/edit, modifying a field,
-        // saving, and verifying the library scrolls and highlights. Editor save flow
-        // may be complex/flaky; marked fixme pending clearer requirements.
-        // Sketch: pick a song, go to edit, change notes field, save → should
-        // land at /library?song=<uuid> with animation on the card.
-        test.skip(true, 'Editor save flow complexity deferred — needs clearer test setup')
-    })
+    // 'editor save → library scrolls and highlights edited song' deleted —
+    // covered by the canonical save-to-library test in e2e/editor.spec.ts
+    // ('save to library: encodes and creates new song version'), which asserts
+    // URL transitions to /library?song=<new_uuid>. The ?song= scroll+highlight
+    // is independently tested via the deep-link test above in this file.
 
 })

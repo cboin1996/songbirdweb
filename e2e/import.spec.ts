@@ -91,21 +91,9 @@ test.describe('import page', () => {
         }
     })
 
-    // FIXME: there is no "remove a row" UI in the import history table currently —
-    // rows are server-persisted import jobs, not transient client state. Punch list.
-    test.fixme('removing a row works', async ({ page }) => {
-        await page.goto(routes.import)
-        const filePath = makeFakeAudioFile('removable.mp3')
-        try {
-            await page.getByTestId('import-file-input').setInputFiles(filePath)
-            const row = page.locator('tr', { hasText: 'removable.mp3' }).first()
-            await expect(row).toBeVisible({ timeout: 3000 })
-            await row.getByTitle('remove').click()
-            await expect(page.locator('tr', { hasText: 'removable.mp3' })).toHaveCount(0)
-        } finally {
-            fs.unlinkSync(filePath)
-        }
-    })
+    // 'removing a row works' was deleted — the import history table doesn't have
+    // per-row remove UI (rows are server-persisted import jobs). Re-add this test
+    // when/if a remove-row feature ships.
 
     test('unauthenticated user is redirected from /import', async ({ page }) => {
         await page.context().clearCookies()
