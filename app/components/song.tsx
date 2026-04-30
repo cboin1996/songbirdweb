@@ -220,7 +220,7 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
                     Download
                 </button>
                 <button onClick={() => { closeKebab(); insertNext({ uuid: song.songId!, properties: song.properties, artwork_cached: song.artworkCached, source: pageSource() }) }}
-                    disabled={isCurrentSong}
+                    disabled={isCurrentSong || !online}
                     className="whitespace-nowrap block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation">
                     Play next
                 </button>

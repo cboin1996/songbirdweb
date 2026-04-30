@@ -12,19 +12,18 @@ test.describe('mobile responsive behaviors', () => {
   })
 
   test('select mode entered via long-press on song card', async ({ page }) => {
-    // Verify Select button exists and initially says "Select"
-    const selectBtn = page.getByRole('button', { name: 'Select', exact: true })
-    await expect(selectBtn).toBeVisible({ timeout: 5000 })
+    // The Select entry-point button is hidden on mobile (long-press is the
+    // canonical entry); it appears only AFTER select mode activates, with
+    // text "1 selected" / "Cancel".
 
     // Long-press (touchStart + wait) on first song card
     const card = page.getByTestId('song-card').first()
     await card.dispatchEvent('touchstart')
-    // Simulate ~500ms hold (from handleTouchStart in song.tsx)
     await page.waitForTimeout(500)
     await card.dispatchEvent('touchend')
 
-    // Verify select mode activated: Select button should show a count like "1 selected"
-    await expect(selectBtn).toContainText(/\d+ selected/)
+    // Once in select mode, the toggle button reappears showing the count.
+    await expect(page.getByRole('button', { name: /\d+ selected/i })).toBeVisible({ timeout: 3000 })
   })
 
   test('library toolbar is NOT sticky on mobile', async ({ page }) => {
