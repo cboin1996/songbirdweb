@@ -120,6 +120,7 @@ jobs:
             -e ADMIN_USERNAME=e2e-admin \
             -e ADMIN_EMAIL=e2e-admin@ci.local \
             -e ADMIN_PASSWORD=e2e-admin-pass \
+            -e CORS_ORIGINS=http://localhost:3000,http://localhost:6996 \
             -v $(pwd)/data:/songbirdapi/data \
             cboin/songbirdapi:latest
 

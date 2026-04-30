@@ -105,12 +105,14 @@ test.describe('mobile responsive behaviors', () => {
     // Wait for player to activate
     await page.waitForTimeout(500)
 
-    // Find all transport control buttons (shuffle, prev, play/pause, next, repeat)
-    const shuffle = page.getByTestId('player-shuffle')
-    const prev = page.getByTestId('player-prev')
-    const playPause = page.getByTestId('player-play-pause')
-    const next = page.getByTestId('player-next')
-    const repeat = page.getByTestId('player-repeat')
+    // Find all transport control buttons (shuffle, prev, play/pause, next, repeat).
+    // Each testid resolves to 2 elements (desktop + mobile button in player.tsx);
+    // .filter({ visible: true }).first() picks whichever is rendered for the viewport.
+    const shuffle = page.getByTestId('player-shuffle').filter({ visible: true }).first()
+    const prev = page.getByTestId('player-prev').filter({ visible: true }).first()
+    const playPause = page.getByTestId('player-play-pause').filter({ visible: true }).first()
+    const next = page.getByTestId('player-next').filter({ visible: true }).first()
+    const repeat = page.getByTestId('player-repeat').filter({ visible: true }).first()
 
     const buttons = [shuffle, prev, playPause, next, repeat]
     for (const btn of buttons) {
