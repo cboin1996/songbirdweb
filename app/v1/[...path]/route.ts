@@ -28,11 +28,26 @@ async function proxyImpl(req: NextRequest) {
     }
     const res = await fetch(target, { method: req.method, headers, body })
 
+    // Forward headers that affect how the browser handles the response.
+    // 'content-disposition' makes downloads save to disk instead of playing
+    // inline; the range/length headers are required for media seeking and
+    // for streamed (206) responses to work in browsers.
+    const FORWARD_HEADERS = [
+        'set-cookie',
+        'content-type',
+        'content-disposition',
+        'content-length',
+        'content-range',
+        'accept-ranges',
+        'cache-control',
+        'etag',
+        'last-modified',
+    ]
     const resHeaders = new Headers()
-    const setCookie = res.headers.get('set-cookie')
-    if (setCookie) resHeaders.set('set-cookie', setCookie)
-    const resContentType = res.headers.get('content-type')
-    if (resContentType) resHeaders.set('content-type', resContentType)
+    for (const name of FORWARD_HEADERS) {
+        const v = res.headers.get(name)
+        if (v) resHeaders.set(name, v)
+    }
 
     return new NextResponse(res.body, { status: res.status, headers: resHeaders })
 }

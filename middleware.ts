@@ -35,12 +35,17 @@ export async function middleware(request: NextRequest) {
   const isSharePage = request.nextUrl.pathname.startsWith('/share/')
   const isOfflinePage = request.nextUrl.pathname === '/offline'
   const isAuthApi = request.nextUrl.pathname.startsWith('/v1/auth/')
+  // /v1/share/<token>/{info,download} are anon-accessible by design;
+  // middleware must let them through for unauthed visitors clicking
+  // a share link's download button. (POST /v1/share/songs/<id> for
+  // creators is auth-gated by the API itself.)
+  const isShareApi = request.nextUrl.pathname.startsWith('/v1/share/')
 
   const validToken = accessToken && !isExpired(accessToken.value)
 
   if (validToken && isLoginPage) return NextResponse.redirect(new URL(routes.download, request.url))
   if (validToken) return NextResponse.next()
-  if (isLoginPage || isSharePage || isOfflinePage || isAuthApi) return NextResponse.next()
+  if (isLoginPage || isSharePage || isOfflinePage || isAuthApi || isShareApi) return NextResponse.next()
 
   if (refreshToken) {
     let newToken: string | null = null

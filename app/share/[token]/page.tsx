@@ -1,6 +1,7 @@
 import Image from "next/image"
-import { BASE_URL, fetchShareInfo, fetchCurrentUser, artworkUrl } from "../../lib/data"
+import { fetchShareInfo, fetchCurrentUser } from "../../lib/data"
 import ShareActions from "./share-actions"
+import { PlayerProvider } from "../../components/player"
 
 export const dynamic = 'force-dynamic';
 
@@ -20,20 +21,25 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
     }
 
     const p = info.properties
-    const downloadUrl = `${BASE_URL}/share/${token}/download`
+    // Relative URL hits Next.js's /v1 proxy (app/v1/[...path]/route.ts),
+    // which forwards to the API. Avoids hardcoding the API origin into HTML.
+    const downloadUrl = `/v1/share/${token}/download`
 
     return (
         <main className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 p-4">
             <div className="flex flex-col items-center gap-6 max-w-sm w-full">
-                {p?.artworkUrl100 && (
-                    <Image
-                        src={artworkUrl(p.artworkUrl100, 600)}
-                        alt=""
-                        width={240}
-                        height={240}
-                        className="rounded-2xl shadow-xl"
-                    />
-                )}
+                {/* The /v1/share/<token>/artwork/<size> endpoint serves
+                    server-cached artwork OR redirects to iTunes if available;
+                    works for fixture-imported songs that have no iTunes URL. */}
+                <Image
+                    src={`/v1/share/${token}/artwork/full`}
+                    alt=""
+                    width={240}
+                    height={240}
+                    className="rounded-2xl shadow-xl"
+                    unoptimized
+                />
+
                 <div className="text-center">
                     <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{p?.trackName ?? 'Unknown'}</p>
                     <p className="text-sky-500 font-medium mt-1">{p?.artistName}</p>
@@ -43,7 +49,11 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
                 </div>
 
                 {user && p ? (
-                    <ShareActions songId={info.song_id} properties={p} downloadUrl={downloadUrl} />
+                    // PlayerProvider scoped here only (not in root layout) so anon
+                    // visitors don't trigger authenticated background fetches.
+                    <PlayerProvider>
+                        <ShareActions songId={info.song_id} properties={p} downloadUrl={downloadUrl} />
+                    </PlayerProvider>
                 ) : (
                     <a
                         href={downloadUrl}
