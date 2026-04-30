@@ -76,4 +76,8 @@ jobs:
             cd ~/songbird
             docker-compose pull songbirdweb
             docker-compose up -d songbirdweb
+            for i in $(seq 1 30); do
+              curl -sf http://localhost:6996 -o /dev/null && echo "healthy" && break
+              sleep 3
+            done
           ENDSSH
