@@ -42,35 +42,39 @@ export default function SongPickerModal({
     emptyState = 'no songs',
     disabledItems,
 }: SongPickerModalProps) {
-    const allIds = songs.map(s => s.uuid)
+    const allIds = useMemo(() => songs.map(s => s.uuid), [songs])
     const { selected, toggle, selectAll, clearAll, setAll, startDrag, continueDrag, endDrag } = useMultiSelect(allIds)
-    const [order, setOrder] = useState<PickerSong[]>(songs)
     const containerRef = useRef<HTMLDivElement>(null)
     const dragReorderRef = useRef<number | null>(null)
     const [dropTarget, setDropTarget] = useState<number | null>(null)
-    const { start, end, totalHeight, offsetTop } = useVirtualList(containerRef, order.length, ROW_H, 3, open)
 
-    // Eligible UUIDs = those NOT in disabledItems. Used to scope "select all"
-    // to selectable rows only, and to bubble eligibles to the top of the list.
-    const eligibleIds = useMemo(() => {
-        if (!disabledItems) return allIds
-        return allIds.filter(id => !disabledItems[id])
-    }, [allIds, disabledItems])
     const hasDisabled = !!disabledItems && Object.keys(disabledItems).length > 0
 
-    // sync order when songs prop changes; if disabledItems present, eligible rows first.
-    useEffect(() => {
-        if (!hasDisabled || reorderable) {
-            setOrder(songs)
-            return
-        }
-        const sorted = [...songs].sort((a, b) => {
+    // Eligible UUIDs = those NOT in disabledItems. Used to scope "select all"
+    // to selectable rows only.
+    const eligibleIds = useMemo(() => {
+        if (!hasDisabled) return allIds
+        return allIds.filter(id => !disabledItems![id])
+    }, [allIds, disabledItems, hasDisabled])
+
+    // Sorted-eligible-first when not reorderable. Memoized so re-renders with stable
+    // songs/disabledItems don't re-run the sort or trigger setOrder thrashing.
+    const sortedSongs = useMemo(() => {
+        if (!hasDisabled || reorderable) return songs
+        return [...songs].sort((a, b) => {
             const aDis = disabledItems![a.uuid] ? 1 : 0
             const bDis = disabledItems![b.uuid] ? 1 : 0
             return aDis - bDis
         })
-        setOrder(sorted)
     }, [songs, disabledItems, hasDisabled, reorderable])
+
+    // Order is state only when reorderable (drag mutates it); otherwise it's derived.
+    const [reorderState, setReorderState] = useState<PickerSong[]>(songs)
+    useEffect(() => { if (reorderable) setReorderState(songs) }, [songs, reorderable])
+    const order = reorderable ? reorderState : sortedSongs
+    const setOrder = reorderable ? setReorderState : (() => {}) // no-op for non-reorderable
+
+    const { start, end, totalHeight, offsetTop } = useVirtualList(containerRef, order.length, ROW_H, 3, open)
 
     // apply initialSelected when modal opens
     useEffect(() => {

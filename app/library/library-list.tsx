@@ -452,15 +452,10 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         setScrubLetter(null)
     }
 
-    // restore scroll position for current view from sessionStorage (skip if jumping to a specific song)
-    useEffect(() => {
-        if (searchParams.get('song')) return
-        const saved = sessionStorage.getItem(`library-scroll-${viewMode}`)
-        const y = saved ? parseInt(saved, 10) : 0
-        if (isNaN(y)) return
-        const id = setTimeout(() => window.scrollTo(0, y), 150)
-        return () => clearTimeout(id)
-    }, [viewMode])
+    // Scroll restore: relying on Next.js + browser native back-button restore.
+    // Forward-nav scroll-to-song uses ?song=<uuid> (deep-link in player). Letter rail
+    // gives 1-tap jump-anywhere. No manual sessionStorage scroll handling — the
+    // earlier attempts (URL-based, pixel-Y, letter-based) all had drift edge cases.
 
     // default activeLetter to first present letter when content fits in viewport (nothing to scroll)
     useEffect(() => {
@@ -469,19 +464,6 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         const first = ALPHABET.find(l => presentLetters.has(l)) ?? null
         if (first) setActiveLetter(first)
     }, [presentLetters]) // eslint-disable-line react-hooks/exhaustive-deps
-
-    // save scroll position per view to sessionStorage (debounced)
-    useEffect(() => {
-        let timer: ReturnType<typeof setTimeout>
-        const handler = () => {
-            clearTimeout(timer)
-            timer = setTimeout(() => {
-                sessionStorage.setItem(`library-scroll-${viewMode}`, String(window.scrollY))
-            }, 200)
-        }
-        window.addEventListener('scroll', handler, { passive: true })
-        return () => { window.removeEventListener('scroll', handler); clearTimeout(timer) }
-    }, [viewMode])
 
     // Jump to and highlight a specific song or album when URL includes ?song=<uuid> or ?album=<id>.
     // Instant scroll: deterministic landing, no layout-shift drift, no timing edge cases.
