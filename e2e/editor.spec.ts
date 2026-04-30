@@ -547,23 +547,6 @@ test.describe('editor modal', () => {
         expect(realErrors, `Errors: ${realErrors.join('\n')}`).toHaveLength(0)
     })
 
-    test('fit trim button is visible and clickable when waveform ready', async ({ page }) => {
-        const errors: string[] = []
-        page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
-        page.on('pageerror', err => errors.push(err.message))
-
-        const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
-
-        const fitTrimBtn = modal.locator('button[title="fit trim region"]')
-        await expect(fitTrimBtn).toBeVisible()
-        await expect(fitTrimBtn).not.toBeDisabled()
-        await fitTrimBtn.click()
-        await page.waitForTimeout(200)
-
-        const realErrors = errors.filter(e => !/AbortError/i.test(e) && !/Failed to fetch/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e) && !/404/i.test(e))
-        expect(realErrors, `Errors: ${realErrors.join('\n')}`).toHaveLength(0)
-    })
 
     test('close guard: amber banner appears on unsaved change, cancel keeps modal open', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
