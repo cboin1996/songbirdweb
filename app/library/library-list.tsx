@@ -483,7 +483,8 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         return () => { window.removeEventListener('scroll', handler); clearTimeout(timer) }
     }, [viewMode])
 
-    // scroll to and highlight a specific song or album when URL includes ?song=<uuid> or ?album=<id>
+    // Jump to and highlight a specific song or album when URL includes ?song=<uuid> or ?album=<id>.
+    // Instant scroll: deterministic landing, no layout-shift drift, no timing edge cases.
     useEffect(() => {
         const songId = searchParams.get('song')
         const albumId = searchParams.get('album')
@@ -491,28 +492,36 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
             ? `[data-song-id="${songId}"]`
             : albumId ? `[data-album-id="${albumId}"]` : null
         if (!target) return
-        let cleanupScrollend: (() => void) | null = null
-        const id = setTimeout(() => {
+
+        const POLL_INTERVAL_MS = 150
+        const MAX_POLL_ATTEMPTS = 20  // 20 × 150ms = 3s window for late renders
+
+        let cancelled = false
+        let pollTimer: ReturnType<typeof setTimeout> | null = null
+
+        const tryScroll = (attempt: number) => {
+            if (cancelled) return
             const el = document.querySelector<HTMLElement>(target)
-            if (!el) return
-            const flash = () => {
-                el.style.animation = 'none'
-                void el.offsetWidth // force reflow so re-applying same animation restarts it
-                el.style.animation = 'song-highlight 1.5s ease-out forwards'
-                el.addEventListener('animationend', () => { el.style.animation = '' }, { once: true })
+            if (!el) {
+                if (attempt < MAX_POLL_ATTEMPTS) {
+                    pollTimer = setTimeout(() => tryScroll(attempt + 1), POLL_INTERVAL_MS)
+                } else {
+                    console.warn(`[library] scroll-to target "${target}" not found after ${MAX_POLL_ATTEMPTS * POLL_INTERVAL_MS}ms`)
+                }
+                return
             }
-            // If scrollend isn't supported, flash immediately after kicking off scroll.
-            const supportsScrollend = 'onscrollend' in window
-            el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-            if (supportsScrollend) {
-                const onScrollEnd = () => { flash(); window.removeEventListener('scrollend', onScrollEnd) }
-                window.addEventListener('scrollend', onScrollEnd, { once: true })
-                cleanupScrollend = () => window.removeEventListener('scrollend', onScrollEnd)
-            } else {
-                flash()
-            }
-        }, 300)
-        return () => { clearTimeout(id); cleanupScrollend?.() }
+            el.scrollIntoView({ behavior: 'instant' as ScrollBehavior, block: 'center' })
+            el.style.animation = 'none'
+            void el.offsetWidth // force reflow so the animation restarts on same element
+            el.style.animation = 'song-highlight 1.5s ease-out forwards'
+            el.addEventListener('animationend', () => { el.style.animation = '' }, { once: true })
+        }
+
+        tryScroll(0)
+        return () => {
+            cancelled = true
+            if (pollTimer) clearTimeout(pollTimer)
+        }
     }, [searchParams, viewMode])
 
     // track active letter: last section whose header has scrolled to/past the sticky bar bottom
