@@ -1,0 +1,40 @@
+name: Feature request
+description: Suggest an enhancement or new feature
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: The motivation matters more than the solution
+      placeholder: "When I'm doing X, it's hard to Y because..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: How would you like it to work?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any other approaches you thought about?
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Where would this live?
+      options:
+        - "Library page"
+        - "Editor"
+        - "Player / queue"
+        - "Explore"
+        - "Playlists"
+        - "Settings"
+        - "Mobile-specific"
+        - "Cross-cutting / not sure"
