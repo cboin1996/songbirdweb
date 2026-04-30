@@ -9,6 +9,9 @@ The SW is **disabled in development** (`sw-register.tsx` checks `NODE_ENV`). It 
 ### Song component handlers not memoized
 `useCallback` is not used on click handlers in `app/components/song.tsx` (`handleLibraryToggle`, `handlePlay`, `handleOfflineToggle`, `handleShare`, `handleDownload`). No user-visible impact currently — would only matter if the actions row is extracted into a `React.memo` component. Requires refactor to be worthwhile.
 
+### Publish-eligible modal renders unbounded list
+`SongPickerModal` opened via "publish eligible" in the library toolbar shows every eligible song without virtualization or pagination. With a few hundred publish-ready songs, the modal becomes janky to scroll and slow to render. Fix: paginate or virtualize the list (mirror the queue panel's `useVirtualList` pattern), or filter by default (e.g., last-edited / by artist).
+
 ## Rate Limiting
 
 ### No rate limiting on playlist creation or share token generation
