@@ -98,7 +98,6 @@ test.describe('Offline Behavior', () => {
 
     // Verify OPFS write succeeded.
     const opfsHasFile = await page.evaluate(async (id) => {
-      // @ts-expect-error
       const root = await navigator.storage.getDirectory()
       try {
         const dir = await root.getDirectoryHandle('audio')
