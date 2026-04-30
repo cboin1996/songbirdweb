@@ -5,9 +5,23 @@ on:
     branches: [main]
 
 jobs:
+  # Lint disabled until ESLint flat-config migration. `next lint` is deprecated
+  # and prompts interactively in CI when no eslint config exists.
+  # lint:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-node@v4
+  #       with:
+  #         node-version: 22
+  #         cache: 'npm'
+  #     - name: Install dependencies
+  #       run: make install
+  #     - name: Lint
+  #       run: make lint
+
   test:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
 
@@ -19,11 +33,6 @@ jobs:
       - name: Install dependencies
         run: make install
 
-      # Lint disabled until ESLint flat-config migration. `next lint` is deprecated
-      # and prompts interactively in CI when no eslint config exists. See known-issues.md.
-      # - name: Lint
-      #   run: make lint
-
       - name: Typecheck
         run: make typecheck
 
@@ -31,3 +40,20 @@ jobs:
         run: make build
         env:
           NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+
+  # E2E disabled in CI — requires live API + DB services.
+  # Run locally with: make test-e2e (dev) or make test-e2e-prod (prod build)
+  # e2e:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-node@v4
+  #       with:
+  #         node-version: 22
+  #         cache: 'npm'
+  #     - name: Install dependencies
+  #       run: make install
+  #     - name: Install Playwright browsers
+  #       run: npx playwright install --with-deps chromium
+  #     - name: Run E2E tests
+  #       run: make test-e2e
