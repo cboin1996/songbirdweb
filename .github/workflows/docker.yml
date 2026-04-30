@@ -74,10 +74,20 @@ jobs:
             set -e
             docker system prune -f
             cd ~/songbird
+            # Pull explicitly + force-recreate. docker-compose up -d alone
+            # can skip recreating if it thinks the image hasn't changed
+            # (manifest-vs-cache races against a fresh push), which leaves
+            # the old container running.
             docker-compose pull songbirdweb
-            docker-compose up -d songbirdweb
+            docker-compose up -d --force-recreate songbirdweb
+            healthy=
             for i in $(seq 1 30); do
-              curl -sf http://localhost:6996 -o /dev/null && echo "healthy" && break
+              if curl -sf http://localhost:6996 -o /dev/null; then
+                healthy=1
+                echo "healthy"
+                break
+              fi
               sleep 3
             done
+            [ "$healthy" = "1" ] || (echo "deploy health-check FAILED" && docker-compose logs --tail=50 songbirdweb && exit 1)
           ENDSSH
