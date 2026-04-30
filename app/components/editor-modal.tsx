@@ -2507,7 +2507,11 @@ export default function EditorModal({
                   value={params.volume <= 0 ? -Infinity : 20 * Math.log10(params.volume)}
                   min={-40} max={6} step={0.3}
                   format={db => isFinite(db) ? `${db >= 0 ? '+' : ''}${db.toFixed(1)} dB` : '-∞ dB'}
-                  parse={s => Math.pow(10, parseFloat(s.replace(/[^0-9.\-+]/g, '')) / 20)}
+                  // value/format/onChange all live in dB display space — parse
+                  // must too. The prior `Math.pow(10, .../20)` here was double
+                  // converting (parse→multiplier, then onChange→multiplier
+                  // again), so e.g. typing +3.0 dB landed at +1.4 dB.
+                  parse={s => parseFloat(s.replace(/[^0-9.\-+]/g, ''))}
                   onChange={db => handleSliderChange('volume', Math.pow(10, db / 20))}
                   onStart={handleSliderStart}
                   onCommit={db => { handleSliderCommit(); handleSliderChange('volume', Math.pow(10, db / 20)) }}

@@ -102,9 +102,12 @@ test.describe('playlists: create / add songs / delete', () => {
         // Tile should disappear
         await expect(page.locator('button').filter({ hasText: name })).toHaveCount(0, { timeout: 5000 })
 
-        // API confirms removal
-        const r = await api.get(`${API_V1}/playlists/${pl.id}`)
-        expect([404, 401, 403]).toContain(r.status())
+        // API confirms removal — there's no GET /v1/playlists/{id} endpoint
+        // (would 405); list and assert the deleted id is gone.
+        const r = await api.get(`${API_V1}/playlists`)
+        expect(r.ok()).toBe(true)
+        const playlists = await r.json()
+        expect(playlists.some((p: { id: string }) => p.id === pl.id)).toBe(false)
     })
 
     // === Tier 2 reorder + icon picker ===

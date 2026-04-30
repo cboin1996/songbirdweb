@@ -178,10 +178,12 @@ test.describe('explore page', () => {
         expect(songId).toBeTruthy()
 
         await cards.first().click()
-        await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
+        const playerBar = page.getByTestId('player-bar')
+        await expect(playerBar).toBeVisible({ timeout: 5000 })
 
-        // Check the context link includes explore params + song UUID
-        const link = page.locator('a[href*="explore"]').first()
+        // Scope to the player bar; otherwise `a[href*="explore"]` matches
+        // the navbar's plain /explore link first (no song= param).
+        const link = playerBar.locator('a[href*="explore"]').first()
         const href = await link.getAttribute('href')
         expect(href).toContain('window=all')
         expect(href).toContain('sort=plays')

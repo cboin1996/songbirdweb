@@ -36,18 +36,23 @@ test.describe('offline mode', () => {
     // moved to e2e-prod/offline.spec.ts — they need a real production SW to be meaningful.
 
     test('import dropzone is disabled when offline', async ({ page }) => {
-        await page.context().setOffline(true)
+        // Load the page online first; navigating while offline fails with
+        // ERR_INTERNET_DISCONNECTED. Then flip offline + dispatch the event
+        // so the useOnline hook re-renders the dropzone in disabled state.
         await page.goto(routes.import)
         const dropzone = page.getByTestId('import-dropzone')
         await expect(dropzone).toBeVisible({ timeout: 5000 })
+        await page.context().setOffline(true)
+        await page.evaluate(() => window.dispatchEvent(new Event('offline')))
         await expect(dropzone).toHaveClass(/opacity-40/)
         await expect(dropzone).toHaveClass(/cursor-not-allowed/)
     })
 
     test('save all offline button is disabled when offline', async ({ page }) => {
-        await page.context().setOffline(true)
         await page.goto(routes.library)
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
+        await page.context().setOffline(true)
+        await page.evaluate(() => window.dispatchEvent(new Event('offline')))
         const saveAllBtn = page.getByRole('button', { name: /save all offline/i })
         await expect(saveAllBtn).toBeVisible({ timeout: 5000 })
         await expect(saveAllBtn).toBeDisabled()
