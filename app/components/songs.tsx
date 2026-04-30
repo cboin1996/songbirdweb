@@ -1,159 +1,233 @@
 'use client'
-import { useEffect, useState } from "react";
-import { DownloadedSong, downloadSongViaUrl, fetchSong, tagSong } from "../lib/data";
-import Song from "./song";
-import { useSearchParams } from "next/navigation";
-import Input from "../components/input"
-import Button from "../components/button"
-import { FaX } from "react-icons/fa6";
-import Spinner from "./spinner";
+import { useEffect, useRef, useState } from "react";
 
-export default function Songs({ songs }: { songs: DownloadedSong[] }) {
-    let statuses = {
-        paste: "enter a url",
-        downloading: "downloading",
-        tagging: "tagging",
-        taggingError: "tagging error, try again",
-        urlDownloadError: "download error, try again",
-        downloadFileError: "download error, try again",
-        noSongSelected: "you must select a song",
-    }
-    const searchParams = useSearchParams()
-
-    const [selected, setSelected] = useState(false);
-    const noActiveIndex = -1
-    const [activeIndex, setActiveIndex] = useState(noActiveIndex);
-    const [status, setStatus] = useState("")
-    const [text, setText] = useState('')
-
-    const api_key = searchParams.get("apiKey")!.toString()
-
-    const displayDownloadInput = activeIndex !== -1 && songs.length > 0
-    const isDownloading = status === statuses.downloading || status === statuses.tagging
-
-    // trigger handleSongSelection() on index selection change
+function useIsDesktop() {
+    const [isDesktop, setIsDesktop] = useState(false)
     useEffect(() => {
-        handleSongSelection()
-    }, [activeIndex])
+        const mq = window.matchMedia('(min-width: 768px)')
+        setIsDesktop(mq.matches)
+        const handler = (e: MediaQueryListEvent) => setIsDesktop(e.matches)
+        mq.addEventListener('change', handler)
+        return () => mq.removeEventListener('change', handler)
+    }, [])
+    return isDesktop
+}
+import { DownloadedSong, downloadSongViaUrl, downloadSongToFile, addToLibrary, fetchLibrary, tagSong, toPlayableSong } from "../lib/data";
+import { usePlayer } from "./player";
+import { routes } from "../lib/routes";
+import Song from "./song";
+import { useScrollRestoration } from "../lib/use-scroll-restoration";
+import Spinner from "./spinner";
+import { FaX } from "react-icons/fa6";
 
-    async function createDownloadFile(song: DownloadedSong) {
-        if (song.songId === undefined) {
-            setStatus(statuses.downloadFileError)
-            return
+export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[] }) {
+    const isDesktop = useIsDesktop()
+    const noActiveIndex = -1
+    const [songs, setSongs] = useState<DownloadedSong[]>(initialSongs)
+    const [libraryIds, setLibraryIds] = useState<Set<string>>(new Set())
+    const [activeIndex, setActiveIndex] = useState(noActiveIndex)
+    const [text, setText] = useState('')
+    const [status, setStatus] = useState<'idle' | 'downloading' | 'tagging' | 'ready' | 'saving' | 'error'>('idle')
+    const [errorMsg, setErrorMsg] = useState('')
+    const [readySong, setReadySong] = useState<DownloadedSong | null>(null)
+    const inputRef = useRef<HTMLInputElement>(null)
+    const { play, current } = usePlayer()
+    useScrollRestoration()
+
+    useEffect(() => {
+        fetchLibrary().then(entries => setLibraryIds(new Set(entries.map(e => e.song_id))))
+    }, [])
+
+    useEffect(() => {
+        if (activeIndex !== noActiveIndex && status === 'idle') {
+            setTimeout(() => inputRef.current?.focus(), 50)
         }
-        // simply return the song if already downloaded
-        const result = await fetchSong(song.songId, api_key)
-        if (result === undefined) {
-          setStatus(statuses.downloadFileError)
-          return
-        }
-        const url: string = window.URL.createObjectURL(result)
-        const link: HTMLAnchorElement = document.createElement('a');
-        link.href = url
-        link.download = `${song.properties.trackName} - ${song.properties.artistName}.mp3`
-        document.body.appendChild(link)
-        link.click()
-        document.body.removeChild(link)
-        window.URL.revokeObjectURL(url)
-        setText("")
+    }, [activeIndex, status])
+
+    const downloaded = songs.filter(s => s.songId !== undefined)
+    const fromItunes = songs.filter(s => s.songId === undefined)
+    const activeSong = activeIndex !== noActiveIndex ? songs[activeIndex] : undefined
+    const isDownloading = status === 'downloading' || status === 'tagging' || status === 'saving'
+
+    function dismiss() {
         setActiveIndex(noActiveIndex)
+        setText('')
+        setStatus('idle')
+        setErrorMsg('')
+        setReadySong(null)
     }
 
-    async function handleSongSelection() {
-        setSelected(true);
-        if (activeIndex === noActiveIndex) {
-            setStatus(statuses.noSongSelected)
-            return
+    async function handleAddToLibrary() {
+        if (!readySong?.songId) return
+        setStatus('saving')
+        const ok = await addToLibrary(readySong.songId)
+        if (ok) {
+            setLibraryIds(prev => new Set([...prev, readySong.songId!]))
+            dismiss()
+        } else {
+            setStatus('error')
+            setErrorMsg('could not add to library')
         }
-        const song = songs[activeIndex]
-        // update status for user as paste
-        if (song.songId === undefined) {
-            setStatus(statuses.paste)
-            return
-        }
-        // simply return the song if already downloaded
-        createDownloadFile(song)
     }
 
-    async function handleSongDownload(e: React.ChangeEvent<HTMLFormElement>) {
+    async function handleDeviceDownload() {
+        if (!readySong?.songId) return
+        setStatus('saving')
+        const ok = await downloadSongToFile(readySong.songId, readySong.properties.trackName, readySong.properties.artistName)
+        if (ok) dismiss()
+        else { setStatus('error'); setErrorMsg('file download failed') }
+    }
+
+    async function handleSongDownload(e: React.FormEvent) {
         e.preventDefault()
-        if (activeIndex === noActiveIndex) {
-            setStatus(statuses.noSongSelected)
-            return
-        }
         const song = songs[activeIndex]
-        setStatus(statuses.downloading)
-        const result = await downloadSongViaUrl(text, api_key)
-        if (result === undefined || result.song_ids === undefined || result.song_ids.length === 0) {
-            setStatus(statuses.urlDownloadError)
-            return
+        if (!song || !text.trim()) return
+        setStatus('downloading')
+        setErrorMsg('')
+        const result = await downloadSongViaUrl(text)
+        if (!result || result.song_ids.length === 0) {
+            setStatus('error'); setErrorMsg('download failed'); return
         }
-        setStatus(statuses.tagging)
         const songId = result.song_ids[0]
-        const taggingResult = await tagSong(
-            result.song_ids[0],
-            song.properties,
-            api_key
-        )
-        if (taggingResult === undefined) {
-            setStatus(statuses.taggingError)
+        if (result.cached) {
+            const existing = songs.find(s => s.songId === songId) ?? { ...song, songId }
+            setReadySong(existing)
+            setStatus('ready')
+            return
         }
-        createDownloadFile(
-            {
-                songId: songId,
-                properties: song.properties
-            }
-        )
+        setStatus('tagging')
+        const tagged = await tagSong(songId, song.properties)
+        if (!tagged) { setStatus('error'); setErrorMsg('tagging failed'); return }
+        const updated = { ...song, songId }
+        setSongs(prev => prev.map((s, i) => i === activeIndex ? updated : s))
+        setReadySong(updated)
+        setStatus('ready')
     }
 
-    function resetText(e: any) {
-        e.preventDefault()
-        setText("")
+    function renderSection(sectionSongs: DownloadedSong[], label: string) {
+        if (sectionSongs.length === 0) return null
+        return (
+            <div className="py-2">
+                <p className="text-gray-400 text-sm pb-2">{label}</p>
+                <div className={isDesktop
+                    ? "grid grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-2 md:gap-6"
+                    : "flex flex-col"
+                }>
+                    {sectionSongs.map((song, i) => {
+                        const globalIndex = songs.indexOf(song)
+                        return (
+                            <Song
+                                key={globalIndex}
+                                song={song}
+                                selected={song.songId ? current?.uuid === song.songId : activeIndex === globalIndex}
+                                onClick={() => {
+                                    if (song.songId) {
+                                        // Source href captures the current URL so navigating back restores the user's
+                                        // search results / page state (e.g. /download/song?query=foo).
+                                        const here = typeof window !== 'undefined'
+                                            ? window.location.pathname + window.location.search
+                                            : routes.download
+                                        const ctx = { label: 'Downloads', href: here, id: 'downloads' }
+                                        const q = downloaded.filter(s => s.songId).map(s => toPlayableSong(s, ctx))
+                                        play(toPlayableSong(song, ctx), q, ctx)
+                                    } else {
+                                        setActiveIndex(globalIndex)
+                                        setStatus('idle')
+                                        setErrorMsg('')
+                                        setReadySong(null)
+                                    }
+                                }}
+                                inLibrary={song.songId ? libraryIds.has(song.songId) : false}
+                                isPrivate={!!song.owner_id}
+                                showSource={true}
+                                compact={!isDesktop}
+                            />
+                        )
+                    })}
+                </div>
+            </div>
+        )
     }
 
     return (
-        <div>
-            {
-                displayDownloadInput ? (
-                    <div>
-                        <form className="flex flex-row gap-2" onSubmit={handleSongDownload}>
-                            <Input
-                                placeholder={`${songs[activeIndex].properties.trackName} - ${songs[activeIndex].properties.artistName}`}
-                                disabled={isDownloading}
-                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setText(e.target.value)}
-                                value={text}
-                                type="url"
-                                classAttrs="md:w-96 w-80"
-                            />
-                            <button onClick={resetText} type="button">
-                                <FaX className="-mx-8 text-gray-700 hover:bg-gray-500 rounded-lg"></FaX>
-                            </button>
-                            <Button
-                                disabled={isDownloading || text === ""}
-                                text="download"
-                            >
-                            </Button>
-                        </form>
-                        <div className="flex flex-row gap-2">
-                            <p>{status}</p>
-                            {isDownloading ? (<Spinner></Spinner>) : (<div></div>)}
-                            { status === statuses.downloadFileError ? <Button text="retry" onClick={handleSongSelection} disabled={isDownloading}></Button> : <div/>}
-                        </div>
-                    </div>
-                ) : (<div />)
+        <div className={activeSong ? 'pb-24' : ''}>
+            {songs.length === 0
+                ? <p>no songs found.</p>
+                : <>
+                    {renderSection(downloaded, "downloaded")}
+                    {renderSection(fromItunes, "matches")}
+                </>
             }
-            <div className="grid 2xl:grid-cols-4 xl:grid-cols-3 lg:grid-cols-2 md:gap-8 rounded-2xl justify-items-stretch py-2">
-                {
-                    songs.length > 0 ? (
-                        songs.map((
-                            song: DownloadedSong, i) => <Song key={i} song={song} selected={activeIndex === i} onClick={() => setActiveIndex(i)}></Song>
-                        )
-                    ) :
-                        (
-                            <p>no songs found.</p>
-                        )
-                }
-            </div>
+
+            {activeSong && (
+                <div className={`fixed left-0 right-0 z-[55] bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 shadow-2xl ${current ? 'bottom-[84px]' : 'bottom-0'}`}>
+                    {status === 'ready' ? (
+                        <div className="flex items-center gap-3 px-4 py-3">
+                            <button type="button" onClick={dismiss} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 shrink-0 transition-colors">
+                                <FaX size={11} />
+                            </button>
+                            <div className="min-w-0 flex-1">
+                                <p className="text-sm font-medium truncate">{activeSong.properties.trackName}</p>
+                                <p className="text-xs text-gray-400">ready — what would you like to do?</p>
+                            </div>
+                            <button
+                                onClick={handleAddToLibrary}
+                                className="text-sm px-3 py-1.5 bg-sky-500 text-white rounded-lg hover:bg-sky-600 transition-colors shrink-0"
+                            >
+                                add to library
+                            </button>
+                            <button
+                                onClick={handleDeviceDownload}
+                                className="text-sm px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors shrink-0"
+                            >
+                                download file
+                            </button>
+                        </div>
+                    ) : (
+                        <form onSubmit={handleSongDownload} className="flex items-center gap-3 px-4 py-3">
+                            <button type="button" onClick={dismiss} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 shrink-0 transition-colors">
+                                <FaX size={11} />
+                            </button>
+                            <div className="min-w-0 hidden sm:block shrink-0 w-40">
+                                <p className="text-sm font-medium truncate">{activeSong.properties.trackName}</p>
+                                <p className="text-xs text-gray-400 truncate">{activeSong.properties.artistName}</p>
+                            </div>
+                            <input
+                                ref={inputRef}
+                                type="url"
+                                placeholder="paste audio url…"
+                                value={text}
+                                disabled={isDownloading}
+                                onChange={e => { setText(e.target.value); if (status === 'error') { setStatus('idle'); setErrorMsg('') } }}
+                                className="flex-1 text-sm border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-1.5 bg-transparent focus:outline-none focus:ring-1 focus:ring-sky-500 min-w-0 disabled:opacity-50"
+                            />
+                            {isDownloading ? (
+                                <div className="flex items-center gap-2 shrink-0">
+                                    <Spinner />
+                                    <span className="text-xs text-gray-400">
+                                        {status === 'tagging' ? 'tagging…' : status === 'saving' ? 'saving…' : 'downloading…'}
+                                    </span>
+                                </div>
+                            ) : status === 'error' ? (
+                                <div className="flex items-center gap-2 shrink-0">
+                                    <span className="text-xs text-red-500">{errorMsg}</span>
+                                    <button type="submit" className="text-xs px-3 py-1.5 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors">
+                                        retry
+                                    </button>
+                                </div>
+                            ) : (
+                                <button
+                                    type="submit"
+                                    disabled={!text}
+                                    className="text-sm px-3 py-1.5 bg-sky-500 text-white rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-sky-600 transition-colors shrink-0"
+                                >
+                                    download
+                                </button>
+                            )}
+                        </form>
+                    )}
+                </div>
+            )}
         </div>
-    );
-} 
+    )
+}

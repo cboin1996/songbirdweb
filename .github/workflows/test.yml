@@ -1,0 +1,173 @@
+name: test
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  # Lint disabled until ESLint flat-config migration. `next lint` is deprecated
+  # and prompts interactively in CI when no eslint config exists.
+  # lint:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-node@v4
+  #       with:
+  #         node-version: 22
+  #         cache: 'npm'
+  #     - name: Install dependencies
+  #       run: make install
+  #     - name: Lint
+  #       run: make lint
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: make install
+
+      - name: Typecheck
+        run: make typecheck
+
+      - name: Build
+        run: make build
+        env:
+          NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+
+  e2e:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: dev
+            browser: chromium
+            make_target: test-e2e
+            needs_dev_server: true
+          - project: mobile
+            browser: webkit
+            make_target: test-e2e-mobile
+            needs_dev_server: true
+          - project: prod
+            browser: chromium
+            make_target: test-e2e-prod
+            needs_dev_server: false
+    name: e2e (${{ matrix.project }})
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: songbirdapi
+          POSTGRES_USER: songbirdapi
+          POSTGRES_PASSWORD: songbirdapi
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: make install
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+
+      - name: Create data directory
+        run: mkdir -p data/downloads
+
+      - name: Run migrations
+        run: |
+          docker run --rm --network host \
+            --entrypoint alembic \
+            -e ENV=test \
+            -e POSTGRES_HOST=localhost \
+            -e POSTGRES_PORT=5432 \
+            -e POSTGRES_USER=songbirdapi \
+            -e POSTGRES_PASSWORD=songbirdapi \
+            -e POSTGRES_DB=songbirdapi \
+            -e API_KEY=ci-test-key \
+            -e JWT_SECRET=ci-test-secret \
+            cboin/songbirdapi:latest upgrade head
+
+      - name: Start API
+        run: |
+          docker run -d --name songbirdapi --network host \
+            -e ENV=test \
+            -e POSTGRES_HOST=localhost \
+            -e POSTGRES_PORT=5432 \
+            -e POSTGRES_USER=songbirdapi \
+            -e POSTGRES_PASSWORD=songbirdapi \
+            -e POSTGRES_DB=songbirdapi \
+            -e API_KEY=ci-test-key \
+            -e JWT_SECRET=ci-test-secret \
+            -e ADMIN_USERNAME=e2e-admin \
+            -e ADMIN_EMAIL=e2e-admin@ci.local \
+            -e ADMIN_PASSWORD=e2e-admin-pass \
+            -v $(pwd)/data:/songbirdapi/data \
+            cboin/songbirdapi:latest
+
+      - name: Wait for API
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8000/v1/version; then
+              echo "API ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs songbirdapi
+          exit 1
+
+      - name: Start Next.js dev server
+        if: matrix.needs_dev_server
+        env:
+          NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+        run: npm run dev &
+
+      - name: Wait for Next.js
+        if: matrix.needs_dev_server
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000; then
+              echo "Next.js ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+
+      - name: Run E2E tests (${{ matrix.project }})
+        env:
+          NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+          E2E_API_BASE_URL: http://localhost:8000
+          E2E_WEB_URL: http://localhost:3000
+          TEST_USERNAME: e2e-user
+          TEST_PASSWORD: e2e-user-pass
+          E2E_ADMIN_USERNAME: e2e-admin
+          E2E_ADMIN_PASSWORD: e2e-admin-pass
+        run: make ${{ matrix.make_target }}
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ matrix.project }}
+          path: playwright-report/
+          retention-days: 7

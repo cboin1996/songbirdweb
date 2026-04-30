@@ -14,13 +14,29 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
+    --background: #030712; /* Tailwind gray-950 — matches sticky navbar/header backdrops */
     --foreground: #ededed;
   }
+}
+
+html {
+  overflow-x: clip;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+@keyframes song-highlight {
+  0%   { background-color: rgb(14 165 233 / 0.25); }
+  100% { background-color: transparent; }
+}
+
+/* Skip painting/layout of offscreen library sections at scale.
+   Browser keeps the first render's height as the placeholder. */
+.cv-auto {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 600px;
 }

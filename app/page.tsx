@@ -1,7 +1,10 @@
+import { Suspense } from "react";
 import Login from "./components/login";
 
 export default function Home() {
     return (
-        <Login></Login>
+        <Suspense>
+            <Login />
+        </Suspense>
     );
 }
