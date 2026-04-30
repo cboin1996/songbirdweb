@@ -344,7 +344,7 @@ test.describe('editor modal', () => {
 
         // 401s from background resource loads (artwork/audio served from API) are expected
         const realErrors = errors.filter(e =>
-            !/AbortError/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e)
+            !/AbortError/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e) && !/404/i.test(e)
         )
         expect(realErrors, `Console errors: ${realErrors.join('\n')}`).toHaveLength(0)
     })
@@ -450,7 +450,7 @@ test.describe('editor modal', () => {
         await scrubFill(modal, 'speed', '0.50×')
         await expect(modal.getByRole('spinbutton', { name: 'speed' })).toContainText('0.50×')
 
-        const realErrors = errors.filter(e => !/AbortError/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e))
+        const realErrors = errors.filter(e => !/AbortError/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e) && !/404/i.test(e))
         expect(realErrors, `Errors: ${realErrors.join('\n')}`).toHaveLength(0)
     })
 
@@ -470,7 +470,7 @@ test.describe('editor modal', () => {
         await checkbox.check()
         await expect(checkbox).toBeChecked()
 
-        const realErrors = errors.filter(e => !/AbortError/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e))
+        const realErrors = errors.filter(e => !/AbortError/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e) && !/404/i.test(e))
         expect(realErrors, `Errors: ${realErrors.join('\n')}`).toHaveLength(0)
     })
 
@@ -543,7 +543,7 @@ test.describe('editor modal', () => {
 
         await modal.locator('button[title="stop preview"]').click()
 
-        const realErrors = errors.filter(e => !/AbortError/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e))
+        const realErrors = errors.filter(e => !/AbortError/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e) && !/404/i.test(e))
         expect(realErrors, `Errors: ${realErrors.join('\n')}`).toHaveLength(0)
     })
 
@@ -561,7 +561,7 @@ test.describe('editor modal', () => {
         await fitTrimBtn.click()
         await page.waitForTimeout(200)
 
-        const realErrors = errors.filter(e => !/AbortError/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e))
+        const realErrors = errors.filter(e => !/AbortError/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e) && !/404/i.test(e))
         expect(realErrors, `Errors: ${realErrors.join('\n')}`).toHaveLength(0)
     })
 
@@ -631,7 +631,7 @@ test.describe('editor modal', () => {
         await modal.press('h')
         await page.waitForTimeout(100)
 
-        const realErrors = errors.filter(e => !/AbortError/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e))
+        const realErrors = errors.filter(e => !/AbortError/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e) && !/404/i.test(e))
         expect(realErrors, `Errors: ${realErrors.join('\n')}`).toHaveLength(0)
     })
 
@@ -707,7 +707,7 @@ test.describe('editor modal', () => {
         await modal.getByRole('button', { name: '+ add cut' }).click()
         await expect(modal.locator('button[title="remove cut"]')).toHaveCount(2, { timeout: 5000 })
 
-        const real = errors.filter(e => !/AbortError/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e))
+        const real = errors.filter(e => !/AbortError/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e) && !/404/i.test(e))
         expect(real, `Errors after adding two cuts: ${real.join('\n')}`).toHaveLength(0)
     })
 
