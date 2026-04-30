@@ -173,11 +173,11 @@ test.describe('explore page', () => {
             test.skip()
         }
 
-        const card = cards.first()
-        const songId = await card.getAttribute('data-song-id')
+        // data-song-id is on the wrapper div around each Song, not on the card.
+        const songId = await page.locator('[data-song-id]').first().getAttribute('data-song-id')
         expect(songId).toBeTruthy()
 
-        await card.click()
+        await cards.first().click()
         await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
 
         // Check the context link includes explore params + song UUID

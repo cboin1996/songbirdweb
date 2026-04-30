@@ -1,6 +1,6 @@
 import { routes } from './routes'
 import { test, expect, Page } from '@playwright/test'
-import { USERNAME, PASSWORD, login, ignoreError } from './helpers'
+import { USERNAME, PASSWORD, login, ignoreError, apiLogin, API_V1 } from './helpers'
 
 
 async function openEditorForEditMe(page: Page) {
@@ -711,5 +711,144 @@ test.describe('editor modal', () => {
 
         const real = errors.filter(e => !/AbortError/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e))
         expect(real, `Errors after adding two cuts: ${real.join('\n')}`).toHaveLength(0)
+    })
+
+    // === CRITICAL DESTRUCTIVE FLOWS ===
+
+    test.slow('save to library: encodes and creates new song version', async ({ page }) => {
+        const api = await apiLogin()
+        const modal = await openEditorFromLibrary(page)
+        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+
+        // Make a small audio change — adjust volume slider
+        const volumeSlider = modal.getByRole('slider', { name: 'Volume' })
+        await volumeSlider.fill('1.2')
+        await volumeSlider.dispatchEvent('input')
+        await expect(modal.getByText(/120%/)).toBeVisible()
+
+        // Extract origin song ID from URL before save
+        const originUrl = page.url()
+        const originMatch = originUrl.match(/\/songs\/([a-f0-9-]+)\/edit/)
+        const originSongId = originMatch?.[1]
+        expect(originSongId, 'Could not extract origin song ID from URL').toBeTruthy()
+
+        // Click "Save to Library" button
+        const saveBtn = modal.getByRole('button', { name: 'Save to Library' })
+        await saveBtn.click()
+
+        // Wait for job completion (polling) — encoding is slow, up to 60s timeout
+        await expect(saveBtn).toContainText('Saved ✓', { timeout: 60000 })
+
+        // Assert URL changed to a different song ID (the new child version)
+        await page.waitForTimeout(500)
+        const newUrl = page.url()
+        const newMatch = newUrl.match(/\/songs\/([a-f0-9-]+)\/edit/)
+        const newSongId = newMatch?.[1]
+        expect(newSongId, 'Could not extract new song ID from URL after save').toBeTruthy()
+        expect(newSongId, 'New song ID should be different from origin').not.toBe(originSongId)
+
+        // Cleanup: delete the new song via API
+        if (newSongId) {
+            const res = await api.delete(`${API_V1}/library/${newSongId}`)
+            expect(res.ok(), `Failed to delete new song ${newSongId}: ${res.status()}`).toBe(true)
+        }
+
+        await api.dispose()
+    })
+
+    test.slow('restore original: child song shows restore button and navigates to parent', async ({ page }) => {
+        const api = await apiLogin()
+
+        // Step 1: Create a child by opening editor, making an edit, and saving
+        const modal1 = await openEditorFromLibrary(page)
+        await expect(modal1.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+
+        const volumeSlider1 = modal1.getByRole('slider', { name: 'Volume' })
+        await volumeSlider1.fill('1.15')
+        await volumeSlider1.dispatchEvent('input')
+
+        // Get parent song ID from URL
+        const parentUrl = page.url()
+        const parentMatch = parentUrl.match(/\/songs\/([a-f0-9-]+)\/edit/)
+        const parentSongId = parentMatch?.[1]
+        expect(parentSongId, 'Could not extract parent song ID').toBeTruthy()
+
+        // Save to create child
+        const saveBtn1 = modal1.getByRole('button', { name: 'Save to Library' })
+        await saveBtn1.click()
+        await expect(saveBtn1).toContainText('Saved ✓', { timeout: 60000 })
+
+        // Extract child song ID from new URL
+        const childUrl = page.url()
+        const childMatch = childUrl.match(/\/songs\/([a-f0-9-]+)\/edit/)
+        const childSongId = childMatch?.[1]
+        expect(childSongId, 'Could not extract child song ID').toBeTruthy()
+        expect(childSongId, 'Child song ID should differ from parent').not.toBe(parentSongId)
+
+        // Wait for modal to refresh with child song data (parent_song_id should be set)
+        await page.waitForTimeout(2000)
+
+        // Step 2: Verify "Restore Original" button is visible (only shown when parent_song_id is set)
+        const restoreBtn = modal1.getByRole('button', { name: 'Restore Original' })
+        await expect(restoreBtn).toBeVisible({ timeout: 10000 })
+
+        // Step 3: Click "Restore Original" button
+        await restoreBtn.click()
+
+        // Assert confirmation dialog appears
+        await expect(page.getByText(/Restore original\?/i)).toBeVisible({ timeout: 5000 })
+
+        // Confirm restore
+        await page.getByRole('button', { name: 'Yes, restore' }).click()
+
+        // Step 4: Assert URL navigates back to parent song's editor
+        await expect(page).toHaveURL(new RegExp(`/songs/${parentSongId}/edit`), { timeout: 10000 })
+
+        // Cleanup: delete the child song
+        if (childSongId) {
+            const res = await api.delete(`${API_V1}/library/${childSongId}`)
+            expect(res.ok(), `Failed to delete child song ${childSongId}: ${res.status()}`).toBe(true)
+        }
+
+        await api.dispose()
+    })
+
+    test('overwrite original: admin checkbox flips save button label and shows danger styling', async ({ page }) => {
+        const modal = await openEditorFromLibrary(page)
+        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+
+        // The "save as original" checkbox is admin-only. If not visible, skip.
+        const checkboxLabel = page.locator('label').filter({ hasText: /save as original/i })
+        const checkboxCount = await checkboxLabel.count()
+
+        if (checkboxCount === 0) {
+            // Admin gating is active — test user is not admin
+            test.skip()
+            return
+        }
+
+        // Admin user: checkbox is visible
+        const checkbox = checkboxLabel.locator('input[type="checkbox"]')
+        await expect(checkbox).toBeVisible()
+        await expect(checkbox).not.toBeChecked()
+
+        // Toggle the checkbox
+        await checkbox.check()
+        await expect(checkbox).toBeChecked()
+
+        // Assert: label text changes to red/danger styling
+        const labelSpan = checkboxLabel.locator('span').filter({ hasText: /save as original/i })
+        await expect(labelSpan).toHaveClass(/text-red-400/)
+
+        // Assert: the Save button still exists and is labeled "Save to Library"
+        // (the label doesn't change, but danger styling on checkbox signals overwrite intent)
+        const saveBtn = modal.getByRole('button', { name: 'Save to Library' })
+        await expect(saveBtn).toBeVisible()
+
+        // DO NOT click save — this is destructive. Test stops here.
+        // Uncheck to revert
+        await checkbox.uncheck()
+        await expect(checkbox).not.toBeChecked()
+        await expect(labelSpan).not.toHaveClass(/text-red-400/)
     })
 })

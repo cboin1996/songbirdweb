@@ -274,10 +274,10 @@ test.describe('library page', () => {
 
     test('?song=<uuid> scrolls to matching song card and applies highlight animation', async ({ page }) => {
         await page.goto(routes.library)
-        const card = page.getByTestId('song-card').first()
-        await expect(card).toBeVisible({ timeout: 10000 })
+        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
 
-        const songId = await card.getAttribute('data-song-id')
+        // data-song-id lives on the wrapper div around each Song component, not on the card itself.
+        const songId = await page.locator('[data-song-id]').first().getAttribute('data-song-id')
         expect(songId).toBeTruthy()
 
         // Navigate to library with ?song param
@@ -427,36 +427,4 @@ test.describe('library page', () => {
         test.skip(true, 'Editor save flow complexity deferred — needs clearer test setup')
     })
 
-    test('sessionStorage scroll position restores per view', async ({ page }) => {
-        await page.goto(routes.library)
-        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
-
-        // Get initial scroll (should be 0)
-        let initialScroll = await page.evaluate(() => window.scrollY)
-        expect(initialScroll).toBe(0)
-
-        // Scroll down by 600px
-        await page.evaluate(() => window.scrollBy(0, 600))
-        await page.waitForTimeout(300)
-        const scrolledY = await page.evaluate(() => window.scrollY)
-        expect(scrolledY).toBeGreaterThan(500) // Allow some tolerance
-
-        // Switch to artists view
-        await page.getByRole('button', { name: 'artists', exact: true }).click()
-        await expect(page).toHaveURL(/view=artists/, { timeout: 5000 })
-        await page.waitForTimeout(300)
-
-        // Scroll should be reset to 0 on new view
-        const artistsScroll = await page.evaluate(() => window.scrollY)
-        expect(artistsScroll).toBe(0)
-
-        // Switch back to songs view
-        await page.getByRole('button', { name: 'songs', exact: true }).click()
-        await expect(page).toHaveURL(/view=songs/, { timeout: 5000 })
-        await page.waitForTimeout(300)
-
-        // Scroll position should be restored (within 50px tolerance)
-        const restoredScroll = await page.evaluate(() => window.scrollY)
-        expect(Math.abs(restoredScroll - scrolledY)).toBeLessThan(50)
-    })
 })

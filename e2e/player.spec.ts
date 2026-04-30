@@ -81,7 +81,8 @@ test.describe('player bar', () => {
         // Ensure shuffle is ON. If currently off, click once.
         const cls0 = await btn.getAttribute('class') ?? ''
         if (!cls0.includes('text-sky-500')) await btn.click()
-        await page.waitForTimeout(300)
+        // scheduleSave debounces 2000ms — wait long enough for state to flush to localStorage.
+        await page.waitForTimeout(2500)
 
         // Capture the saved shuffle_seed (server-side state via API once it saves).
         // Easier: read it from localStorage where the player mirrors state.
@@ -99,7 +100,8 @@ test.describe('player bar', () => {
         await page.waitForTimeout(300)
         // Toggle ON
         await btn.click()
-        await page.waitForTimeout(300)
+        // wait for debounced save again
+        await page.waitForTimeout(2500)
 
         const seedAfter = await page.evaluate(() => {
             try {

@@ -2,11 +2,11 @@ import { request } from '@playwright/test'
 const fs = require('fs')
 const path = require('path')
 
-let __dirname = '.'
-try {
-  __dirname = path.dirname(require.main?.filename || '.')
-} catch (e) {
-  __dirname = process.cwd()
+// __dirname should be the e2e directory (where this file lives)
+let __dirname = path.resolve(path.dirname(__filename || '.'), '.')
+// Fallback if __filename isn't available
+if (!__dirname || __dirname === '.') {
+  __dirname = path.resolve(process.cwd(), 'e2e')
 }
 
 try {
