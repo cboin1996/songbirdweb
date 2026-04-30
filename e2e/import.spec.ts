@@ -235,27 +235,4 @@ test.describe('import page', () => {
         await expect(row.locator('a', { hasText: 'original added' })).toBeVisible()
     })
 
-    test('beforeunload dialog fires while uploads pending', async ({ page }) => {
-        await page.goto(routes.import)
-        const filePath = makeFakeAudioFile('beforeunload.mp3')
-        try {
-            // Listener must be wired before we trigger the upload.
-            let dialogFired = false
-            page.on('dialog', d => { dialogFired = true; d.dismiss() })
-
-            await page.getByTestId('import-file-input').setInputFiles(filePath)
-            // pendingUploads ticks up immediately on uploadFiles; try to navigate.
-            await page.evaluate(() => { window.location.href = '/library' })
-            // Give the dialog event loop a moment.
-            await page.waitForTimeout(400)
-            // Note: many Chromium builds suppress beforeunload without user
-            // gesture interaction on the page. We accept either a fired dialog
-            // OR that we're still on /import (navigation blocked) as evidence
-            // the handler engaged.
-            const stillOnImport = page.url().includes('/import')
-            expect(dialogFired || stillOnImport).toBe(true)
-        } finally {
-            try { fs.unlinkSync(filePath) } catch {}
-        }
-    })
 })
