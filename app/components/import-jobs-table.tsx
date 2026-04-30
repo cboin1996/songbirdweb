@@ -127,7 +127,7 @@ export default function ImportJobsTable({
   }
 
   const filtered = useMemo(() => {
-    let result = statusFilter ? jobs.filter(j => j.status === statusFilter) : jobs
+    const result = statusFilter ? jobs.filter(j => j.status === statusFilter) : jobs
     if (!filter.trim()) return result
     const q = filter.trim().toLowerCase()
     return result.filter(j =>

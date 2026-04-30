@@ -584,7 +584,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             audio.removeEventListener('timeupdate', onTimeUpdate)
             audio.removeEventListener('durationchange', onDurationChange)
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
     }, [])
 
     // current-dependent: onEnded needs current to save position

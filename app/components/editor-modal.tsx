@@ -445,7 +445,7 @@ export default function EditorModal({
       wsOrigRef.current?.pause()
       stopPreview()
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [playerIsPlaying])
 
   // load draft on open
@@ -466,7 +466,7 @@ export default function EditorModal({
         }
       }
     })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [songId])
 
   // fetch eligibility on mount and when active song changes
@@ -504,7 +504,7 @@ export default function EditorModal({
     waveRafRef.current = requestAnimationFrame(() => {
       if (peaksRef.current && waveCtxRef.current) renderWave(peaksRef.current, waveCtxRef.current)
     })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [selectedRegionId, renderWave])
 
   useEffect(() => {
@@ -513,7 +513,7 @@ export default function EditorModal({
     waveRafRef.current = requestAnimationFrame(() => {
       if (peaksRef.current && waveCtxRef.current) renderWave(peaksRef.current, waveCtxRef.current)
     })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [allSelected, renderWave])
   useEffect(() => {
     paramsRef.current = params
@@ -1179,7 +1179,7 @@ export default function EditorModal({
       renderFunction: renderOrigWave,
     })
     wsOrigRef.current = ws
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     ws.load(`${DOWNLOAD_URL}/${songId}`).catch((err: Error) => {
       if (err?.name !== 'AbortError') console.error('WaveSurfer orig:', err)
     })

@@ -179,7 +179,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     useEffect(() => {
         if (navigator.onLine) refreshSongs()
         if (navigator.onLine) fetchEligibleSongs().then(e => { setEligibleSongs(e); setEligibleCount(e.filter(s => s.eligible).length) })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
     }, [])
 
     useEffect(() => {
@@ -536,7 +536,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         window.addEventListener('scroll', handler, { passive: true })
         handler()
         return () => { window.removeEventListener('scroll', handler); if (rafId) cancelAnimationFrame(rafId); setActiveLetter(null) }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
     }, [viewMode, songGrouped, albumGrouped, genreGrouped])
 
     const VIEW_CONTEXT: Record<ViewMode, { label: string; href: string }> = {
@@ -670,7 +670,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
             container.removeEventListener('touchmove', onTouchMove)
             container.removeEventListener('touchend', onTouchEnd)
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
     }, [selectMode, songGrouped])
 
     function handleSelect(songId: string, shiftKey = false) {
