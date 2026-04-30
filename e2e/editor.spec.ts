@@ -58,12 +58,6 @@ test.describe('editor modal', () => {
     test.describe.configure({ mode: 'serial' })
 
     test.beforeEach(async ({ page }) => {
-        // Hard reset before each test: Chrome caps AudioContext at ~6/tab.
-        // WaveSurfer's destroy() does not always fully release its context,
-        // so without this navigate-to-blank step the 7th editor mount in a
-        // serial suite fails to ready up. about:blank forces the prior
-        // React tree (and any held AudioContext) to fully tear down.
-        await page.goto('about:blank')
         await login(page)
     })
 
