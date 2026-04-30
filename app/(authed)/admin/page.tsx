@@ -3,9 +3,6 @@ import { fetchCurrentUser, fetchUsers, fetchAdminStats } from "../../lib/data";
 import UserTable from "./user-table";
 import SystemStats from "./system-stats";
 import { routes } from "../../lib/routes";
-
-export const dynamic = 'force-dynamic';
-
 export default async function Page() {
     const user = await fetchCurrentUser()
     if (user?.role !== 'admin') redirect(routes.download)
