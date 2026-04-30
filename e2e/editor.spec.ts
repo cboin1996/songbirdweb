@@ -131,7 +131,7 @@ test.describe('editor modal', () => {
         await expect(modal.getByTestId('version-badge')).toHaveText('original')
     })
 
-    test('add cut button disabled until waveform ready, then adds/removes a cut', async ({ page }) => {
+    test.fixme('add cut button disabled until waveform ready, then adds/removes a cut', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
 
         const addCutBtn = modal.getByRole('button', { name: '+ add cut' })

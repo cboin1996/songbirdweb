@@ -371,10 +371,9 @@ test.describe('library page', () => {
         const rail = page.locator('div.touch-none.select-none.cursor-pointer')
         const allSpans = rail.locator('span')
 
-        // Find active span (has both text-sky-500 and font-bold)
-        const activeSpan = allSpans.filter({
-            has: page.locator('.text-sky-500.font-bold')
-        })
+        // Active span has text-sky-500 + font-bold directly on it (not on a
+        // child); same selector fix as the :319 sibling test.
+        const activeSpan = rail.locator('span.font-bold.text-sky-500')
         await expect(activeSpan).toHaveClass(/text-sky-500/)
         await expect(activeSpan).toHaveClass(/font-bold/)
 

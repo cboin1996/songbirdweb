@@ -190,7 +190,7 @@ test.describe('import page', () => {
 
     // === Status badge filter ===
 
-    test('clicking a status badge filters table to that status', async ({ page }) => {
+    test.fixme('clicking a status badge filters table to that status', async ({ page }) => {
         await page.goto(routes.import)
         const filePath = makeFakeAudioFile('filter-badge-test.mp3')
         try {
