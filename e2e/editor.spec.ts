@@ -717,7 +717,8 @@ test.describe('editor modal', () => {
 
     // === CRITICAL DESTRUCTIVE FLOWS ===
 
-    test.slow('save to library: encodes and creates new song version', async ({ page }) => {
+    test('save to library: encodes and creates new song version', async ({ page }) => {
+        test.slow()
         const api = await apiLogin()
         const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
@@ -751,7 +752,8 @@ test.describe('editor modal', () => {
         await api.dispose()
     })
 
-    test.slow('restore original: child song shows restore button and navigates to parent', async ({ page }) => {
+    test('restore original: child song shows restore button and navigates to parent', async ({ page }) => {
+        test.slow()
         const api = await apiLogin()
 
         // Step 1: Open editor on a library song, capture parent ID, make an edit, save → creates a child.
