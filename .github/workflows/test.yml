@@ -4,6 +4,10 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # Lint disabled until ESLint flat-config migration. `next lint` is deprecated
   # and prompts interactively in CI when no eslint config exists.
