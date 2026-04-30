@@ -30,13 +30,13 @@ async function proxyImpl(req: NextRequest) {
 
     // Forward headers that affect how the browser handles the response.
     // 'content-disposition' makes downloads save to disk instead of playing
-    // inline; the range/length headers are required for media seeking and
-    // for streamed (206) responses to work in browsers.
+    // inline; range/accept-ranges are required for media seeking. Do NOT
+    // forward content-length: Next computes its own from the stream and
+    // forwarding the upstream value can mismatch and 500.
     const FORWARD_HEADERS = [
         'set-cookie',
         'content-type',
         'content-disposition',
-        'content-length',
         'content-range',
         'accept-ranges',
         'cache-control',
