@@ -796,7 +796,10 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                     })()}
                     <button
                         onClick={selectMode ? exitSelectMode : () => enterSelectMode()}
-                        className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors border min-h-[36px] ${selectMode ? 'bg-sky-500 text-white border-sky-500' : 'bg-[var(--background)]/90 backdrop-blur-md text-gray-400 hover:text-sky-500 border-gray-200 dark:border-gray-800 hover:border-sky-500'}`}
+                        // On mobile, entering select mode is via long-press;
+                        // hide the entry-point button. Keep visible while in
+                        // select mode so users can cancel.
+                        className={`items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors border min-h-[36px] ${selectMode ? 'flex bg-sky-500 text-white border-sky-500' : 'hidden md:flex bg-[var(--background)]/90 backdrop-blur-md text-gray-400 hover:text-sky-500 border-gray-200 dark:border-gray-800 hover:border-sky-500'}`}
                     >
                         {selectMode
                             ? selectedIds.size > 0

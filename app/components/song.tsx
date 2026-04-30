@@ -181,6 +181,13 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
     }
 
     function handleContextMenu(e: React.MouseEvent) {
+        // On touch-only devices, long-press fires both contextmenu and our
+        // long-press → bulk-select handler. Skip the kebab pop-up so it
+        // doesn't fight with select mode; users tap the kebab icon instead.
+        if (typeof window !== 'undefined' && window.matchMedia('(hover: none) and (pointer: coarse)').matches) {
+            e.preventDefault()
+            return
+        }
         if (!song.songId) return
         e.preventDefault()
         e.stopPropagation()
