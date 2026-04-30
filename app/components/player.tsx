@@ -262,6 +262,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             }
             shouldPlayRef.current = true
             audio.load()
+            // Call play() directly as well as setting shouldPlayRef. canplay can be
+            // throttled / delayed in background tabs (Chrome on Android, iOS PWA),
+            // which would leave the next song loaded-but-paused. Once
+            // autoplayActivated, the browser allows non-gesture play() calls.
+            audio.play().catch(() => {})
         } else {
             // First play — must call play() within the user-gesture window before any await.
             audio.src = `${DOWNLOAD_URL}/${song.uuid}`

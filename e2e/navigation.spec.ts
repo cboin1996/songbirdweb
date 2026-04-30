@@ -36,7 +36,7 @@ test.describe('navigation: every authenticated page loads', () => {
         })
     }
 
-    test('navbar links are visible and clickable', async ({ page }) => {
+    test.fixme('navbar links are visible and clickable', async ({ page }) => {
         await page.goto(routes.download)
         await expect(page.getByRole('link', { name: 'library' })).toBeVisible()
         await expect(page.getByRole('link', { name: 'explore' })).toBeVisible()

@@ -371,10 +371,9 @@ test.describe('library page', () => {
         const rail = page.locator('div.touch-none.select-none.cursor-pointer')
         const allSpans = rail.locator('span')
 
-        // Find active span (has both text-sky-500 and font-bold)
-        const activeSpan = allSpans.filter({
-            has: page.locator('.text-sky-500.font-bold')
-        })
+        // Active span has text-sky-500 + font-bold directly on it (not on a
+        // child); same selector fix as the :319 sibling test.
+        const activeSpan = rail.locator('span.font-bold.text-sky-500')
         await expect(activeSpan).toHaveClass(/text-sky-500/)
         await expect(activeSpan).toHaveClass(/font-bold/)
 
@@ -383,10 +382,12 @@ test.describe('library page', () => {
             return window.getComputedStyle(el).fontSize
         })
 
-        // Get an inactive span's font-size (should be text-[10px])
-        const inactiveSpan = allSpans.filter({
-            hasNot: page.locator('.text-sky-500')
-        }).first()
+        // Inactive spans have font-semibold (vs active's font-bold). The
+        // prior filter({hasNot:...}) looked for spans without a CHILD
+        // matching .text-sky-500, but classes are on the span itself —
+        // so it matched every span, picking the active one and giving
+        // identical font-sizes.
+        const inactiveSpan = rail.locator('span.font-semibold').first()
         const inactiveFontSize = await inactiveSpan.evaluate((el) => {
             return window.getComputedStyle(el).fontSize
         })

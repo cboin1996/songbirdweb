@@ -1,0 +1,89 @@
+name: Bug report
+description: Something is broken in the songbird web UI
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please fill in as much as you can — the more context, the faster the fix.
+
+  - type: input
+    id: web-version
+    attributes:
+      label: songbirdweb version
+      description: Found at the bottom of the page or in `package.json`
+      placeholder: "0.3.2"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Where are you running it?
+      options:
+        - "https://songbird.kee-flix.com (production)"
+        - "Local dev (localhost:3000)"
+        - "Self-hosted Docker"
+        - "Other"
+    validations:
+      required: true
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser + version
+      placeholder: "Chrome 120, Safari 17, Firefox 121, etc."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: device
+    attributes:
+      label: Device type
+      options:
+        - "Desktop"
+        - "Mobile"
+        - "Tablet"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug
+      placeholder: "When I click X, I see Y instead of Z"
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Go to /library
+        2. Click song-card kebab
+        3. Select "Edit"
+        4. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+
+  - type: textarea
+    id: console-errors
+    attributes:
+      label: Browser console errors
+      description: Open devtools (F12) → Console tab. Paste any red errors here.
+      render: shell
+
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Screenshot or screen recording
+      description: Drag-drop into this field. Optional but helpful for visual bugs.

@@ -4,6 +4,10 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # Lint disabled until ESLint flat-config migration. `next lint` is deprecated
   # and prompts interactively in CI when no eslint config exists.
@@ -120,6 +124,7 @@ jobs:
             -e ADMIN_USERNAME=e2e-admin \
             -e ADMIN_EMAIL=e2e-admin@ci.local \
             -e ADMIN_PASSWORD=e2e-admin-pass \
+            -e CORS_ORIGINS=http://localhost:3000,http://localhost:6996 \
             -v $(pwd)/data:/songbirdapi/data \
             cboin/songbirdapi:latest
 

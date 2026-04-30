@@ -200,8 +200,16 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         fetchPlaylists().then(setPlaylists)
         fetchDrafts().then(d => setDraftIds(new Set(d.map(x => x.song_id))))
         function onDraftChanged(e: Event) {
+            // Banner deletes pass { deleted: songId } as a fast path. Editor
+            // saves/deletes (data.ts saveEditDraft/deleteEditDraft) dispatch
+            // with no detail — refetch in that case so newly-created drafts
+            // light up the kebab/edit highlighting.
             const deleted = (e as CustomEvent).detail?.deleted
-            if (deleted) setDraftIds(prev => { const next = new Set(prev); next.delete(deleted); return next })
+            if (deleted) {
+                setDraftIds(prev => { const next = new Set(prev); next.delete(deleted); return next })
+            } else {
+                fetchDrafts().then(d => setDraftIds(new Set(d.map(x => x.song_id))))
+            }
         }
         window.addEventListener(EVENTS.draftChanged, onDraftChanged)
         return () => window.removeEventListener(EVENTS.draftChanged, onDraftChanged)
