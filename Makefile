@@ -49,6 +49,10 @@ test-e2e:
 test-e2e-prod:
 	npx playwright test --project=prod --workers=1
 
+.PHONY: test-e2e-mobile
+test-e2e-mobile:
+	npx playwright test --project=mobile --workers=1
+
 .PHONY: test
 test: lint typecheck
 
