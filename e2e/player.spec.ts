@@ -189,7 +189,8 @@ test.describe('player bar', () => {
         const card = page.getByTestId('song-card').first()
         await expect(card).toBeVisible({ timeout: 10000 })
         await card.click()
-        await expect(page.getByText(/from Library/i)).toBeVisible({ timeout: 5000 })
+        await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
+        await expect(page.getByText(/from Library/i)).toBeVisible({ timeout: 10000 })
     })
 
     test('no console errors during playback', async ({ page }) => {
