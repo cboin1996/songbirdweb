@@ -2266,14 +2266,7 @@ export default function EditorModal({
             <Image src={artSrc} alt="" width={36} height={36} className="rounded shrink-0 object-cover" unoptimized={!!artworkCached} />
           )}
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 min-w-0">
-              <p className="font-medium truncate text-base">{props.trackName}</p>
-              {eligibility !== null && (
-                <span className={`shrink-0 text-xs font-medium px-2 py-0.5 rounded-full border ${eligibility.eligible ? 'text-emerald-400 border-emerald-500/40' : 'text-amber-500 border-amber-600/40'}`}>
-                  {eligibility.eligible ? 'publish eligible' : `missing: ${eligibility.missing_fields.join(', ')}`}
-                </span>
-              )}
-            </div>
+            <p className="font-medium truncate text-base">{props.trackName}</p>
             <p className="text-sm text-sky-500 truncate">{props.artistName}</p>
             {draftUpdatedAt && (() => {
               const exp = new Date(draftUpdatedAt)
@@ -2317,9 +2310,17 @@ export default function EditorModal({
             <button
               key={t}
               onClick={() => setTab(t)}
-              className={`px-5 py-2.5 text-sm font-medium capitalize transition-colors ${tab === t ? 'border-b-2 border-sky-500 text-sky-500' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}
+              className={`px-5 py-2.5 text-sm font-medium capitalize transition-colors flex items-center gap-2 ${tab === t ? 'border-b-2 border-sky-500 text-sky-500' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}
             >
               {t}
+              {t === 'properties' && eligibility !== null && (
+                <span
+                    title={eligibility.eligible ? 'publish eligible' : `missing: ${eligibility.missing_fields.join(', ')}`}
+                    className={`text-[10px] font-medium normal-case px-1.5 py-0.5 rounded-full border ${eligibility.eligible ? 'text-emerald-400 border-emerald-500/40' : 'text-amber-500 border-amber-600/40'}`}
+                >
+                  {eligibility.eligible ? 'eligible' : `missing ${eligibility.missing_fields.length}`}
+                </span>
+              )}
             </button>
           ))}
         </div>

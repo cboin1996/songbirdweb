@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Image from 'next/image'
 import { FaTimes, FaCheck, FaBars, FaMusic } from 'react-icons/fa'
@@ -50,8 +50,27 @@ export default function SongPickerModal({
     const [dropTarget, setDropTarget] = useState<number | null>(null)
     const { start, end, totalHeight, offsetTop } = useVirtualList(containerRef, order.length, ROW_H, 3, open)
 
-    // sync order when songs prop changes
-    useEffect(() => { setOrder(songs) }, [songs])
+    // Eligible UUIDs = those NOT in disabledItems. Used to scope "select all"
+    // to selectable rows only, and to bubble eligibles to the top of the list.
+    const eligibleIds = useMemo(() => {
+        if (!disabledItems) return allIds
+        return allIds.filter(id => !disabledItems[id])
+    }, [allIds, disabledItems])
+    const hasDisabled = !!disabledItems && Object.keys(disabledItems).length > 0
+
+    // sync order when songs prop changes; if disabledItems present, eligible rows first.
+    useEffect(() => {
+        if (!hasDisabled || reorderable) {
+            setOrder(songs)
+            return
+        }
+        const sorted = [...songs].sort((a, b) => {
+            const aDis = disabledItems![a.uuid] ? 1 : 0
+            const bDis = disabledItems![b.uuid] ? 1 : 0
+            return aDis - bDis
+        })
+        setOrder(sorted)
+    }, [songs, disabledItems, hasDisabled, reorderable])
 
     // apply initialSelected when modal opens
     useEffect(() => {
@@ -64,7 +83,7 @@ export default function SongPickerModal({
     useEffect(() => {
         if (!open || !selectable) return
         const handler = (e: KeyboardEvent) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === 'a') { e.preventDefault(); selectAll() }
+            if ((e.ctrlKey || e.metaKey) && e.key === 'a') { e.preventDefault(); setAll(eligibleIds) }
             if (e.key === 'Escape') onClose()
         }
         window.addEventListener('keydown', handler)
@@ -115,10 +134,12 @@ export default function SongPickerModal({
                         {titleActions}
                         {selectable && (
                             <button
-                                onClick={selected.size === songs.length ? clearAll : selectAll}
+                                onClick={selected.size === eligibleIds.length ? clearAll : () => setAll(eligibleIds)}
                                 className="text-xs text-sky-500 hover:text-sky-400 font-medium"
                             >
-                                {selected.size === songs.length ? 'deselect all' : 'select all'}
+                                {selected.size === eligibleIds.length
+                                    ? 'deselect all'
+                                    : hasDisabled ? 'select eligible' : 'select all'}
                             </button>
                         )}
                         <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-1">
