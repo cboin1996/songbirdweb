@@ -5,6 +5,8 @@ import { fetchCurrentUser } from "../lib/data";
 import { UserProvider } from "../lib/user-context";
 import OfflineGuard from "../components/offline-guard";
 
+export const dynamic = 'force-dynamic';
+
 export default async function Layout({ children }: { children: React.ReactNode }) {
     const user = await fetchCurrentUser()
     return (

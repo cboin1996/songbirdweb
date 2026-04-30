@@ -2,6 +2,8 @@ import Image from "next/image"
 import { BASE_URL, fetchShareInfo, fetchCurrentUser, artworkUrl } from "../../lib/data"
 import ShareActions from "./share-actions"
 
+export const dynamic = 'force-dynamic';
+
 export default async function SharePage({ params }: { params: Promise<{ token: string }> }) {
     const { token } = await params
     const [info, user] = await Promise.all([fetchShareInfo(token), fetchCurrentUser()])
