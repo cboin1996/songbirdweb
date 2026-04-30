@@ -257,7 +257,7 @@ test.describe('library bulk select', () => {
 
         // Cleanup: re-add the removed songs
         for (const uuid of uuidsToRemove) {
-            await api.post(`${API_V1}/songs/${uuid}/library`)
+            await api.post(`${API_V1}/library/${uuid}`)
         }
     })
 })
