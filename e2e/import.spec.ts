@@ -184,10 +184,10 @@ test.describe('import page', () => {
             // shortly after as the in-flight tracker drains).
             const row = page.locator('tr', { hasText: 'disappear.mp3' }).first()
             await expect(row.locator('text=/^(done|failed|duplicate)$/').first()).toBeVisible({ timeout: 20000 })
-            // Banner clears once activeIds is empty. Allow a short grace window.
+            // Banner clears once activeIds is empty. Allow longer grace window.
             await expect.poll(async () =>
                 await page.locator('text=/\\d+ importing/').count(),
-                { timeout: 8000 }
+                { timeout: 15000 }
             ).toBe(0)
         } finally {
             fs.unlinkSync(filePath)

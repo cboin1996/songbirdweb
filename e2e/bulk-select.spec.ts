@@ -235,10 +235,13 @@ test.describe('library bulk select', () => {
         for (let i = 0; i < 2; i++) await cards.nth(i).click()
         await expect(page.getByRole('button', { name: /2 selected/i })).toBeVisible({ timeout: 3000 })
 
-        // Handle confirm dialog and click Remove
+        // Handle confirm dialog and click Remove — wait for API response deterministically
         page.once('dialog', d => d.accept())
-        await page.getByRole('button', { name: 'Remove', exact: true }).click()
-        await page.waitForTimeout(1000)
+        const removeBtn = page.getByRole('button', { name: 'Remove', exact: true })
+        await Promise.all([
+            page.waitForResponse(r => r.url().includes(`${API_V1}/library/bulk`) && r.request().method() === 'DELETE'),
+            removeBtn.click()
+        ])
 
         // Verify post-remove count
         const postRes = await api.get(`${API_V1}/songs/library`)

@@ -43,7 +43,9 @@ test.describe('offline mode', () => {
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
     })
 
-    test('kebab menu actions are disabled when offline', async ({ page }) => {
+    // FIXME: Service Worker is disabled in dev mode, so offline behavior cannot be tested here.
+    // This test should run against a production build only. Move to e2e-prod/ if available.
+    test.fixme('kebab menu actions are disabled when offline', async ({ page }) => {
         await page.context().setOffline(true)
         await page.goto(routes.library)
         const card = page.getByTestId('song-card').first()

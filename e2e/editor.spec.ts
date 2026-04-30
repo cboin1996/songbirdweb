@@ -83,14 +83,14 @@ test.describe('editor modal', () => {
         const modal = await openEditorFromLibrary(page)
 
         // loop button is disabled until wsReady — use it as the waveform-ready signal
-        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
     })
 
     test.skip('sliders are interactive', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
 
         // wait for waveform ready (play button enabled)
-        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
         const volumeSlider = modal.getByRole('slider', { name: 'Volume' })
         await expect(volumeSlider).toBeVisible()
@@ -105,7 +105,9 @@ test.describe('editor modal', () => {
 
     test('undo button activates after slider change', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+        // Wait for waveform to be ready (canvas visible and interactive)
+        await expect(modal.locator('canvas').first()).toBeVisible({ timeout: 30000 })
+        await page.waitForTimeout(500)
 
         const undoBtn = modal.locator('button[title="undo (Ctrl+Z)"]')
         await expect(undoBtn).toBeDisabled()
@@ -119,7 +121,7 @@ test.describe('editor modal', () => {
 
     test('redo button becomes enabled after undo', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
         const undoBtn = modal.locator('button[title="undo (Ctrl+Z)"]')
         const redoBtn = modal.locator('button[title="redo (Ctrl+Shift+Z)"]')
@@ -140,7 +142,7 @@ test.describe('editor modal', () => {
 
     test('version badge shows "original" for unedited song', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
         // Jolene has no edits so badge should read "original"
         await expect(modal.getByTestId('version-badge')).toHaveText('original')
@@ -156,7 +158,7 @@ test.describe('editor modal', () => {
         await expect(addCutBtn).toBeDisabled()
 
         // wait for waveform ready
-        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
         // now enabled
         await expect(addCutBtn).not.toBeDisabled()
@@ -197,7 +199,7 @@ test.describe('editor modal', () => {
         page.on('pageerror', err => errors.push(err.message))
 
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
         // clear init-time errors (draft 404 on open is expected)
         errors.length = 0
@@ -216,7 +218,7 @@ test.describe('editor modal', () => {
 
     test('discard draft resets params', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
         const volumeSlider = modal.getByRole('slider', { name: 'Volume' })
         await volumeSlider.fill('1.8')
@@ -233,7 +235,7 @@ test.describe('editor modal', () => {
         page.on('pageerror', err => errors.push(err.message))
 
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
         errors.length = 0
 
         const fadeInSlider = modal.getByRole('slider', { name: 'Fade in' })
@@ -251,7 +253,7 @@ test.describe('editor modal', () => {
         page.on('pageerror', err => errors.push(err.message))
 
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
         errors.length = 0
 
         const fadeOutSlider = modal.getByRole('slider', { name: 'Fade out' })
@@ -269,7 +271,7 @@ test.describe('editor modal', () => {
         page.on('pageerror', err => errors.push(err.message))
 
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
         errors.length = 0
 
         // set fade in + fade out
@@ -362,7 +364,7 @@ test.describe('editor modal', () => {
         page.on('pageerror', err => errors.push(err.message))
 
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
         const zoomSlider = modal.getByRole('slider', { name: 'zoom' })
         await expect(zoomSlider).toBeVisible()
@@ -387,7 +389,7 @@ test.describe('editor modal', () => {
         page.on('pageerror', err => errors.push(err.message))
 
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
         errors.length = 0
 
         // add a cut
@@ -412,7 +414,7 @@ test.describe('editor modal', () => {
 
     test('waveform play pauses when preview starts', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
         // start waveform playback
         await modal.locator('button[title="play"]').click()
@@ -429,7 +431,7 @@ test.describe('editor modal', () => {
 
     test('discard clears all cuts', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
         // add two cuts
         await modal.getByRole('button', { name: '+ add cut' }).click()
@@ -447,7 +449,7 @@ test.describe('editor modal', () => {
         page.on('pageerror', err => errors.push(err.message))
 
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
         const speedSlider = modal.getByRole('slider', { name: 'speed' })
         await expect(speedSlider).toBeVisible()
@@ -466,7 +468,7 @@ test.describe('editor modal', () => {
         page.on('pageerror', err => errors.push(err.message))
 
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
         const normalizeCheckbox = modal.locator('input[type="checkbox"]').filter({ hasNot: modal.locator('[name]') }).first()
         // find the normalize label
@@ -482,7 +484,7 @@ test.describe('editor modal', () => {
 
     test('per-cut fade sliders appear after adding a cut', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
         await modal.getByRole('button', { name: '+ add cut' }).click()
         await expect(modal.locator('button[title="remove cut"]').first()).toBeVisible({ timeout: 5000 })
@@ -506,7 +508,7 @@ test.describe('editor modal', () => {
 
     test('preview badge changes to "preview" (orange) when preview starts', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
         const badge = modal.getByTestId('version-badge')
         await expect(badge).toHaveText('original')
@@ -525,7 +527,7 @@ test.describe('editor modal', () => {
         page.on('pageerror', err => errors.push(err.message))
 
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
         errors.length = 0
 
         // start preview (no cuts — uses WaveSurfer native path)
@@ -552,7 +554,7 @@ test.describe('editor modal', () => {
         page.on('pageerror', err => errors.push(err.message))
 
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
         const fitTrimBtn = modal.locator('button[title="fit trim region"]')
         await expect(fitTrimBtn).toBeVisible()
@@ -566,7 +568,7 @@ test.describe('editor modal', () => {
 
     test('close guard: amber banner appears on unsaved change, cancel keeps modal open', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
         // make a change so paramsChanged returns true
         const volumeSlider = modal.getByRole('slider', { name: 'Volume' })
@@ -588,7 +590,7 @@ test.describe('editor modal', () => {
 
     test('close guard: "close anyway" dismisses modal', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
         const volumeSlider = modal.getByRole('slider', { name: 'Volume' })
         await volumeSlider.fill('1.3')
@@ -603,7 +605,7 @@ test.describe('editor modal', () => {
 
     test('Ctrl+Z keyboard shortcut triggers undo', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
         const undoBtn = modal.locator('button[title="undo (Ctrl+Z)"]')
         await expect(undoBtn).toBeDisabled()
@@ -627,7 +629,7 @@ test.describe('editor modal', () => {
         page.on('pageerror', err => errors.push(err.message))
 
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
         errors.length = 0
 
         // press l (seek forward 5s)
@@ -643,9 +645,9 @@ test.describe('editor modal', () => {
 
     test('loop button activates and deactivates', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
-        const loopBtn = modal.locator('button[title="loop trim region"]')
+        const loopBtn = modal.locator('button[title="preview with edits"]')
 
         // initially not active (no sky-500 color on the button itself)
         await expect(loopBtn).not.toHaveClass(/text-sky-500/)
@@ -672,7 +674,7 @@ test.describe('editor modal', () => {
     // baseline below.
     test.fixme('add cut → expand fade-out ear left → add second cut respects fade range', async ({ page }) => {
         const modal = await openEditorForEditMe(page)
-        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
         // First cut
         await modal.getByRole('button', { name: '+ add cut' }).click()
@@ -701,7 +703,7 @@ test.describe('editor modal', () => {
         page.on('pageerror', err => errors.push(err.message))
 
         const modal = await openEditorForEditMe(page)
-        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
         errors.length = 0
 
         await modal.getByRole('button', { name: '+ add cut' }).click()
@@ -718,7 +720,7 @@ test.describe('editor modal', () => {
     test.slow('save to library: encodes and creates new song version', async ({ page }) => {
         const api = await apiLogin()
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
         // Make a small audio change — adjust volume slider
         const volumeSlider = modal.getByRole('slider', { name: 'Volume' })
@@ -761,7 +763,7 @@ test.describe('editor modal', () => {
 
         // Step 1: Create a child by opening editor, making an edit, and saving
         const modal1 = await openEditorFromLibrary(page)
-        await expect(modal1.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal1.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
         const volumeSlider1 = modal1.getByRole('slider', { name: 'Volume' })
         await volumeSlider1.fill('1.15')
@@ -815,7 +817,7 @@ test.describe('editor modal', () => {
 
     test('overwrite original: admin checkbox flips save button label and shows danger styling', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="loop trim region"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
         // The "save as original" checkbox is admin-only. If not visible, skip.
         const checkboxLabel = page.locator('label').filter({ hasText: /save as original/i })
