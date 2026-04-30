@@ -162,9 +162,11 @@ test.describe('editor modal', () => {
         const modal = await openEditorFromLibrary(page)
 
         await modal.getByRole('button', { name: 'properties' }).click()
-        await expect(modal.getByText('Track name')).toBeVisible()
-        await expect(modal.getByText('Artist')).toBeVisible()
-        await expect(modal.getByText('Album')).toBeVisible()
+        // exact: true — otherwise 'Artist' matches 'Album artist' too,
+        // and 'Album' matches both 'Album' and 'Album artist'.
+        await expect(modal.getByText('Track name', { exact: true })).toBeVisible()
+        await expect(modal.getByText('Artist', { exact: true })).toBeVisible()
+        await expect(modal.getByText('Album', { exact: true })).toBeVisible()
 
         const trackInput = modal.locator('input').first()
         await expect(trackInput).not.toBeEmpty()
