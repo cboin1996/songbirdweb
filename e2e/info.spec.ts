@@ -21,14 +21,15 @@ test.describe('info page', () => {
 
     test('page loads with "about" heading', async ({ page }) => {
         await page.goto(routes.info)
-        await expect(page.getByText('about')).toBeVisible({ timeout: 10000 })
+        await expect(page.locator('main').filter({ visible: true }).getByText('about')).toBeVisible({ timeout: 10000 })
     })
 
     test('three version cards visible: songbirdweb, songbirdapi, songbirdcore', async ({ page }) => {
         await page.goto(routes.info)
-        await expect(page.getByText(/songbirdweb/i)).toBeVisible({ timeout: 10000 })
-        await expect(page.getByText(/songbirdapi/i)).toBeVisible()
-        await expect(page.getByText(/songbirdcore/i)).toBeVisible()
+        const main = page.locator('main').filter({ visible: true })
+        await expect(main.getByText(/songbirdweb/i)).toBeVisible({ timeout: 10000 })
+        await expect(main.getByText(/songbirdapi/i)).toBeVisible()
+        await expect(main.getByText(/songbirdcore/i)).toBeVisible()
     })
 
     test('each card shows a version string', async ({ page }) => {

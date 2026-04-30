@@ -75,7 +75,7 @@ test.describe('explore page', () => {
     test('search input is visible', async ({ page }) => {
         await page.goto(routes.explore)
         // Placeholder was simplified to just "search…" when toolbar was redesigned.
-        await expect(page.getByPlaceholder(/search/i)).toBeVisible({ timeout: 5000 })
+        await expect(page.locator('main').getByPlaceholder(/search/i)).toBeVisible({ timeout: 5000 })
     })
 
     test('search filters results and updates URL', async ({ page }) => {

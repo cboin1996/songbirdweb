@@ -79,12 +79,13 @@ test.describe('import page', () => {
 
     test('uploading multiple files shows multiple rows', async ({ page }) => {
         await page.goto(routes.import)
-        const file1 = makeFakeAudioFile('song-a.mp3')
-        const file2 = makeFakeAudioFile('song-b.mp3')
+        const ts = Date.now()
+        const file1 = makeFakeAudioFile(`song-a-${ts}.mp3`)
+        const file2 = makeFakeAudioFile(`song-b-${ts}.mp3`)
         try {
             await page.getByTestId('import-file-input').setInputFiles([file1, file2])
-            await expect(page.locator('tr', { hasText: 'song-a.mp3' })).toHaveCount(1, { timeout: 5000 })
-            await expect(page.locator('tr', { hasText: 'song-b.mp3' })).toHaveCount(1, { timeout: 5000 })
+            await expect(page.locator('tr', { hasText: `song-a-${ts}.mp3` })).toHaveCount(1, { timeout: 5000 })
+            await expect(page.locator('tr', { hasText: `song-b-${ts}.mp3` })).toHaveCount(1, { timeout: 5000 })
         } finally {
             fs.unlinkSync(file1)
             fs.unlinkSync(file2)

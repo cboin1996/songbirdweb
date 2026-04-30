@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
+    "dev:e2e": "next dev -p ${E2E_WEB_PORT:-3001}",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",

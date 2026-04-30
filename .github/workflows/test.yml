@@ -142,21 +142,7 @@ jobs:
 
       - name: Start Next.js dev server
         if: matrix.needs_dev_server
-        env:
-          NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
-        run: npm run dev &
-
-      - name: Wait for Next.js
-        if: matrix.needs_dev_server
-        run: |
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:3000; then
-              echo "Next.js ready"
-              exit 0
-            fi
-            sleep 2
-          done
-          exit 1
+        run: make e2e-next-up E2E_WEB_PORT=3000 E2E_API_PORT=8000
 
       - name: Run E2E tests (${{ matrix.project }})
         env:

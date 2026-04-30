@@ -64,7 +64,7 @@ test.describe('library page', () => {
         if (!letter) return
 
         const rail = page.locator('div.touch-none.select-none.cursor-pointer')
-        const letterSpan = rail.locator('span').filter({ hasText: new RegExp(`^${letter}$`) })
+        const letterSpan = rail.locator('span.font-bold').filter({ hasText: new RegExp(`^${letter}$`) })
         await letterSpan.click()
         await expect(page).toHaveURL(new RegExp(`letter=${letter}`), { timeout: 5000 })
     })
