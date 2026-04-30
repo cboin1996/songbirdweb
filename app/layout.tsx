@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { PlayerProvider } from "./components/player";
 import ServiceWorkerRegistrar from "./components/sw-register";
 import OfflineBanner from "./components/offline-banner";
 
@@ -33,9 +32,7 @@ export default function RootLayout({
       >
         <OfflineBanner />
         <ServiceWorkerRegistrar />
-        <PlayerProvider>
-          {children}
-        </PlayerProvider>
+        {children}
       </body>
     </html>
   );
