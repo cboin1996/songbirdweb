@@ -222,24 +222,33 @@ test.describe('library bulk select', () => {
         const baseline = Array.isArray(baselineSongs) ? baselineSongs.length : 0
         test.skip(baseline < 2, 'library has fewer than 2 songs — cannot test bulk remove')
 
-        // Capture the UUIDs of the first 2 songs to verify they're removed
-        const uuidsToRemove = baselineSongs.slice(0, 2).map((s: any) => s.uuid)
-
         await page.goto(routes.library)
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
 
         await page.getByRole('button', { name: 'Select', exact: true }).click()
+
+        // Capture the UUIDs of the first 2 RENDERED cards (not API order;
+        // /library sorts alphabetically). data-song-id is on the wrapper
+        // around each Song component.
+        const songIdLocators = page.locator('[data-song-id]')
+        const uuidsToRemove: string[] = []
+        for (let i = 0; i < 2; i++) {
+            const id = await songIdLocators.nth(i).getAttribute('data-song-id')
+            if (id) uuidsToRemove.push(id)
+        }
 
         // Select first 2 cards
         const cards = page.getByTestId('song-card')
         for (let i = 0; i < 2; i++) await cards.nth(i).click()
         await expect(page.getByRole('button', { name: /2 selected/i })).toBeVisible({ timeout: 3000 })
 
-        // Handle confirm dialog and click Remove — wait for API response deterministically
+        // Handle confirm dialog and click Remove — wait for API response deterministically.
+        // Match by path, not full URL: requests are proxied through Next on
+        // :3000 so r.url() won't include the absolute API_V1 origin.
         page.once('dialog', d => d.accept())
         const removeBtn = page.getByRole('button', { name: 'Remove', exact: true })
         await Promise.all([
-            page.waitForResponse(r => r.url().includes(`${API_V1}/library/bulk`) && r.request().method() === 'DELETE'),
+            page.waitForResponse(r => r.url().includes('/v1/library/bulk') && r.request().method() === 'DELETE'),
             removeBtn.click()
         ])
 

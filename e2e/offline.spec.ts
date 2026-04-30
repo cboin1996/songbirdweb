@@ -35,17 +35,17 @@ test.describe('offline mode', () => {
     // The two SW-gated offline tests (library loads cached songs, kebab menu disabled when offline)
     // moved to e2e-prod/offline.spec.ts — they need a real production SW to be meaningful.
 
-    test('import dropzone is disabled when offline', async ({ page }) => {
-        // Load the page online first; navigating while offline fails with
-        // ERR_INTERNET_DISCONNECTED. Then flip offline + dispatch the event
-        // so the useOnline hook re-renders the dropzone in disabled state.
+    test('import dropzone is hidden by OfflineGuard when offline', async ({ page }) => {
+        // /import is wrapped in <OfflineGuard feature="import">, which
+        // replaces the dropzone with an empty-state message when offline.
+        // Verify the dropzone disappears and the guard message appears.
         await page.goto(routes.import)
         const dropzone = page.getByTestId('import-dropzone')
         await expect(dropzone).toBeVisible({ timeout: 5000 })
         await page.context().setOffline(true)
         await page.evaluate(() => window.dispatchEvent(new Event('offline')))
-        await expect(dropzone).toHaveClass(/opacity-40/)
-        await expect(dropzone).toHaveClass(/cursor-not-allowed/)
+        await expect(dropzone).toBeHidden({ timeout: 5000 })
+        await expect(page.getByText(/needs internet/i)).toBeVisible()
     })
 
     test('save all offline button is disabled when offline', async ({ page }) => {

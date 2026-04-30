@@ -224,12 +224,14 @@ test.describe('playlists: create / add songs / delete', () => {
         await namedInput.fill(renamed)
         await page.getByRole('button', { name: 'save', exact: true }).click()
 
-        // API confirms rename
+        // API confirms rename — there's no GET /v1/playlists/{id} endpoint
+        // (would 405); list and assert the renamed entry exists with new name.
         await expect.poll(async () => {
-            const r = await api.get(`${API_V1}/playlists/${pl.id}`)
+            const r = await api.get(`${API_V1}/playlists`)
             if (!r.ok()) return ''
-            const body = await r.json()
-            return body.name
+            const playlists = await r.json()
+            const found = playlists.find((p: { id: string }) => p.id === pl.id)
+            return found?.name ?? ''
         }, { timeout: 5000 }).toBe(renamed)
     })
 })

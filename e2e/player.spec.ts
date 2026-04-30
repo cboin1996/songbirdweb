@@ -81,36 +81,32 @@ test.describe('player bar', () => {
         // Ensure shuffle is ON. If currently off, click once.
         const cls0 = await btn.getAttribute('class') ?? ''
         if (!cls0.includes('text-sky-500')) await btn.click()
-        // scheduleSave debounces 2000ms — wait long enough for state to flush to localStorage.
-        await page.waitForTimeout(2500)
-
-        // Capture the saved shuffle_seed (server-side state via API once it saves).
-        // Easier: read it from localStorage where the player mirrors state.
-        const seedBefore = await page.evaluate(() => {
+        // scheduleSave debounces 2000ms; rather than a fixed timeout (raceable
+        // when other player events reset the timer), poll localStorage until
+        // the seed lands.
+        const readSeed = () => page.evaluate(() => {
             try {
                 const raw = localStorage.getItem('playerState')
                 if (!raw) return null
                 return (JSON.parse(raw) as { shuffle_seed?: number | null }).shuffle_seed ?? null
             } catch { return null }
         })
-        expect(seedBefore, 'shuffle_seed should exist while shuffle is on').not.toBeNull()
+        await expect.poll(readSeed, {
+            message: 'shuffle_seed should be persisted to localStorage',
+            timeout: 8000,
+        }).not.toBeNull()
+        const seedBefore = await readSeed()
 
         // Toggle OFF
         await btn.click()
         await page.waitForTimeout(300)
         // Toggle ON
         await btn.click()
-        // wait for debounced save again
-        await page.waitForTimeout(2500)
-
-        const seedAfter = await page.evaluate(() => {
-            try {
-                const raw = localStorage.getItem('playerState')
-                if (!raw) return null
-                return (JSON.parse(raw) as { shuffle_seed?: number | null }).shuffle_seed ?? null
-            } catch { return null }
-        })
-        expect(seedAfter, 'shuffle_seed must be unchanged after off→on toggle').toBe(seedBefore)
+        // poll until the post-toggle save lands; the seed shouldn't change.
+        await expect.poll(readSeed, {
+            message: 'shuffle_seed should still match after off→on cycle',
+            timeout: 8000,
+        }).toBe(seedBefore)
     })
 
     test('repeat cycles off → one → all → off', async ({ page }) => {

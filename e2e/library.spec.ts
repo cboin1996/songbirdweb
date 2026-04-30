@@ -324,11 +324,10 @@ test.describe('library page', () => {
         const firstLetter = await page.locator('[data-letter]').first().getAttribute('data-letter')
         expect(firstLetter).toBeTruthy()
 
-        // Find the active letter in the rail (has text-sky-500 and font-bold)
+        // The active letter span has text-sky-500 + font-bold directly on it
+        // (not on a child). filter({has:...}) was looking for a descendant.
         const rail = page.locator('div.touch-none.select-none.cursor-pointer')
-        const activeSpan = rail.locator('span').filter({
-            has: page.locator('.text-sky-500.font-bold')
-        })
+        const activeSpan = rail.locator('span.font-bold.text-sky-500')
         const activeText = await activeSpan.textContent()
         expect(activeText?.trim()).toBe(firstLetter)
 
