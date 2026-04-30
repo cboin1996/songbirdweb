@@ -66,6 +66,10 @@ export default function ScrubInput({
     const parsed = parse(text)
     if (!isNaN(parsed)) {
       const v = clamp(parsed)
+      // Snapshot the pre-change value before applying — mirrors the drag
+      // flow's onStart in handlePointerDown so history (undo/redo) works
+      // for typed input too.
+      onStart?.()
       onChange(v)
       onCommit?.(v)
     }
