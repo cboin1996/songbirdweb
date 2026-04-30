@@ -61,34 +61,89 @@ test-e2e-mobile:
 test: lint typecheck
 
 # ----------------------------------------------------------------------------
-# Local CI-parity e2e harness — talks to the songbirdapi e2e stack
-# (api on :8001 + postgres on :5433) instead of the dev stack on :3000/:8000.
-# Brings up `npm run dev:e2e` (next on :3001 pointing at api :8001), runs
-# the test suite, then tears the next dev process down.
-#
-# Prereq: in songbirdapi repo, `make e2e-up` must have been run.
-# Use `make e2e-reset` (in songbirdapi) between runs to wipe DB state.
+# Local CI-parity e2e harness — same cboin/songbirdapi:latest Docker image
+# as CI, so local and CI run identical server code.
+# Usage:
+#   make test-e2e-local        # spins up everything, runs dev suite, tears down
+#   make e2e-api-up            # start API stack only (postgres + API containers)
+#   make e2e-api-down          # stop and remove containers
 # ----------------------------------------------------------------------------
 
-E2E_WEB_PORT=3001
+E2E_API_IMAGE=cboin/songbirdapi:latest
+E2E_NETWORK=songbirdweb-e2e
+E2E_PG_CONTAINER=songbirdweb-e2e-postgres
+E2E_API_CONTAINER=songbirdweb-e2e-api
 E2E_API_PORT=8001
+E2E_WEB_PORT=3001
 E2E_NEXT_PIDFILE=/tmp/songbirdweb-e2e-next.pid
 
-.PHONY: e2e-check-api
-e2e-check-api:
-	@curl -sf http://localhost:$(E2E_API_PORT)/v1/health >/dev/null || \
-		(echo "✗ e2e api not reachable on :$(E2E_API_PORT). Run \`make e2e-up\` in songbirdapi first." && exit 1)
-	@echo "✓ e2e api is up"
+.PHONY: e2e-api-up
+e2e-api-up:
+	@docker network create $(E2E_NETWORK) 2>/dev/null || true
+	@if ! docker ps --format '{{.Names}}' | grep -q "^$(E2E_PG_CONTAINER)$$"; then \
+		docker run -d --name $(E2E_PG_CONTAINER) --network $(E2E_NETWORK) \
+			-e POSTGRES_DB=songbirdapi \
+			-e POSTGRES_USER=songbirdapi \
+			-e POSTGRES_PASSWORD=songbirdapi \
+			postgres:17; \
+		for i in $$(seq 1 30); do \
+			docker exec $(E2E_PG_CONTAINER) pg_isready -U songbirdapi >/dev/null 2>&1 && break; \
+			sleep 1; \
+		done; \
+	fi
+	docker run --rm --network $(E2E_NETWORK) \
+		--entrypoint alembic \
+		-e ENV=test \
+		-e POSTGRES_HOST=$(E2E_PG_CONTAINER) \
+		-e POSTGRES_PORT=5432 \
+		-e POSTGRES_USER=songbirdapi \
+		-e POSTGRES_PASSWORD=songbirdapi \
+		-e POSTGRES_DB=songbirdapi \
+		-e API_KEY=ci-test-key \
+		-e JWT_SECRET=ci-test-secret \
+		$(E2E_API_IMAGE) upgrade head
+	@if ! docker ps --format '{{.Names}}' | grep -q "^$(E2E_API_CONTAINER)$$"; then \
+		mkdir -p data/downloads; \
+		docker run -d --name $(E2E_API_CONTAINER) --network $(E2E_NETWORK) \
+			-e ENV=test \
+			-e POSTGRES_HOST=$(E2E_PG_CONTAINER) \
+			-e POSTGRES_PORT=5432 \
+			-e POSTGRES_USER=songbirdapi \
+			-e POSTGRES_PASSWORD=songbirdapi \
+			-e POSTGRES_DB=songbirdapi \
+			-e API_KEY=ci-test-key \
+			-e JWT_SECRET=ci-test-secret \
+			-e ADMIN_USERNAME=e2e-admin \
+			-e ADMIN_EMAIL=e2e-admin@ci.local \
+			-e ADMIN_PASSWORD=e2e-admin-pass \
+			-e CORS_ORIGINS=http://localhost:$(E2E_WEB_PORT),http://localhost:6996 \
+			-v $$(pwd)/data:/songbirdapi/data \
+			-p $(E2E_API_PORT):8000 \
+			$(E2E_API_IMAGE); \
+		for i in $$(seq 1 30); do \
+			curl -sf http://localhost:$(E2E_API_PORT)/v1/version >/dev/null && echo "✓ e2e api ready" && exit 0; \
+			sleep 1; \
+		done; \
+		docker logs $(E2E_API_CONTAINER); exit 1; \
+	else \
+		echo "e2e api already running"; \
+	fi
+
+.PHONY: e2e-api-down
+e2e-api-down:
+	@docker rm -f $(E2E_API_CONTAINER) $(E2E_PG_CONTAINER) 2>/dev/null || true
+	@docker network rm $(E2E_NETWORK) 2>/dev/null || true
 
 .PHONY: e2e-next-up
-e2e-next-up: e2e-check-api
+e2e-next-up:
+	@curl -sf http://localhost:$(E2E_API_PORT)/v1/version >/dev/null || \
+		(echo "✗ e2e api not reachable on :$(E2E_API_PORT). Run make e2e-api-up first." && exit 1)
 	@if [ -f $(E2E_NEXT_PIDFILE) ] && kill -0 $$(cat $(E2E_NEXT_PIDFILE)) 2>/dev/null; then \
-		echo "e2e next already running (pid $$(cat $(E2E_NEXT_PIDFILE)))"; \
+		echo "e2e next already running"; \
 	else \
-		echo "starting next dev:e2e on :$(E2E_WEB_PORT)..."; \
 		nohup env NEXT_PUBLIC_API_BASE_URL=http://localhost:$(E2E_API_PORT) API_BASE_URL=http://localhost:$(E2E_API_PORT) npm run dev:e2e > /tmp/songbirdweb-e2e-next.log 2>&1 & echo $$! > $(E2E_NEXT_PIDFILE); \
 		for i in $$(seq 1 60); do \
-			curl -sf http://localhost:$(E2E_WEB_PORT) -o /dev/null && echo "next ready" && exit 0; \
+			curl -sf http://localhost:$(E2E_WEB_PORT) -o /dev/null && echo "✓ next ready" && exit 0; \
 			sleep 1; \
 		done; \
 		echo "next dev:e2e failed to start — check /tmp/songbirdweb-e2e-next.log" && exit 1; \
@@ -98,15 +153,11 @@ e2e-next-up: e2e-check-api
 e2e-next-down:
 	@if [ -f $(E2E_NEXT_PIDFILE) ]; then \
 		kill $$(cat $(E2E_NEXT_PIDFILE)) 2>/dev/null || true; \
-		pkill -f "next-server.*$(E2E_WEB_PORT)" 2>/dev/null || true; \
 		rm -f $(E2E_NEXT_PIDFILE); \
-		echo "stopped e2e next"; \
 	fi
 
-# Run the full dev e2e suite against the e2e stack. Mirrors what CI does
-# but on alt ports so dev work isn't disturbed.
 .PHONY: test-e2e-local
-test-e2e-local: e2e-next-up
+test-e2e-local: e2e-api-up e2e-next-up
 	E2E_WEB_URL=http://localhost:$(E2E_WEB_PORT) \
 	E2E_API_BASE_URL=http://localhost:$(E2E_API_PORT) \
 	NEXT_PUBLIC_API_BASE_URL=http://localhost:$(E2E_API_PORT) \
@@ -117,7 +168,7 @@ test-e2e-local: e2e-next-up
 	npx playwright test --project=dev --workers=1
 
 .PHONY: test-e2e-local-mobile
-test-e2e-local-mobile: e2e-next-up
+test-e2e-local-mobile: e2e-api-up e2e-next-up
 	E2E_WEB_URL=http://localhost:$(E2E_WEB_PORT) \
 	E2E_API_BASE_URL=http://localhost:$(E2E_API_PORT) \
 	NEXT_PUBLIC_API_BASE_URL=http://localhost:$(E2E_API_PORT) \
@@ -128,7 +179,7 @@ test-e2e-local-mobile: e2e-next-up
 	npx playwright test --project=mobile --workers=2
 
 .PHONY: e2e-down
-e2e-down: e2e-next-down
+e2e-down: e2e-next-down e2e-api-down
 
 local-run-songbirdweb:
 	npm run dev
