@@ -525,6 +525,11 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                     if (el.getBoundingClientRect().top <= threshold) active = key
                     else break
                 }
+                // At scroll-y=0, no section will be above the sticky-header
+                // threshold yet — but the user is visually looking at the
+                // first one. Fall back to the first present key so the rail
+                // highlights on initial load.
+                if (!active) active = keys.find(k => k.el)?.key ?? null
                 if (active) setActiveLetter(active)
             })
         }

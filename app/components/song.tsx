@@ -148,7 +148,12 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
         if (!song.songId) return
         const result = await createShareToken(song.songId)
         if (!result) return
-        await navigator.clipboard.writeText(`${window.location.origin}/share/${result.token}`)
+        // Clipboard can throw in headless / restricted contexts (no permission,
+        // insecure context). Token is still created — surface the success
+        // state so the user sees feedback. They can copy from the share page.
+        try {
+            await navigator.clipboard.writeText(`${window.location.origin}/share/${result.token}`)
+        } catch { /* swallow — UI feedback below */ }
         setCopied(true)
         setTimeout(() => setCopied(false), 2000)
     }

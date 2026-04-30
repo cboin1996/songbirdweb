@@ -4,11 +4,14 @@ import { USERNAME, PASSWORD, login, ignoreError, apiLogin, API_V1 } from './help
 
 
 // Volume / Speed are ScrubInput components — role="spinbutton", aria-label
-// in lowercase ("volume", "speed"). Drag interaction won't fire from
-// Playwright reliably, but ScrubInput supports double-click → typed input.
+// in lowercase ("volume", "speed"). Playwright's dblclick() simulates pointer
+// events which trigger the scrub-drag path and bump the value before edit
+// mode opens. Dispatch a synthetic dblclick instead so only React's
+// onDoubleClick handler fires (cleanly enters edit mode at current value).
 async function scrubFill(modal: Locator, label: string, displayText: string) {
     const scrub = modal.getByRole('spinbutton', { name: label })
-    await scrub.dblclick()
+    await expect(scrub).toBeVisible({ timeout: 3000 })
+    await scrub.dispatchEvent('dblclick')
     const input = modal.locator(`input[aria-label="${label}"]`)
     await expect(input).toBeVisible({ timeout: 3000 })
     await input.fill(displayText)
