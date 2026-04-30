@@ -42,8 +42,12 @@ build:
 	npm run build
 
 .PHONY: test-e2e
+# workers=1 for dev — the full e2e/ suite shares player + queue + library
+# state across the test user; workers=2 races on player state and flakes
+# editor/queue/player tests. Mobile + prod live in their own (smaller) dirs
+# without that shared-state surface, so they're fine at 2.
 test-e2e:
-	npx playwright test --project=dev --workers=2
+	npx playwright test --project=dev --workers=1
 
 .PHONY: test-e2e-prod
 test-e2e-prod:
