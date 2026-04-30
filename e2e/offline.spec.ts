@@ -88,7 +88,12 @@ test.describe('offline mode', () => {
         await expect(page.getByRole('link', { name: /go to library/i })).toBeVisible()
     })
 
-    test('OfflineGuard: clicking "go to library" lands on /library', async ({ page }) => {
+    // FIXME(0.1.0): SW-gated. /library bundle is pre-cached by the SW at
+    // install (see public/sw.js: `cache.addAll(['/offline', '/', '/library'])`),
+    // but the SW doesn't register in dev mode — so clicking the link while
+    // offline navigates to chrome-error. This test belongs in e2e-prod/
+    // alongside the other SW-gated cases. Move it there + un-fixme.
+    test.fixme('OfflineGuard: clicking "go to library" lands on /library', async ({ page }) => {
         await page.goto(routes.explore)
         await flipOffline(page)
         const link = page.getByRole('link', { name: /go to library/i })
