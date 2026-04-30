@@ -722,94 +722,78 @@ test.describe('editor modal', () => {
         const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
-        // Make a small audio change — adjust volume slider
-        const volumeSlider = modal.getByRole('slider', { name: 'Volume' })
-        await volumeSlider.fill('1.2')
-        await volumeSlider.dispatchEvent('input')
-        await expect(modal.getByText(/120%/)).toBeVisible()
-
-        // Extract origin song ID from URL before save
-        const originUrl = page.url()
-        const originMatch = originUrl.match(/\/songs\/([a-f0-9-]+)\/edit/)
+        // Extract origin song ID from URL BEFORE editing (we're at /songs/<uuid>/edit)
+        const originMatch = page.url().match(/\/songs\/([a-f0-9-]+)\/edit/)
         const originSongId = originMatch?.[1]
         expect(originSongId, 'Could not extract origin song ID from URL').toBeTruthy()
 
-        // Click "Save to Library" button
-        const saveBtn = modal.getByRole('button', { name: 'Save to Library' })
-        await saveBtn.click()
+        // Make an unambiguous param change. Volume uses ScrubInput (a span with role=spinbutton),
+        // not a real range input, so .fill() doesn't work. Toggling Normalize checkbox is the
+        // simplest deterministic param mutation.
+        const normalizeCheckbox = modal.locator('label').filter({ hasText: /normalize/i }).locator('input[type="checkbox"]')
+        await normalizeCheckbox.check()
 
-        // Wait for job completion (polling) — encoding is slow, up to 60s timeout
-        await expect(saveBtn).toContainText('Saved ✓', { timeout: 60000 })
+        // Click "Save to Library" — handleSave creates the edit job, polls until done,
+        // then router.push to /library?song=<newId>. The modal unmounts on success.
+        await modal.getByRole('button', { name: /^Save to Library$/i }).click()
 
-        // Assert URL changed to a different song ID (the new child version)
-        await page.waitForTimeout(500)
-        const newUrl = page.url()
-        const newMatch = newUrl.match(/\/songs\/([a-f0-9-]+)\/edit/)
-        const newSongId = newMatch?.[1]
-        expect(newSongId, 'Could not extract new song ID from URL after save').toBeTruthy()
-        expect(newSongId, 'New song ID should be different from origin').not.toBe(originSongId)
+        // Wait for the post-save navigation. Encoding can take ~30-60s; allow 90s.
+        await expect(page).toHaveURL(/\/library\?song=[a-f0-9-]+/, { timeout: 90_000 })
+        const newSongId = page.url().match(/[?&]song=([a-f0-9-]+)/)?.[1]
+        expect(newSongId, 'New song ID should be present in URL').toBeTruthy()
+        expect(newSongId, 'New song ID should differ from origin').not.toBe(originSongId)
 
-        // Cleanup: delete the new song via API
+        // Cleanup: delete the new child song via API. 200/204 success, 404 already gone — both fine.
         if (newSongId) {
             const res = await api.delete(`${API_V1}/library/${newSongId}`)
-            expect(res.ok(), `Failed to delete new song ${newSongId}: ${res.status()}`).toBe(true)
+            expect([200, 204, 404]).toContain(res.status())
         }
-
         await api.dispose()
     })
 
     test.slow('restore original: child song shows restore button and navigates to parent', async ({ page }) => {
         const api = await apiLogin()
 
-        // Step 1: Create a child by opening editor, making an edit, and saving
+        // Step 1: Open editor on a library song, capture parent ID, make an edit, save → creates a child.
         const modal1 = await openEditorFromLibrary(page)
         await expect(modal1.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
-        const volumeSlider1 = modal1.getByRole('slider', { name: 'Volume' })
-        await volumeSlider1.fill('1.15')
-        await volumeSlider1.dispatchEvent('input')
-
-        // Get parent song ID from URL
-        const parentUrl = page.url()
-        const parentMatch = parentUrl.match(/\/songs\/([a-f0-9-]+)\/edit/)
-        const parentSongId = parentMatch?.[1]
+        const parentSongId = page.url().match(/\/songs\/([a-f0-9-]+)\/edit/)?.[1]
         expect(parentSongId, 'Could not extract parent song ID').toBeTruthy()
 
-        // Save to create child
-        const saveBtn1 = modal1.getByRole('button', { name: 'Save to Library' })
-        await saveBtn1.click()
-        await expect(saveBtn1).toContainText('Saved ✓', { timeout: 60000 })
+        // Toggle Normalize for an unambiguous param change (volume slider is a ScrubInput, not a real range)
+        await modal1.locator('label').filter({ hasText: /normalize/i }).locator('input[type="checkbox"]').check()
 
-        // Extract child song ID from new URL
-        const childUrl = page.url()
-        const childMatch = childUrl.match(/\/songs\/([a-f0-9-]+)\/edit/)
-        const childSongId = childMatch?.[1]
+        await modal1.getByRole('button', { name: /^Save to Library$/i }).click()
+
+        // After save, app router.push'es to /library?song=<newId>
+        await expect(page).toHaveURL(/\/library\?song=[a-f0-9-]+/, { timeout: 90_000 })
+        const childSongId = page.url().match(/[?&]song=([a-f0-9-]+)/)?.[1]
         expect(childSongId, 'Could not extract child song ID').toBeTruthy()
         expect(childSongId, 'Child song ID should differ from parent').not.toBe(parentSongId)
 
-        // Wait for modal to refresh with child song data (parent_song_id should be set)
-        await page.waitForTimeout(2000)
+        // Step 2: Navigate to the child editor — modal1 unmounted on save, need a fresh editor instance.
+        await page.goto(`/songs/${childSongId}/edit`)
+        const childModal = page.getByTestId('editor-modal')
+        await expect(childModal).toBeVisible({ timeout: 10000 })
+        await expect(childModal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
-        // Step 2: Verify "Restore Original" button is visible (only shown when parent_song_id is set)
-        const restoreBtn = modal1.getByRole('button', { name: 'Restore Original' })
+        // Step 3: "Restore Original" button is visible only when activeRootSongId !== activeSongId
+        // (i.e. on a child song). Click it, confirm, expect navigation back to root/parent.
+        const restoreBtn = childModal.getByRole('button', { name: 'Restore Original' })
         await expect(restoreBtn).toBeVisible({ timeout: 10000 })
-
-        // Step 3: Click "Restore Original" button
         await restoreBtn.click()
-
-        // Assert confirmation dialog appears
         await expect(page.getByText(/Restore original\?/i)).toBeVisible({ timeout: 5000 })
-
-        // Confirm restore
         await page.getByRole('button', { name: 'Yes, restore' }).click()
 
-        // Step 4: Assert URL navigates back to parent song's editor
+        // Step 4: Assert URL navigates back to parent's editor route.
+        // handleRestoreOriginal redirects to editSongRoute(rootSongId ?? songId).
         await expect(page).toHaveURL(new RegExp(`/songs/${parentSongId}/edit`), { timeout: 10000 })
 
-        // Cleanup: delete the child song
+        // Cleanup
         if (childSongId) {
             const res = await api.delete(`${API_V1}/library/${childSongId}`)
-            expect(res.ok(), `Failed to delete child song ${childSongId}: ${res.status()}`).toBe(true)
+            expect([200, 204, 404]).toContain(res.status())
         }
 
         await api.dispose()
