@@ -871,7 +871,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                         return <span className="text-xs text-gray-400">{pos + 1} / {queue.length}</span>
                                     })()}
                                     {playContext && (
-                                        <Link href={playContext.href} className="text-xs text-gray-400 hover:text-sky-500 transition-colors truncate max-w-[120px]">
+                                        <Link href={playContext.href} onClick={() => setShowQueue(false)} className="text-xs text-gray-400 hover:text-sky-500 transition-colors truncate max-w-[120px]">
                                             {playContext.label}
                                         </Link>
                                     )}
@@ -945,7 +945,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                                         {isActive && (isPlaying ? <FaPause size={9} className="text-sky-500 shrink-0" /> : <FaPlay size={9} className="text-sky-500 shrink-0" />)}
                                                     </button>
                                                     {song.source && (
-                                                        <Link href={song.source.href} onClick={e => e.stopPropagation()} className="text-xs text-gray-400 hover:text-sky-500 truncate max-w-[80px] shrink-0">
+                                                        <Link href={song.source.href} onClick={e => { e.stopPropagation(); setShowQueue(false) }} className="text-xs text-gray-400 hover:text-sky-500 truncate max-w-[80px] shrink-0">
                                                             {song.source.label}
                                                         </Link>
                                                     )}
@@ -971,7 +971,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                     {(() => {
                                         const ctx = current?.source ?? playContext
                                         return ctx ? (
-                                            <Link href={ctx.href} className="flex flex-col min-w-0 flex-1 group">
+                                            <Link href={ctx.href} onClick={() => setShowQueue(false)} className="flex flex-col min-w-0 flex-1 group">
                                                 <span data-testid="player-track-name" className="text-sm md:text-xs font-medium truncate group-hover:text-sky-500 transition-colors">{p.trackName || 'Unknown title'}</span>
                                                 <span className="text-sm md:text-xs text-sky-500 truncate">{p.artistName || 'Unknown artist'}</span>
                                                 <span className="text-xs text-gray-400 truncate hidden md:block">from {ctx.label}</span>
@@ -1030,15 +1030,16 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                             )}
                                         </button>
                                     </div>
-                                    {/* Queue toggle + volume (both breakpoints) */}
-                                    <button data-testid="player-queue-toggle" onClick={() => setShowQueue(v => !v)} className={`shrink-0 ${showQueue ? activeClass : idleClass}`}>
-                                        <FaList size={12} />
+                                    {/* Queue toggle (both breakpoints) — bigger tap target on mobile */}
+                                    <button data-testid="player-queue-toggle" onClick={() => setShowQueue(v => !v)} className={`shrink-0 p-2 -m-1 touch-manipulation ${showQueue ? activeClass : idleClass}`}>
+                                        <FaList size={16} className="md:w-3 md:h-3" />
                                     </button>
-                                    <div className="flex items-center gap-1.5 shrink-0">
+                                    {/* Volume controls: desktop only — mobile audio.volume is ignored by iOS/Android, system handles it */}
+                                    <div className="hidden md:flex items-center gap-1.5 shrink-0">
                                         <button onClick={() => setVolume(v => v > 0 ? 0 : 1)} className={idleClass}>
                                             {volume === 0 ? <FaVolumeMute size={12} /> : <FaVolumeUp size={12} />}
                                         </button>
-                                        <div className="hidden sm:block w-16">
+                                        <div className="w-16">
                                             <Slider value={volume} min={0} max={1} step={0.02} onChange={setVolume} label="volume" />
                                         </div>
                                     </div>
