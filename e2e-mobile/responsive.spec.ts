@@ -124,4 +124,26 @@ test.describe('mobile responsive behaviors', () => {
       }
     }
   })
+
+  // Regression: on mobile the queue panel takes the full screen, so clicking
+  // a per-song source link in the queue must close the panel — otherwise the
+  // jumped-to song is hidden behind it and the user can't see the highlight.
+  test('clicking a per-song source link in queue closes the queue panel', async ({ page }) => {
+    // Start playback so player + queue are populated
+    await page.getByTestId('song-card').first().click()
+    await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
+
+    // Open queue
+    await page.getByTestId('player-queue-toggle').click()
+    const queuePanel = page.getByTestId('player-queue-panel')
+    await expect(queuePanel).toBeVisible({ timeout: 3000 })
+
+    // Click the first per-song source link inside the queue (the "Library" label next to a row)
+    const sourceLink = queuePanel.locator('a').filter({ hasText: /library|artists|genres|albums/i }).first()
+    if (await sourceLink.isVisible()) {
+      await sourceLink.click()
+      // Queue panel should close so the highlighted song is visible
+      await expect(queuePanel).not.toBeVisible({ timeout: 3000 })
+    }
+  })
 })

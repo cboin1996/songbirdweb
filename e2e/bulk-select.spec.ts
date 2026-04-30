@@ -123,49 +123,6 @@ test.describe('library bulk select', () => {
         await expect(page.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible({ timeout: 3000 })
     })
 
-    test('bulk Remove confirms and removes selected songs from library', async ({ page }) => {
-        // Get baseline library count via API
-        const baselineRes = await api.get(`${API_V1}/songs/library`)
-        const baselineSongs = await baselineRes.json()
-        const baseline = Array.isArray(baselineSongs) ? baselineSongs.length : 0
-        test.skip(baseline < 2, 'library has fewer than 2 songs — cannot test bulk remove')
-
-        // Capture the UUIDs of the first 2 songs to verify they're removed
-        const uuidsToRemove = baselineSongs.slice(0, 2).map((s: any) => s.uuid)
-
-        await page.goto(routes.library)
-        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
-
-        await page.getByRole('button', { name: 'Select', exact: true }).click()
-
-        // Select first 2 cards
-        const cards = page.getByTestId('song-card')
-        for (let i = 0; i < 2; i++) await cards.nth(i).click()
-        await expect(page.getByRole('button', { name: /2 selected/i })).toBeVisible({ timeout: 3000 })
-
-        // Handle confirm dialog and click Remove
-        page.once('dialog', d => d.accept())
-        await page.getByRole('button', { name: 'Remove', exact: true }).click()
-        await page.waitForTimeout(1000)
-
-        // Verify post-remove count
-        const postRes = await api.get(`${API_V1}/songs/library`)
-        const postSongs = await postRes.json()
-        const postCount = Array.isArray(postSongs) ? postSongs.length : 0
-        expect(postCount).toBe(baseline - 2)
-
-        // Verify the specific UUIDs are gone
-        const remainingUuids = postSongs.map((s: any) => s.uuid)
-        for (const uuid of uuidsToRemove) {
-            expect(remainingUuids).not.toContain(uuid)
-        }
-
-        // Cleanup: re-add the removed songs
-        for (const uuid of uuidsToRemove) {
-            await api.post(`${API_V1}/songs/${uuid}/library`)
-        }
-    })
-
     // FIXME: bulk Save offline downloads each track and writes to IndexedDB —
     // produces network traffic and can hang in CI. Functionality test belongs
     // behind a dedicated env-gated suite. Documents the visible-button path.
@@ -256,5 +213,48 @@ test.describe('library bulk select', () => {
         // Verify we're still in select mode (Cancel button or Select all should still be visible)
         await expect(page.getByRole('button', { name: /select all/i })).toBeVisible()
         await expect(page.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible()
+    })
+
+    test('bulk Remove confirms and removes selected songs from library', async ({ page }) => {
+        // Get baseline library count via API
+        const baselineRes = await api.get(`${API_V1}/songs/library`)
+        const baselineSongs = await baselineRes.json()
+        const baseline = Array.isArray(baselineSongs) ? baselineSongs.length : 0
+        test.skip(baseline < 2, 'library has fewer than 2 songs — cannot test bulk remove')
+
+        // Capture the UUIDs of the first 2 songs to verify they're removed
+        const uuidsToRemove = baselineSongs.slice(0, 2).map((s: any) => s.uuid)
+
+        await page.goto(routes.library)
+        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
+
+        await page.getByRole('button', { name: 'Select', exact: true }).click()
+
+        // Select first 2 cards
+        const cards = page.getByTestId('song-card')
+        for (let i = 0; i < 2; i++) await cards.nth(i).click()
+        await expect(page.getByRole('button', { name: /2 selected/i })).toBeVisible({ timeout: 3000 })
+
+        // Handle confirm dialog and click Remove
+        page.once('dialog', d => d.accept())
+        await page.getByRole('button', { name: 'Remove', exact: true }).click()
+        await page.waitForTimeout(1000)
+
+        // Verify post-remove count
+        const postRes = await api.get(`${API_V1}/songs/library`)
+        const postSongs = await postRes.json()
+        const postCount = Array.isArray(postSongs) ? postSongs.length : 0
+        expect(postCount).toBe(baseline - 2)
+
+        // Verify the specific UUIDs are gone
+        const remainingUuids = postSongs.map((s: any) => s.uuid)
+        for (const uuid of uuidsToRemove) {
+            expect(remainingUuids).not.toContain(uuid)
+        }
+
+        // Cleanup: re-add the removed songs
+        for (const uuid of uuidsToRemove) {
+            await api.post(`${API_V1}/songs/${uuid}/library`)
+        }
     })
 })
