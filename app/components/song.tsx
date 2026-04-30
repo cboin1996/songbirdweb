@@ -224,7 +224,7 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
                     className="whitespace-nowrap block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation">
                     Play next
                 </button>
-                <button onClick={() => { closeKebab(); handleShare() }}
+                <button onClick={() => { handleShare() }}
                     disabled={!online}
                     className="whitespace-nowrap block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation">
                     {copied ? 'Link copied!' : 'Copy share link'}
