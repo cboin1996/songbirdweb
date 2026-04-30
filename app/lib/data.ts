@@ -70,11 +70,6 @@ async function fetchData<T>(args: {
   body?: any;
   responseType?: ResponseTypes;
   silentStatuses?: number[];
-  // If true, return undefined on 401 instead of redirecting to login.
-  // Use for best-effort background fetches (player state, current user
-  // probe, etc.) that fire on every page mount including anon-accessible
-  // pages like /share/<token>.
-  silentAuth?: boolean;
 }): Promise<T | undefined> {
   try {
     const responseType = args.responseType ?? ResponseTypes.json;
@@ -93,7 +88,7 @@ async function fetchData<T>(args: {
             if (responseType === ResponseTypes.blob) return await retryResponse.blob() as T;
           }
         }
-        if (!args.silentAuth) redirectToLogin()
+        redirectToLogin()
         return undefined;
       }
       if (response.status !== 401 && !silent.includes(response.status))
@@ -117,8 +112,7 @@ export interface CurrentUser {
 }
 
 export async function fetchCurrentUser(): Promise<CurrentUser | undefined> {
-  // silentAuth: anon visitors on /share/<token> probe this — don't redirect.
-  return fetchData<CurrentUser>({ url: `${API_V1}/auth/me`, method: 'GET', silentAuth: true })
+  return fetchData<CurrentUser>({ url: `${API_V1}/auth/me`, method: 'GET' })
 }
 
 export async function login(username: string, password: string): Promise<CurrentUser | 401 | 'error'> {
@@ -200,9 +194,7 @@ export async function fetchDrafts(): Promise<DraftSummary[]> {
 
 
 export async function fetchLibrarySongs(): Promise<LibrarySong[]> {
-  // silentAuth: PlayerProvider fetches this on every page mount, including
-  // anon /share/<token> routes. Anon should silently fall through to [].
-  const result = await fetchData<LibrarySong[]>({ url: `${API_V1}/songs/library`, method: 'GET', silentAuth: true })
+  const result = await fetchData<LibrarySong[]>({ url: `${API_V1}/songs/library`, method: 'GET' })
   if (result !== undefined) {
     if (typeof window !== 'undefined') cacheLibraryData('library-songs', result)
     return result
@@ -594,9 +586,7 @@ export interface PlayerState {
 }
 
 export async function fetchPlayerState(): Promise<PlayerState | undefined> {
-  // silentAuth: PlayerProvider mounts on every route incl. anon /share/<token>;
-  // anon fetch should silently return undefined, not redirect to login.
-  return fetchData<PlayerState>({ url: `${API_V1}/player/state`, method: 'GET', silentAuth: true })
+  return fetchData<PlayerState>({ url: `${API_V1}/player/state`, method: 'GET' })
 }
 
 export async function savePlayerState(state: PlayerState): Promise<void> {
