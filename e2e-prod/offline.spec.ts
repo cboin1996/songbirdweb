@@ -65,16 +65,10 @@ test.describe('Offline Behavior', () => {
     }
   })
 
-  // FIXME(post-0.1.0): the OPFS write is verified working (probe returns the
-  // 6.6MB MP3 with correct path/size) but the player's audio.src never swaps
-  // from http://download/<id> to a blob: URL within 10s. Suspected cause:
-  // loadSong's `gen !== loadGenRef.current` race aborts the swap when some
-  // useEffect re-fires loadSong. Reproduce + diagnose with `pwdebug`/headed
-  // mode locally — needs a breakpoint inside loadSong to see which branch
-  // hits and whether gen advances mid-await. The other 3 offline tests cover
-  // shell caching + OfflineGuard; this one was meant to lock in the
-  // OPFS-blob playback path specifically.
-  test.fixme('saved-offline song plays after going offline', async ({ page, context }) => {
+  // Core offline UX: save song offline → play it → go offline → still plays.
+  // cacheSong (app/lib/offline.ts) writes to OPFS; loadSong (player.tsx)
+  // swaps audio.src to a blob: URL when getSongFile finds the cached file.
+  test('saved-offline song plays after going offline', async ({ page, context }) => {
     test.setTimeout(60000)
 
     const logs: string[] = []
