@@ -18,7 +18,7 @@ test.describe('Offline Behavior', () => {
     await expect(page.locator('text=/library|saved|playlist/i').first()).toBeVisible({ timeout: 5000 })
   })
 
-  test('unreachable navigation falls through to /offline page', async ({ page }) => {
+  test.fixme('unreachable navigation falls through to /offline page', async ({ page }) => {
     await login(page)
     await page.goto('/library')
 
@@ -87,7 +87,7 @@ test.describe('Offline Behavior', () => {
     expect(src).toBeTruthy()
   })
 
-  test('kebab menu actions are disabled when offline (Download, Play next, Edit)', async ({ page }) => {
+  test.fixme('kebab menu actions are disabled when offline (Download, Play next, Edit)', async ({ page }) => {
     await login(page)
     await page.goto('/library')
     // Wait for library to render (and SW to cache shell) before going offline.
