@@ -8,6 +8,10 @@ const IDB_VERSION = 1
 
 // --- OPFS helpers ---
 
+// Always re-resolve the dir handle. Chromium's OPFS handles can go stale —
+// a handle obtained before a write doesn't always see the new file via
+// getFileHandle / entries(). Resolving fresh each call costs ~1ms and
+// guarantees we see current contents.
 async function getAudioDir(): Promise<FileSystemDirectoryHandle> {
     const root = await navigator.storage.getDirectory()
     return root.getDirectoryHandle(AUDIO_DIR, { create: true })

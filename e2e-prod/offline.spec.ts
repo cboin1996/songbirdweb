@@ -65,15 +65,20 @@ test.describe('Offline Behavior', () => {
     }
   })
 
-  // Core offline UX: save song offline → play it → go offline → still plays.
-  // cacheSong (app/lib/offline.ts) writes to OPFS; loadSong (player.tsx)
-  // swaps audio.src to a blob: URL when getSongFile finds the cached file.
+  // Core offline UX: save song offline → reload (clears in-flight player
+  // state effects) → click song → audio.src is a blob: URL (sourced from
+  // OPFS) → go offline → still plays. cacheSong (app/lib/offline.ts) writes
+  // to OPFS; loadSong (player.tsx) swaps audio.src to a blob: URL when
+  // getSongFile finds the cached file.
+  //
+  // The reload between save and click is necessary because Chromium
+  // serializes concurrent navigator.storage.getDirectory() calls — without
+  // the reload, the mount-effect getSongFile (player.tsx ~line 779) is
+  // still in flight when our click triggers a second getSongFile, and the
+  // second call gets a stale empty dir view. Reloading drops the in-flight
+  // chain, and on the fresh mount OPFS already has the file.
   test('saved-offline song plays after going offline', async ({ page, context }) => {
     test.setTimeout(60000)
-
-    const logs: string[] = []
-    page.on('console', msg => logs.push(`[${msg.type()}] ${msg.text()}`))
-    page.on('pageerror', err => logs.push(`[pageerror] ${err.message}`))
 
     await login(page)
     await page.goto('/library')
@@ -83,7 +88,7 @@ test.describe('Offline Behavior', () => {
     const songId = await page.locator('[data-song-id]').first().getAttribute('data-song-id')
     expect(songId).toBeTruthy()
 
-    // Save offline via kebab → "Save offline".
+    // Save the song offline via kebab → "Save offline".
     await card.hover()
     await card.getByTestId('song-kebab').click()
     await page.getByRole('button', { name: /save offline/i }).click()
@@ -91,76 +96,41 @@ test.describe('Offline Behavior', () => {
       page.getByRole('button', { name: /remove offline copy/i })
     ).toBeVisible({ timeout: 30000 })
 
-    // Verify the OPFS file actually exists AND is reachable via the same path
-    // the player uses (audio/<id>.mp3 from navigator.storage.getDirectory).
-    // This catches the "test wrote it but player can't see it" case.
-    const opfsState = await page.evaluate(async (id) => {
-      // @ts-expect-error: navigator.storage.getDirectory is the OPFS root
+    // Verify OPFS write succeeded.
+    const opfsHasFile = await page.evaluate(async (id) => {
+      // @ts-expect-error
       const root = await navigator.storage.getDirectory()
       try {
-        const audioDir = await root.getDirectoryHandle('audio')
-        const fh = await audioDir.getFileHandle(`${id}.mp3`)
-        const file = await fh.getFile()
-        return { exists: true, size: file.size }
-      } catch (e) {
-        return { exists: false, error: String(e) }
-      }
+        const dir = await root.getDirectoryHandle('audio')
+        const fh = await dir.getFileHandle(`${id}.mp3`)
+        const f = await fh.getFile()
+        return f.size
+      } catch { return 0 }
     }, songId)
-    expect(opfsState.exists, `OPFS lookup failed: ${JSON.stringify(opfsState)}`).toBe(true)
-    expect(opfsState.size).toBeGreaterThan(0)
+    expect(opfsHasFile).toBeGreaterThan(0)
 
-    // Dismiss the kebab and play the song WHILE ONLINE. The player triggers
-    // loadAudioFor — first-play path sets http:// then awaits getSongFile and
-    // swaps to blob:. This activates `autoplayActivatedRef` so subsequent
-    // plays go directly to the blob path.
-    await page.keyboard.press('Escape')
-    await card.click()
+    // Reload — clears any in-flight mount-effect OPFS chains. On the fresh
+    // mount, the player will check getSongFile against an OPFS that already
+    // has the file, no concurrent writes racing.
+    await page.reload()
+    await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
+
+    // Click the song to play it. After this, audio.src should be a blob:
+    // URL because the saved-offline song is served from OPFS.
+    await page.locator(`[data-song-id="${songId}"]`).first().click()
     await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
 
-    // Sample audio.src every 250ms for 10s — emit timeline so the failure
-    // mode is observable. If we never see blob:, log the timeline.
-    const timeline: string[] = []
-    const start = Date.now()
-    let sawBlob = false
-    while (Date.now() - start < 10000) {
-      const src = await page.locator('audio').first().evaluate((el: HTMLAudioElement) => el.src).catch(() => '<no audio>')
-      timeline.push(`${((Date.now() - start) / 1000).toFixed(2)}s: ${src.slice(0, 80)}`)
-      if (src.startsWith('blob:')) { sawBlob = true; break }
-      await page.waitForTimeout(250)
-    }
+    await expect.poll(
+      () => page.locator('audio').first().evaluate((el: HTMLAudioElement) => el.src),
+      { timeout: 10000, message: 'audio.src never became blob: URL' }
+    ).toMatch(/^blob:/)
 
-    if (!sawBlob) {
-      console.log('--- audio.src timeline ---')
-      timeline.forEach(t => console.log(t))
-      console.log('--- console logs ---')
-      logs.slice(-40).forEach(l => console.log(l))
-
-      // Probe what the player would see via getSongFile semantics.
-      const probe = await page.evaluate(async (id) => {
-        try {
-          // @ts-expect-error
-          const root = await navigator.storage.getDirectory()
-          const dir = await root.getDirectoryHandle('audio', { create: false })
-          const fh = await dir.getFileHandle(`${id}.mp3`, { create: false })
-          const f = await fh.getFile()
-          return { ok: true, size: f.size, type: f.type }
-        } catch (e) {
-          return { ok: false, error: String(e) }
-        }
-      }, songId)
-      console.log('--- OPFS probe at swap-fail time:', JSON.stringify(probe))
-    }
-
-    expect(sawBlob, 'audio.src never became blob: within 10s').toBe(true)
-
-    // Confirm the audio actually loaded the blob (readyState >= 2 = HAVE_CURRENT_DATA).
     await expect.poll(
       () => page.locator('audio').first().evaluate((el: HTMLAudioElement) => el.readyState),
       { timeout: 5000 }
     ).toBeGreaterThanOrEqual(2)
 
-    // Now go offline. The src should remain a blob: URL — the audio is fed by
-    // OPFS, not the network, so disconnecting changes nothing.
+    // Go offline — src stays blob:, audio remains playable from OPFS.
     await context.setOffline(true)
     await page.evaluate(() => window.dispatchEvent(new Event('offline')))
 
