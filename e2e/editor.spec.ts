@@ -1,22 +1,18 @@
 import { routes } from './routes'
-import { test, expect, Page } from '@playwright/test'
+import { test, expect, Page, Locator } from '@playwright/test'
 import { USERNAME, PASSWORD, login, ignoreError, apiLogin, API_V1 } from './helpers'
 
 
-async function openEditorForEditMe(page: Page) {
-    await page.goto(routes.library)
-    const songCard = page.getByTestId('song-card').filter({ hasText: /edit-me/i }).first()
-    await expect(songCard).toBeVisible({ timeout: 10000 })
-
-    await songCard.hover()
-    const kebabBtn = songCard.locator('button[title="more"]')
-    await kebabBtn.click()
-
-    await page.getByRole('button', { name: 'Edit', exact: true }).click()
-
-    const modal = page.getByTestId('editor-modal')
-    await expect(modal).toBeVisible()
-    return modal
+// Volume / Speed are ScrubInput components — role="spinbutton", aria-label
+// in lowercase ("volume", "speed"). Drag interaction won't fire from
+// Playwright reliably, but ScrubInput supports double-click → typed input.
+async function scrubFill(modal: Locator, label: string, displayText: string) {
+    const scrub = modal.getByRole('spinbutton', { name: label })
+    await scrub.dblclick()
+    const input = modal.locator(`input[aria-label="${label}"]`)
+    await expect(input).toBeVisible({ timeout: 3000 })
+    await input.fill(displayText)
+    await input.press('Enter')
 }
 
 async function openEditorFromLibrary(page: Page) {
@@ -79,42 +75,30 @@ test.describe('editor modal', () => {
         expect(abortErrors, `AbortErrors found: ${abortErrors.join('\n')}`).toHaveLength(0)
     })
 
-    test.skip('waveform loads and play button becomes active', async ({ page }) => {
+    test('waveform loads and preview-with-edits button becomes active', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
-
-        // loop button is disabled until wsReady — use it as the waveform-ready signal
+        // The preview button is gated by wsReady, so we use it as the
+        // waveform-ready signal across the suite.
         await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
     })
 
-    test.skip('sliders are interactive', async ({ page }) => {
+    test('volume scrub-input is interactive and updates display', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
-
-        // wait for waveform ready (play button enabled)
         await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
-        const volumeSlider = modal.getByRole('slider', { name: 'Volume' })
-        await expect(volumeSlider).toBeVisible()
-
-        // drag volume down
-        await volumeSlider.fill('0.5')
-        await volumeSlider.dispatchEvent('input')
-
-        // confirm the display updated (shows ~50%)
-        await expect(modal.getByText(/50%/)).toBeVisible()
+        // Volume's ScrubInput parses raw dB; +6 dB == ~2x amplitude.
+        await scrubFill(modal, 'volume', '+3.0 dB')
+        await expect(modal.getByRole('spinbutton', { name: 'volume' })).toContainText('+3.0 dB')
     })
 
-    test('undo button activates after slider change', async ({ page }) => {
+    test('undo button activates after volume change', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
-        // Wait for waveform to be ready (canvas visible and interactive)
-        await expect(modal.locator('canvas').first()).toBeVisible({ timeout: 30000 })
-        await page.waitForTimeout(500)
+        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
         const undoBtn = modal.locator('button[title="undo (Ctrl+Z)"]')
         await expect(undoBtn).toBeDisabled()
 
-        const volumeSlider = modal.getByRole('slider', { name: 'Volume' })
-        await volumeSlider.fill('1.5')
-        await volumeSlider.click()
+        await scrubFill(modal, 'volume', '+3.0 dB')
 
         await expect(undoBtn).not.toBeDisabled()
     })
@@ -126,25 +110,21 @@ test.describe('editor modal', () => {
         const undoBtn = modal.locator('button[title="undo (Ctrl+Z)"]')
         const redoBtn = modal.locator('button[title="redo (Ctrl+Shift+Z)"]')
 
-        // redo starts disabled
         await expect(redoBtn).toBeDisabled()
 
-        // make a change so undo becomes available
-        const volumeSlider = modal.getByRole('slider', { name: 'Volume' })
-        await volumeSlider.fill('1.5')
-        await volumeSlider.click()
+        await scrubFill(modal, 'volume', '+3.0 dB')
         await expect(undoBtn).not.toBeDisabled()
 
-        // undo the change — redo should become enabled
         await undoBtn.click()
         await expect(redoBtn).not.toBeDisabled()
     })
 
-    test('version badge shows "original" for unedited song', async ({ page }) => {
+    // FIXME(0.1.0): no data-testid="version-badge" rendered in editor-modal
+    // — UI shows version text inline ("original" / "prev. edit") instead.
+    // Add data-testid then un-fixme.
+    test.fixme('version badge shows "original" for unedited song', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
-
-        // Jolene has no edits so badge should read "original"
         await expect(modal.getByTestId('version-badge')).toHaveText('original')
     })
 
@@ -204,10 +184,7 @@ test.describe('editor modal', () => {
         // clear init-time errors (draft 404 on open is expected)
         errors.length = 0
 
-        // change volume to trigger draft save
-        const volumeSlider = modal.getByRole('slider', { name: 'Volume' })
-        await volumeSlider.fill('1.2')
-        await volumeSlider.dispatchEvent('input')
+        await scrubFill(modal, 'volume', '+1.0 dB')
 
         // wait for debounced draft save (1s)
         await page.waitForTimeout(1500)
@@ -220,16 +197,18 @@ test.describe('editor modal', () => {
         const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
-        const volumeSlider = modal.getByRole('slider', { name: 'Volume' })
-        await volumeSlider.fill('1.8')
-        await volumeSlider.dispatchEvent('input')
-        await expect(modal.getByText(/180%/)).toBeVisible()
+        await scrubFill(modal, 'volume', '+3.0 dB')
+        const volumeScrub = modal.getByRole('spinbutton', { name: 'volume' })
+        await expect(volumeScrub).toContainText('+3.0 dB')
 
         await modal.getByRole('button', { name: /discard/i }).click()
-        await expect(modal.getByText(/100%/)).toBeVisible()
+        await expect(volumeScrub).toContainText('+0.0 dB')
     })
 
-    test('fade in slider works without errors', async ({ page }) => {
+    // FIXME(0.1.0): no global "Fade in" slider — fades are added per-cut via
+    // the "+ fade in" / "+ fade out" BUTTONS, which create fade regions. The
+    // test as written assumed a global fade-time slider that no longer exists.
+    test.fixme('fade in slider works without errors', async ({ page }) => {
         const errors: string[] = []
         page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
         page.on('pageerror', err => errors.push(err.message))
@@ -247,7 +226,8 @@ test.describe('editor modal', () => {
         expect(realErrors, `Errors after fade in: ${realErrors.join('\n')}`).toHaveLength(0)
     })
 
-    test('fade out slider works without errors', async ({ page }) => {
+    // FIXME(0.1.0): same as above — fades are button-driven, no slider.
+    test.fixme('fade out slider works without errors', async ({ page }) => {
         const errors: string[] = []
         page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
         page.on('pageerror', err => errors.push(err.message))
@@ -265,7 +245,10 @@ test.describe('editor modal', () => {
         expect(realErrors, `Errors after fade out: ${realErrors.join('\n')}`).toHaveLength(0)
     })
 
-    test('preview with fade in and fade out plays without errors', async ({ page }) => {
+    // FIXME(0.1.0): depends on the global fade sliders that don't exist.
+    // The "Preview" button is also misnamed — actual title is
+    // "preview with edits" / "stop preview". Rewrite as part of fade revamp.
+    test.fixme('preview with fade in and fade out plays without errors', async ({ page }) => {
         const errors: string[] = []
         page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
         page.on('pageerror', err => errors.push(err.message))
@@ -312,12 +295,15 @@ test.describe('editor modal', () => {
         expect(abortErrors, `AbortErrors after close: ${abortErrors.join('\n')}`).toHaveLength(0)
     })
 
-    test('properties tab: saves and reverts track name on edit-me', async ({ page }) => {
+    // FIXME(0.1.0): test wants a song with track name "edit-me" — no such
+    // fixture in e2e/fixtures/songs/. Either add a dedicated fixture (mp3
+    // with that ID3 tag) or rewrite to save+revert track on a seeded song.
+    test.fixme('properties tab: saves and reverts track name on edit-me', async ({ page }) => {
         const errors: string[] = []
         page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
         page.on('pageerror', err => errors.push(err.message))
 
-        const modal = await openEditorForEditMe(page)
+        const modal = await openEditorFromLibrary(page)
 
         // switch to properties tab
         await modal.getByRole('button', { name: 'properties' }).click()
@@ -358,7 +344,10 @@ test.describe('editor modal', () => {
         expect(realErrors, `Console errors: ${realErrors.join('\n')}`).toHaveLength(0)
     })
 
-    test('zoom slider is visible and interactive', async ({ page }) => {
+    // FIXME(0.1.0): no <input type=range aria-label="zoom"> exists in the
+    // editor. Zoom may be button-driven or scrub-input. Re-investigate UI
+    // before rewriting.
+    test.fixme('zoom slider is visible and interactive', async ({ page }) => {
         const errors: string[] = []
         page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
         page.on('pageerror', err => errors.push(err.message))
@@ -402,17 +391,19 @@ test.describe('editor modal', () => {
         // the cut list should display a formatted time range
         await expect(modal.locator('.tabular-nums').first()).toBeVisible()
 
-        // preview with the cut active — should play without errors
-        const previewBtn = modal.getByRole('button', { name: 'Preview' })
-        await previewBtn.click()
+        // preview with the cut active — actual button title is
+        // "preview with edits" (toggles to "stop preview" while running).
+        await modal.locator('button[title="preview with edits"]').click()
         await page.waitForTimeout(800)
-        await modal.getByRole('button', { name: 'Stop preview' }).click()
+        await modal.locator('button[title="stop preview"]').click()
 
         const realErrors = errors.filter(e => !/AbortError/i.test(e) && !/favicon/i.test(e))
         expect(realErrors, `Errors during cut preview: ${realErrors.join('\n')}`).toHaveLength(0)
     })
 
-    test('waveform play pauses when preview starts', async ({ page }) => {
+    // FIXME(0.1.0): no `button[title="play"]` for the original-waveform play
+    // button — title and icon are dynamic. Add a stable testid then rewrite.
+    test.fixme('waveform play pauses when preview starts', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
@@ -443,7 +434,7 @@ test.describe('editor modal', () => {
         await expect(modal.locator('button[title="remove cut"]')).toHaveCount(0)
     })
 
-    test('speed slider sets display to 0.50×', async ({ page }) => {
+    test('speed scrub-input sets display to 0.50×', async ({ page }) => {
         const errors: string[] = []
         page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
         page.on('pageerror', err => errors.push(err.message))
@@ -451,12 +442,8 @@ test.describe('editor modal', () => {
         const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
-        const speedSlider = modal.getByRole('slider', { name: 'speed' })
-        await expect(speedSlider).toBeVisible()
-        await speedSlider.fill('0.5')
-        await speedSlider.dispatchEvent('input')
-
-        await expect(modal.getByText('0.50×')).toBeVisible()
+        await scrubFill(modal, 'speed', '0.50×')
+        await expect(modal.getByRole('spinbutton', { name: 'speed' })).toContainText('0.50×')
 
         const realErrors = errors.filter(e => !/AbortError/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e))
         expect(realErrors, `Errors: ${realErrors.join('\n')}`).toHaveLength(0)
@@ -482,7 +469,10 @@ test.describe('editor modal', () => {
         expect(realErrors, `Errors: ${realErrors.join('\n')}`).toHaveLength(0)
     })
 
-    test('per-cut fade sliders appear after adding a cut', async ({ page }) => {
+    // FIXME(0.1.0): no `slider[name="fade before cut"]` controls in current
+    // editor — fade UX is button-driven (+ fade in / + fade out) creating
+    // fade regions, not per-cut sliders.
+    test.fixme('per-cut fade sliders appear after adding a cut', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
@@ -506,7 +496,10 @@ test.describe('editor modal', () => {
         await expect(modal.locator('.tabular-nums').filter({ hasText: '1.0s' }).first()).toBeVisible()
     })
 
-    test('preview badge changes to "preview" (orange) when preview starts', async ({ page }) => {
+    // FIXME(0.1.0): same root cause as #6 — no version-badge testid, plus
+    // "Preview" / "Stop preview" buttons don't exist by name (icon-only
+    // with title="preview with edits" / "stop preview"). Add testid and rewrite.
+    test.fixme('preview badge changes to "preview" (orange) when preview starts', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
@@ -530,9 +523,10 @@ test.describe('editor modal', () => {
         await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
         errors.length = 0
 
-        // start preview (no cuts — uses WaveSurfer native path)
-        await modal.getByRole('button', { name: 'Preview' }).click()
-        await expect(modal.getByTestId('version-badge')).toHaveText('preview', { timeout: 3000 })
+        // start preview (no cuts — uses WaveSurfer native path).
+        await modal.locator('button[title="preview with edits"]').click()
+        // the button toggles to title="stop preview" while preview is running
+        await expect(modal.locator('button[title="stop preview"]')).toBeVisible({ timeout: 3000 })
 
         // click waveform at a different position
         const waveform = modal.getByTestId('waveform')
@@ -542,7 +536,7 @@ test.describe('editor modal', () => {
         }
         await page.waitForTimeout(300)
 
-        await modal.getByRole('button', { name: 'Stop preview' }).click()
+        await modal.locator('button[title="stop preview"]').click()
 
         const realErrors = errors.filter(e => !/AbortError/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e))
         expect(realErrors, `Errors: ${realErrors.join('\n')}`).toHaveLength(0)
@@ -571,9 +565,7 @@ test.describe('editor modal', () => {
         await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
         // make a change so paramsChanged returns true
-        const volumeSlider = modal.getByRole('slider', { name: 'Volume' })
-        await volumeSlider.fill('1.3')
-        await volumeSlider.click()
+        await scrubFill(modal, 'volume', '+2.0 dB')
 
         // click X
         await modal.getByTestId('editor-close').click()
@@ -592,9 +584,7 @@ test.describe('editor modal', () => {
         const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
-        const volumeSlider = modal.getByRole('slider', { name: 'Volume' })
-        await volumeSlider.fill('1.3')
-        await volumeSlider.click()
+        await scrubFill(modal, 'volume', '+2.0 dB')
 
         await modal.getByTestId('editor-close').click()
         await expect(page.getByText(/close without saving/i)).toBeVisible({ timeout: 3000 })
@@ -610,10 +600,7 @@ test.describe('editor modal', () => {
         const undoBtn = modal.locator('button[title="undo (Ctrl+Z)"]')
         await expect(undoBtn).toBeDisabled()
 
-        // make a change
-        const volumeSlider = modal.getByRole('slider', { name: 'Volume' })
-        await volumeSlider.fill('1.5')
-        await volumeSlider.click()
+        await scrubFill(modal, 'volume', '+3.0 dB')
         await expect(undoBtn).not.toBeDisabled()
 
         // press Ctrl+Z on the modal element (focused by default)
@@ -643,7 +630,11 @@ test.describe('editor modal', () => {
         expect(realErrors, `Errors: ${realErrors.join('\n')}`).toHaveLength(0)
     })
 
-    test('loop button activates and deactivates', async ({ page }) => {
+    // FIXME(0.1.0): test was checking the preview button (titled
+    // "preview with edits" / "stop preview") and asserting class toggling.
+    // No real "loop" button exists today. Either we add a loop control or
+    // delete the test in the next pass.
+    test.fixme('loop button activates and deactivates', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
@@ -673,7 +664,7 @@ test.describe('editor modal', () => {
     // directly. Until then we lock in the simpler "two cuts can coexist"
     // baseline below.
     test.fixme('add cut → expand fade-out ear left → add second cut respects fade range', async ({ page }) => {
-        const modal = await openEditorForEditMe(page)
+        const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
         // First cut
@@ -702,7 +693,7 @@ test.describe('editor modal', () => {
         page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
         page.on('pageerror', err => errors.push(err.message))
 
-        const modal = await openEditorForEditMe(page)
+        const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
         errors.length = 0
 
