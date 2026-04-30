@@ -19,7 +19,7 @@ function contextFromId(id: string | null): PlayContext | null {
     if (id === 'genres')    return { id, label: 'Genres',    href: `${routes.library}?view=genres` }
     if (id === 'playlists') return { id, label: 'Playlists', href: `${routes.library}?view=playlists` }
     if (id === 'explore')   return { id, label: 'Explore',   href: routes.explore }
-    if (id === 'downloads') return { id, label: 'Downloads', href: routes.downloadSong }
+    if (id === 'downloads') return { id, label: 'Downloads', href: routes.download }
     if (id.startsWith('genre:')) { const g = id.slice(6); return { id, label: g, href: `${routes.library}?view=genres` } }
     if (id.startsWith('album:')) return { id, label: 'Album', href: `${routes.library}?view=albums` }
     return null
