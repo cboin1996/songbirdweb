@@ -43,11 +43,11 @@ build:
 
 .PHONY: test-e2e
 test-e2e:
-	npx playwright test --project=dev
+	npx playwright test --project=dev --workers=1
 
 .PHONY: test-e2e-prod
 test-e2e-prod:
-	npx playwright test --project=prod
+	npx playwright test --project=prod --workers=1
 
 .PHONY: test
 test: lint typecheck

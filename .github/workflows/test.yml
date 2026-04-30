@@ -41,19 +41,114 @@ jobs:
         env:
           NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
 
-  # E2E disabled in CI — requires live API + DB services.
-  # Run locally with: make test-e2e (dev) or make test-e2e-prod (prod build)
-  # e2e:
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - uses: actions/setup-node@v4
-  #       with:
-  #         node-version: 22
-  #         cache: 'npm'
-  #     - name: Install dependencies
-  #       run: make install
-  #     - name: Install Playwright browsers
-  #       run: npx playwright install --with-deps chromium
-  #     - name: Run E2E tests
-  #       run: make test-e2e
+  e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: songbirdapi
+          POSTGRES_USER: songbirdapi
+          POSTGRES_PASSWORD: songbirdapi
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: make install
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Create data directory
+        run: mkdir -p data/downloads
+
+      - name: Run migrations
+        run: |
+          docker run --rm --network host \
+            --entrypoint alembic \
+            -e ENV=test \
+            -e POSTGRES_HOST=localhost \
+            -e POSTGRES_PORT=5432 \
+            -e POSTGRES_USER=songbirdapi \
+            -e POSTGRES_PASSWORD=songbirdapi \
+            -e POSTGRES_DB=songbirdapi \
+            -e API_KEY=ci-test-key \
+            -e JWT_SECRET=ci-test-secret \
+            cboin/songbirdapi:latest upgrade head
+
+      - name: Start API
+        run: |
+          docker run -d --name songbirdapi --network host \
+            -e ENV=test \
+            -e POSTGRES_HOST=localhost \
+            -e POSTGRES_PORT=5432 \
+            -e POSTGRES_USER=songbirdapi \
+            -e POSTGRES_PASSWORD=songbirdapi \
+            -e POSTGRES_DB=songbirdapi \
+            -e API_KEY=ci-test-key \
+            -e JWT_SECRET=ci-test-secret \
+            -e ADMIN_USERNAME=e2e-admin \
+            -e ADMIN_EMAIL=e2e-admin@ci.local \
+            -e ADMIN_PASSWORD=e2e-admin-pass \
+            -v $(pwd)/data:/songbirdapi/data \
+            cboin/songbirdapi:latest
+
+      - name: Wait for API
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8000/v1/version; then
+              echo "API ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs songbirdapi
+          exit 1
+
+      - name: Start Next.js dev server
+        env:
+          NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+        run: npm run dev &
+
+      - name: Wait for Next.js
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000; then
+              echo "Next.js ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+
+      - name: Run E2E tests
+        env:
+          NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+          E2E_API_BASE_URL: http://localhost:8000
+          E2E_WEB_URL: http://localhost:3000
+          TEST_USERNAME: e2e-user
+          TEST_PASSWORD: e2e-user-pass
+          E2E_ADMIN_USERNAME: e2e-admin
+          E2E_ADMIN_PASSWORD: e2e-admin-pass
+        run: make test-e2e
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
