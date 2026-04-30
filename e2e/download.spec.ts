@@ -49,8 +49,10 @@ test.describe('download page', () => {
         await expect(card).toBeVisible({ timeout: 15000 })
     })
 
+    // Use a seeded library title so the first card is a library match (has songId).
+    // Pure iTunes results have no songId → no kebab/library-toggle/playable file.
     test('song search: kebab menu opens on hover', async ({ page }) => {
-        await page.goto('/download/song?query=jolene')
+        await page.goto('/download/song?query=sound%20of%20silence')
         const card = page.getByTestId('song-card').first()
         await expect(card).toBeVisible({ timeout: 15000 })
         await card.hover()
@@ -58,7 +60,7 @@ test.describe('download page', () => {
     })
 
     test('song search: kebab menu shows expected actions', async ({ page }) => {
-        await page.goto('/download/song?query=jolene')
+        await page.goto('/download/song?query=sound%20of%20silence')
         const card = page.getByTestId('song-card').first()
         await expect(card).toBeVisible({ timeout: 15000 })
         await card.hover()
@@ -75,7 +77,7 @@ test.describe('download page', () => {
         const errors: string[] = []
         page.on('pageerror', err => { if (!ignoreError(err.message)) errors.push(err.message) })
 
-        await page.goto('/download/song?query=jolene')
+        await page.goto('/download/song?query=sound%20of%20silence')
         const card = page.getByTestId('song-card').first()
         await expect(card).toBeVisible({ timeout: 15000 })
         await card.click()
@@ -86,7 +88,7 @@ test.describe('download page', () => {
     })
 
     test('song search: library bookmark button visible on card', async ({ page }) => {
-        await page.goto('/download/song?query=jolene')
+        await page.goto('/download/song?query=sound%20of%20silence')
         const card = page.getByTestId('song-card').first()
         await expect(card).toBeVisible({ timeout: 15000 })
         await expect(card.getByTestId('song-library-toggle')).toBeVisible()
@@ -96,7 +98,7 @@ test.describe('download page', () => {
 
     test('URL sub-page: status message is present', async ({ page }) => {
         await page.goto(routes.downloadUrl)
-        await expect(page.getByText('enter a url')).toBeVisible({ timeout: 5000 })
+        await expect(page.getByText('no url provided')).toBeVisible({ timeout: 5000 })
     })
 
     test('no console errors on download page', async ({ page }) => {
@@ -111,6 +113,9 @@ test.describe('download page', () => {
 
     // --- real flow tests (hit yt-dlp + iTunes; local only) ---
 
+    // Real-flow curation test: pick an iTunes match (no songId) → click card
+    // → URL form opens → paste source URL → submit → tag with iTunes props →
+    // add to library. This is the canonical "curate a new song" path.
     test('/download/song flow downloads first iTunes result', async ({ page }) => {
         test.skip(!!process.env.CI, 'requires yt-dlp + network — local only')
         test.slow()
@@ -119,95 +124,97 @@ test.describe('download page', () => {
         let songUuid: string | null = null
 
         try {
-            // Navigate to song download with reliable iTunes hit
+            // 'jolene' is not in our seed library → first iTunes match leads.
             await page.goto('/download/song?query=jolene')
-            const card = page.getByTestId('song-card').first()
-            await expect(card).toBeVisible({ timeout: 15000 })
 
-            // Click kebab menu and select download
-            await card.hover()
-            await card.getByTestId('song-kebab').click()
-            const menu = page.getByTestId('song-kebab-menu')
-            await expect(menu).toBeVisible({ timeout: 3000 })
-            await menu.getByRole('button', { name: /download/i }).click()
+            // iTunes cards have no kebab/library-toggle (no songId yet).
+            const itunesCard = page.getByTestId('song-card')
+                .filter({ hasNot: page.getByTestId('song-kebab') })
+                .first()
+            await expect(itunesCard).toBeVisible({ timeout: 15000 })
 
-            // Wait for song to appear in library
+            // Click iTunes card → bottom URL form appears.
+            await itunesCard.click()
+            const urlInput = page.locator('input[type="url"]')
+            await expect(urlInput).toBeVisible({ timeout: 5000 })
+
+            // Stable Creative-Commons audio URL (yt-dlp supports archive.org direct).
+            await urlInput.fill('https://archive.org/download/testmp3testfile/mpthreetest.mp3')
+
+            // The submit button reads "download" in idle state.
+            await page.getByRole('button', { name: /^download$/i }).click()
+
+            // Once download+tag completes, the lowercase "add to library" submit
+            // button appears in the bottom panel (distinct from the bookmark
+            // toggle which has title="Add to library").
+            await page.getByRole('button', { name: 'add to library', exact: true }).click({ timeout: 90000 })
+
+            // Verify the song appears in the test user's library via API.
             let found = false
             for (let i = 0; i < 30; i++) {
                 const res = await api.get(`/v1/songs/library`)
                 if (res.ok()) {
                     const songs = await res.json()
                     const song = songs.find((s: any) => s.properties?.trackName?.toLowerCase().includes('jolene'))
-                    if (song) {
-                        songUuid = song.uuid
-                        found = true
-                        break
-                    }
+                    if (song) { songUuid = song.uuid; found = true; break }
                 }
                 await page.waitForTimeout(1000)
             }
             expect(found, 'Song did not appear in library within 30s').toBe(true)
         } finally {
-            // Cleanup: delete the downloaded song via API
-            if (songUuid) {
-                await api.delete(`/v1/library/${songUuid}`)
-            }
+            if (songUuid) await api.delete(`/v1/library/${songUuid}`)
             await api.dispose()
         }
     })
 
-    test('/download/album flow downloads selected tracks from album', async ({ page }) => {
+    // Album flow: click album → redirects to song page filtered to its tracks
+    // (collectionId+lookup=true), then download one track to prove the chain.
+    // No bulk-select UI exists; per-track download is the canonical path.
+    test('/download/album flow finds tracks then downloads one', async ({ page }) => {
         test.skip(!!process.env.CI, 'requires yt-dlp + network — local only')
         test.slow()
 
         const api = await import('./helpers').then(h => h.apiLogin())
-        const songUuids: string[] = []
+        let songUuid: string | null = null
 
         try {
-            // Navigate to album download search
             await page.goto('/download/album?query=rumours')
-            await page.waitForTimeout(2000)
 
-            // Look for album result and click it
-            const albumResult = page.locator('[data-testid="album-result"]').first()
-            if (await albumResult.isVisible({ timeout: 10000 })) {
-                await albumResult.click()
-                await page.waitForTimeout(2000)
-            }
+            // First album in the iTunes results.
+            const album = page.getByRole('button').filter({ hasText: /rumours/i }).first()
+            await expect(album).toBeVisible({ timeout: 15000 })
+            await album.click()
 
-            // Select first track checkbox
-            const trackCheckbox = page.locator('input[type="checkbox"]').first()
-            if (await trackCheckbox.isVisible({ timeout: 5000 })) {
-                await trackCheckbox.click()
-            }
+            // Should redirect to /download/song with the album's tracks.
+            await expect(page).toHaveURL(/\/download\/song\?.*lookup=true/, { timeout: 10000 })
 
-            // Click download button
-            const downloadBtn = page.getByRole('button', { name: /download/i }).first()
-            if (await downloadBtn.isVisible({ timeout: 5000 })) {
-                await downloadBtn.click()
-            }
+            // Pick first iTunes track (no kebab — not yet downloaded).
+            const itunesCard = page.getByTestId('song-card')
+                .filter({ hasNot: page.getByTestId('song-kebab') })
+                .first()
+            await expect(itunesCard).toBeVisible({ timeout: 15000 })
+            await itunesCard.click()
 
-            // Wait for tracks to appear in library
+            const urlInput = page.locator('input[type="url"]')
+            await expect(urlInput).toBeVisible({ timeout: 5000 })
+            await urlInput.fill('https://archive.org/download/testmp3testfile/mpthreetest.mp3')
+            await page.getByRole('button', { name: /^download$/i }).click()
+            await page.getByRole('button', { name: /add to library/i }).click({ timeout: 90000 })
+
             let found = false
             for (let i = 0; i < 30; i++) {
                 const res = await api.get(`/v1/songs/library`)
                 if (res.ok()) {
                     const songs = await res.json()
-                    const newSongs = songs.filter((s: any) => !songUuids.includes(s.uuid))
-                    if (newSongs.length > 0) {
-                        newSongs.forEach((s: any) => songUuids.push(s.uuid))
-                        found = true
-                        break
-                    }
+                    // Latest-added song has the URL we just submitted.
+                    const recent = songs.find((s: any) => s?.url?.includes('archive.org'))
+                    if (recent) { songUuid = recent.uuid; found = true; break }
                 }
                 await page.waitForTimeout(1000)
             }
-            expect(found, 'Album tracks did not appear in library within 30s').toBe(true)
+            expect(found, 'Album track did not appear in library within 30s').toBe(true)
         } finally {
-            // Cleanup: delete all downloaded songs via API
-            for (const uuid of songUuids) {
-                await api.delete(`/v1/library/${uuid}`)
-            }
+            if (songUuid) await api.delete(`/v1/library/${songUuid}`)
             await api.dispose()
         }
     })
@@ -220,36 +227,22 @@ test.describe('download page', () => {
         let songUuid: string | null = null
 
         try {
-            // Navigate to URL download
-            await page.goto('/download/url')
-            await expect(page.getByText('enter a url')).toBeVisible({ timeout: 5000 })
+            // The URL flow takes the source URL via query param. Search bar
+            // above submits to /download/url?query=…; navigate directly here.
+            const url = 'https://archive.org/download/testmp3testfile/mpthreetest.mp3'
+            await page.goto(`/download/url?query=${encodeURIComponent(url)}`)
 
-            // Paste a public domain / stable URL (Creative Commons audio)
-            const urlInput = page.locator('input[type="url"]')
-            await expect(urlInput).toBeVisible({ timeout: 5000 })
-            // Using a short Creative Commons audio track from archive.org
-            await urlInput.fill('https://archive.org/download/testmp3testfile/mpthreetest.mp3')
-            await page.waitForTimeout(500)
+            // Download starts automatically. After completion, "ready" state
+            // shows an "add to library" button — user must click to commit.
+            await page.getByRole('button', { name: 'add to library', exact: true }).click({ timeout: 90000 })
 
-            // Submit form
-            await page.getByRole('button', { name: 'download', exact: true }).click()
-
-            // Wait for download to complete and song to appear in library
             let found = false
             for (let i = 0; i < 30; i++) {
                 const res = await api.get(`/v1/songs/library`)
                 if (res.ok()) {
                     const songs = await res.json()
-                    // Look for a song added in the last 60 seconds
-                    const recentSong = songs.find((s: any) => {
-                        const added = new Date(s.properties?.dateAdded).getTime()
-                        return Date.now() - added < 60000
-                    })
-                    if (recentSong) {
-                        songUuid = recentSong.uuid
-                        found = true
-                        break
-                    }
+                    const recent = songs.find((s: any) => s?.url?.includes('archive.org'))
+                    if (recent) { songUuid = recent.uuid; found = true; break }
                 }
                 await page.waitForTimeout(1000)
             }
