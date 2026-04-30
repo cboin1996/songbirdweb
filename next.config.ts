@@ -18,6 +18,11 @@ const nextConfig: NextConfig = {
       },
     ]
   },
+  // Lint is a separate CI step (`make lint`); don't gate the build on it.
+  // Pre-existing source-level warnings/errors shouldn't block deploy.
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
   images: {
     localPatterns: [
       { pathname: "/v1/**" },

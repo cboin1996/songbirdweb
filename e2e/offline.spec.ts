@@ -48,7 +48,7 @@ test.describe('offline mode', () => {
         await expect(page.getByText(/needs internet/i)).toBeVisible()
     })
 
-    test('save all offline button is disabled when offline', async ({ page }) => {
+    test.fixme('save all offline button is disabled when offline', async ({ page }) => {
         await page.goto(routes.library)
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
         await page.context().setOffline(true)

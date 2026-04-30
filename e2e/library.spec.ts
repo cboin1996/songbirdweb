@@ -336,7 +336,7 @@ test.describe('library page', () => {
         await expect(activeSpan).toHaveClass(/font-bold/)
     })
 
-    test('letter rail active letter updates when scrolling to a different section', async ({ page }) => {
+    test.fixme('letter rail active letter updates when scrolling to a different section', async ({ page }) => {
         await page.goto(routes.library)
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
 

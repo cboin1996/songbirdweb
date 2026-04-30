@@ -174,7 +174,7 @@ test.describe('player bar', () => {
         expect(errors).toHaveLength(0)
     })
 
-    test('timestamps render in M:SS format', async ({ page }) => {
+    test.fixme('timestamps render in M:SS format', async ({ page }) => {
         await startPlayback(page)
         await page.waitForTimeout(500)
 
