@@ -82,7 +82,7 @@ const AlbumCard = memo(function AlbumCard({ album, isCompact, isActive, isPlayin
     return (
         <button
             onClick={onClick}
-            className="group flex flex-col gap-2 rounded-lg p-2 text-left transition-colors hover:bg-gray-100 dark:hover:bg-gray-900"
+            className="group flex flex-col gap-2 rounded-lg p-2 text-left transition-colors hover:bg-gray-100 dark:hover:bg-gray-900 w-full"
         >
             <div className="relative w-full aspect-square">
                 {largeArt
@@ -878,7 +878,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
             {/* Sections */}
             {viewMode === 'albums'
                 ? sortLetterEntries([...albumGrouped.entries()]).map(([letter, albums]) => (
-                    <div key={letter} ref={el => { sectionRefs.current[letter] = el }} data-letter={letter} className="scroll-mt-24 cv-auto">
+                    <div key={letter} ref={el => { sectionRefs.current[letter] = el }} data-letter={letter} className="scroll-mt-24">
                         <div className="md:sticky md:top-24 z-30 bg-background px-1 py-0.5 mb-1">
                             <span className="text-xs font-bold text-sky-500 tracking-widest">{letter}</span>
                         </div>
