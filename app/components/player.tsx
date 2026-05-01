@@ -412,6 +412,26 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         scheduleSave()
     }
 
+    // Pin lock-screen position/duration to the real song's values while the silent
+    // loop drives the element. Without this, iOS reads the silent track's 0:00/0:01.
+    // playbackRate=0 freezes the position display so iOS doesn't extrapolate from
+    // the silent track's elapsed time (which would make the lock-screen bar bounce).
+    function pinLockScreenPosition(position: number, duration: number) {
+        if (!('mediaSession' in navigator)) return
+        navigator.mediaSession.playbackState = 'paused'
+        if (!isFinite(duration) || duration <= 0) return
+        try {
+            navigator.mediaSession.setPositionState({ duration, position, playbackRate: 0 })
+        } catch {}
+    }
+
+    // Hand the lock-screen back to the audio element's natural timing.
+    function unpinLockScreenPosition() {
+        if (!('mediaSession' in navigator)) return
+        navigator.mediaSession.playbackState = 'playing'
+        try { navigator.mediaSession.setPositionState() } catch {}
+    }
+
     function pause() {
         const audio = audioRef.current
         if (!audio || !current) return
@@ -426,8 +446,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             setIsPlaying(false)
             return
         }
-        savePosition(current, audio.currentTime)
-        pendingPosition.current = audio.currentTime
+        const realPos = audio.currentTime
+        const realDur = audio.duration
+        savePosition(current, realPos)
+        pendingPosition.current = realPos
         savedSrcBeforeSilenceRef.current = audio.src
         sessionKeepAliveRef.current = true
         audio.src = SILENT_LOOP_SRC
@@ -440,6 +462,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             audio.pause()
         })
         setIsPlaying(false)
+        pinLockScreenPosition(realPos, realDur)
     }
 
     function resume() {
@@ -456,6 +479,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 audio.load()
             }
             setIsPlaying(true)
+            unpinLockScreenPosition()
             return
         }
         setIsPlaying(true)
@@ -763,6 +787,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                     audio.load()
                 }
                 setIsPlaying(true)
+                unpinLockScreenPosition()
                 return
             }
             setIsPlaying(true)
@@ -780,8 +805,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 setIsPlaying(false)
                 return
             }
-            savePosition(current, audio.currentTime)
-            pendingPosition.current = audio.currentTime
+            const realPos = audio.currentTime
+            const realDur = audio.duration
+            savePosition(current, realPos)
+            pendingPosition.current = realPos
             savedSrcBeforeSilenceRef.current = audio.src
             sessionKeepAliveRef.current = true
             audio.src = SILENT_LOOP_SRC
@@ -793,6 +820,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 audio.pause()
             })
             setIsPlaying(false)
+            pinLockScreenPosition(realPos, realDur)
         })
         navigator.mediaSession.setActionHandler('previoustrack', skipPrev)
         navigator.mediaSession.setActionHandler('nexttrack', skipNext)
