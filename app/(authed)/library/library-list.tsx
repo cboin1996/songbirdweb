@@ -507,9 +507,15 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
             }
             el.scrollIntoView({ behavior: 'instant' as ScrollBehavior, block: 'center' })
             el.style.animation = 'none'
-            void el.offsetWidth // force reflow so the animation restarts on same element
+            void el.offsetWidth
             el.style.animation = 'song-highlight 1.5s ease-out forwards'
             el.addEventListener('animationend', () => { el.style.animation = '' }, { once: true })
+            // Remove ?song/?album from URL so subsequent letter-rail taps don't re-fire this effect
+            const params = new URLSearchParams(searchParams.toString())
+            params.delete('song')
+            params.delete('album')
+            const qs = params.toString()
+            router.replace(qs ? `?${qs}` : window.location.pathname, { scroll: false })
         }
 
         tryScroll(0)
