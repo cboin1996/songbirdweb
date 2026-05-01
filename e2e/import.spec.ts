@@ -1,29 +1,27 @@
 import { routes } from './routes'
 import { test, expect, Page } from '@playwright/test'
-import { USERNAME, PASSWORD, login, ignoreError, apiLogin, API_V1 } from './helpers'
+import { login, apiLoginAs, API_V1, IMPORT_USERNAME, IMPORT_PASSWORD } from './helpers'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
 
 
-// Create a minimal valid-ish mp3 file for upload testing (ID3 header + empty frames)
-function makeFakeAudioFile(name: string): string {
+// Copy a real mp3 fixture to a tmp file with the given name.
+// Real files let the import worker fail fast (missing tags → "failed") instead
+// of hanging on a malformed 10-byte stub, keeping the queue clear for later tests.
+const NO_TAGS_FIXTURE = path.join(__dirname, 'fixtures/songs/no-tags.mp3')
+function makeRealAudioCopy(name: string): string {
     const filePath = path.join(os.tmpdir(), name)
-    // ID3v2 header: "ID3" + version 2.3 + flags + size (0)
-    const id3 = Buffer.alloc(10)
-    id3.write('ID3')
-    id3[3] = 3; id3[4] = 0; id3[5] = 0
-    // size: 0 (syncsafe int)
-    id3[6] = 0; id3[7] = 0; id3[8] = 0; id3[9] = 0
-    fs.writeFileSync(filePath, id3)
+    fs.copyFileSync(NO_TAGS_FIXTURE, filePath)
     return filePath
 }
 
 test.describe('import page', () => {
     test.describe.configure({ mode: 'serial' })
+    test.use({ storageState: 'e2e/.auth/import-user.json' })
 
     test.beforeEach(async ({ page }) => {
-        await login(page)
+        await login(page, IMPORT_USERNAME, IMPORT_PASSWORD)
     })
 
     test('import link visible in navbar', async ({ page }) => {
@@ -86,12 +84,19 @@ test.describe('import page', () => {
     test('uploading multiple files shows multiple rows', async ({ page }) => {
         await page.goto(routes.import)
         const ts = Date.now()
-        const file1 = makeFakeAudioFile(`song-a-${ts}.mp3`)
-        const file2 = makeFakeAudioFile(`song-b-${ts}.mp3`)
+        const file1 = makeRealAudioCopy(`song-a-${ts}.mp3`)
+        const file2 = makeRealAudioCopy(`song-b-${ts}.mp3`)
         try {
             await page.getByTestId('import-file-input').setInputFiles([file1, file2])
-            await expect(page.locator('tr', { hasText: `song-a-${ts}.mp3` })).toHaveCount(1, { timeout: 10000 })
-            await expect(page.locator('tr', { hasText: `song-b-${ts}.mp3` })).toHaveCount(1, { timeout: 10000 })
+            // Poll for BOTH rows simultaneously — sequential checks race with the 3-second
+            // poller that can overwrite optimistic UI state before both jobs are confirmed.
+            await expect.poll(async () => {
+                const [a, b] = await Promise.all([
+                    page.locator('tr', { hasText: `song-a-${ts}.mp3` }).count(),
+                    page.locator('tr', { hasText: `song-b-${ts}.mp3` }).count(),
+                ])
+                return a >= 1 && b >= 1
+            }, { timeout: 15000 }).toBe(true)
         } finally {
             fs.unlinkSync(file1)
             fs.unlinkSync(file2)
@@ -112,10 +117,11 @@ test.describe('import page', () => {
 
     test('dove banner appears with "importing" / "finished" counts on multi-file drop', async ({ page }) => {
         await page.goto(routes.import)
+        const ts = Date.now()
         const files = [
-            makeFakeAudioFile('dove-a.mp3'),
-            makeFakeAudioFile('dove-b.mp3'),
-            makeFakeAudioFile('dove-c.mp3'),
+            makeRealAudioCopy(`dove-a-${ts}.mp3`),
+            makeRealAudioCopy(`dove-b-${ts}.mp3`),
+            makeRealAudioCopy(`dove-c-${ts}.mp3`),
         ]
         try {
             await page.getByTestId('import-file-input').setInputFiles(files)
@@ -132,7 +138,7 @@ test.describe('import page', () => {
             } catch {
                 // Fallback: banner already disappeared, ensure terminal status
                 // visible on at least one row.
-                await expect(page.locator('tr', { hasText: 'dove-a.mp3' }).locator('text=/^(done|failed|duplicate)$/').first()).toBeVisible({ timeout: 15000 })
+                await expect(page.locator('tr', { hasText: `dove-a-${ts}.mp3` }).locator('text=/^(done|failed|duplicate)$/').first()).toBeVisible({ timeout: 15000 })
             }
         } finally {
             for (const f of files) try { fs.unlinkSync(f) } catch {}
@@ -140,7 +146,7 @@ test.describe('import page', () => {
     })
 
     test('lifetime status chips increment after import completes', async ({ page }) => {
-        const api = await apiLogin()
+        const api = await apiLoginAs(IMPORT_USERNAME, IMPORT_PASSWORD)
         // Read initial counts via API (status_counts is included in listImportJobs)
         const before = await api.get(`${API_V1}/import?limit=1&offset=0`)
         const beforeBody = before.ok() ? await before.json() : { status_counts: {} }
@@ -228,14 +234,14 @@ test.describe('import page', () => {
 
     test('duplicate row shows "original added" link', async ({ page }) => {
         await page.goto(routes.import)
-        // Upload a seeded fixture song — already in DB so it triggers duplicate detection
-        const fixturePath = path.join(__dirname, 'fixtures/songs/Nothing Else Matters.mp3')
-        await page.getByTestId('import-file-input').setInputFiles(fixturePath)
-
-        // Chain two filters: must have filename AND "duplicate" — skips the global-setup "done" row.
-        const row = page.locator('tr').filter({ hasText: /Nothing Else Matters/i }).filter({ hasText: 'duplicate' }).first()
-        await expect(row).toBeVisible({ timeout: 20000 })
-        await expect(row.locator('a', { hasText: 'original added' })).toBeVisible()
+        await page.getByTestId('import-file-input').setInputFiles(
+            path.join(__dirname, 'fixtures/songs/Nothing Else Matters.mp3'),
+        )
+        // 3s poller updates the table with terminal status. Wait for the row to
+        // show "duplicate" in the DOM — this is what the user actually sees.
+        const row = page.locator('tr').filter({ hasText: /Nothing Else Matters/i }).filter({ hasText: 'duplicate' })
+        await expect(row.first()).toBeVisible({ timeout: 20000 })
+        await expect(row.first().locator('a', { hasText: 'original added' })).toBeVisible()
     })
 
 })

@@ -1,6 +1,6 @@
 import { routes } from './routes'
 import { test, expect, Page, Locator } from '@playwright/test'
-import { USERNAME, PASSWORD, login, ignoreError, apiLogin, API_V1 } from './helpers'
+import { USERNAME, PASSWORD, login, ignoreError, apiLogin, apiLoginAs, API_V1, EDITOR_USERNAME, EDITOR_PASSWORD } from './helpers'
 
 
 // Volume / Speed are ScrubInput components — role="spinbutton", aria-label
@@ -56,9 +56,10 @@ async function openEditorFromLibrary(page: Page) {
 
 test.describe('editor modal', () => {
     test.describe.configure({ mode: 'serial' })
+    test.use({ storageState: 'e2e/.auth/editor-user.json' })
 
     test.beforeEach(async ({ page }) => {
-        await login(page)
+        await login(page, EDITOR_USERNAME, EDITOR_PASSWORD)
     })
 
     test('opens editor modal for first library song', async ({ page }) => {
@@ -554,10 +555,12 @@ test.describe('editor modal', () => {
         await scrubFill(modal, 'volume', '+2.0 dB')
         await modal.getByTestId('editor-close').click()
 
-        // banner appears while draft saves, then modal closes automatically
-        const banner = page.locator('.bg-amber-50, .bg-amber-950\\/40').first()
-        await expect(banner).toBeVisible({ timeout: 3000 })
-        await expect(banner).toContainText(/Draft auto-saved/i)
+        // Single atomic check: banner appears while draft saves then auto-closes.
+        // filter({ hasText }) is evaluated atomically — avoids a sequential race
+        // where the banner disappears between toBeVisible and toContainText.
+        await expect(
+            page.locator('.bg-amber-50, .bg-amber-950\\/40').filter({ hasText: /Draft auto-saved/i })
+        ).toBeVisible({ timeout: 5000 })
         await expect(modal).not.toBeVisible({ timeout: 10000 })
     })
 
@@ -691,7 +694,7 @@ test.describe('editor modal', () => {
     test('save to library: encodes and creates new song version', async ({ page }) => {
         test.skip(!!process.env.CI, 'encoding job too slow for CI runners — run locally')
         test.slow()
-        const api = await apiLogin()
+        const api = await apiLoginAs(EDITOR_USERNAME, EDITOR_PASSWORD)
         const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
@@ -739,7 +742,7 @@ test.describe('editor modal', () => {
     test('restore original: child song shows restore button and navigates to parent', async ({ page }) => {
         test.skip(!!process.env.CI, 'encoding job too slow for CI runners — run locally')
         test.slow()
-        const api = await apiLogin()
+        const api = await apiLoginAs(EDITOR_USERNAME, EDITOR_PASSWORD)
 
         // Step 1: Open editor on a library song, capture parent ID, make an edit, save → creates a child.
         const modal1 = await openEditorFromLibrary(page)
@@ -778,7 +781,7 @@ test.describe('editor modal', () => {
         const restoreBtn = childModal.getByRole('button', { name: 'Restore Original' })
         await expect(restoreBtn).toBeVisible({ timeout: 10000 })
         await restoreBtn.click()
-        await expect(page.getByText(/Restore original\?/i)).toBeVisible({ timeout: 5000 })
+        await expect(page.getByText('Restore original?', { exact: true })).toBeVisible({ timeout: 5000 })
         await page.getByRole('button', { name: 'Yes, restore' }).click()
 
         // Step 4: Assert URL navigates back to parent's editor route.

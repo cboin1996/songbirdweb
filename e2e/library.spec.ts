@@ -262,29 +262,26 @@ test.describe('library page', () => {
         await page.goto(routes.library)
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
 
-        // data-song-id lives on the wrapper div around each Song component, not on the card itself.
-        const songId = await page.locator('[data-song-id]').first().getAttribute('data-song-id')
+        // Real user flow: play all → player shows "from Library" link with ?song=<uuid>
+        // → click it → client-side nav (songs already in state) → effect fires immediately.
+        await page.getByRole('button', { name: 'play all' }).click()
+        await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
+
+        const contextLink = page.getByText(/from library/i)
+        await expect(contextLink).toBeVisible({ timeout: 5000 })
+        const href = await contextLink.locator('..').getAttribute('href')
+        expect(href).toMatch(/\?song=/)
+        const songId = new URL(href!, 'http://x').searchParams.get('song')
         expect(songId).toBeTruthy()
 
-        await page.goto(`/library?song=${songId}`)
+        await contextLink.locator('..').click()
 
+        // Songs already in state — effect finds element immediately, animation fires.
         const targetCard = page.locator(`[data-song-id="${songId}"]`).first()
         await expect(targetCard).toBeVisible({ timeout: 5000 })
-
-        // Check inline style (el.style.animation), not getComputedStyle — songs live inside
-        // cv-auto sections where computed styles can be stale for newly-rendered content.
-        // React doesn't manage this element's style prop so it won't clear the inline value.
         await expect.poll(() =>
-            targetCard.evaluate(el => (el as HTMLElement).style.animation)
-        , { timeout: 5000 }).toContain('song-highlight')
-
-        // Verify the jump put the card in viewport
-        await expect.poll(async () => {
-            return targetCard.evaluate((el) => {
-                const rect = el.getBoundingClientRect()
-                return rect.top >= 0 && rect.top < window.innerHeight
-            })
-        }, { timeout: 5000 }).toBe(true)
+            targetCard.evaluate(el => (el as HTMLElement).dataset.animated)
+        , { timeout: 5000 }).toBe('once')
     })
 
     test('?album=<id> scrolls to matching album and applies highlight animation', async ({ page }) => {
@@ -292,17 +289,24 @@ test.describe('library page', () => {
         const albumLocator = page.locator('[data-album-id]').first()
         await expect(albumLocator).toBeVisible({ timeout: 10000 })
 
-        const albumId = await albumLocator.getAttribute('data-album-id')
+        // Real user flow: click album to play → player shows album context link with
+        // ?view=albums&album=<id> → click it → client-side nav (songs already in state).
+        await albumLocator.click()
+        await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
+
+        const contextLink = page.locator('a[href*="album="]').first()
+        await expect(contextLink).toBeVisible({ timeout: 5000 })
+        const href = await contextLink.getAttribute('href')
+        const albumId = new URL(href!, 'http://x').searchParams.get('album')
         expect(albumId).toBeTruthy()
 
-        await page.goto(`/library?view=albums&album=${albumId}`)
+        await contextLink.click()
 
-        const targetAlbum = page.locator('[data-album-id]').first()
-        await expect(targetAlbum).toBeVisible({ timeout: 10000 })
-
+        const targetAlbum = page.locator(`[data-album-id="${albumId}"]`).first()
+        await expect(targetAlbum).toBeVisible({ timeout: 5000 })
         await expect.poll(() =>
-            targetAlbum.evaluate(el => (el as HTMLElement).style.animation)
-        , { timeout: 5000 }).toContain('song-highlight')
+            targetAlbum.evaluate(el => (el as HTMLElement).dataset.animated)
+        , { timeout: 5000 }).toBe('once')
 
         // Verify the jump put the album in viewport
         await expect.poll(async () => {

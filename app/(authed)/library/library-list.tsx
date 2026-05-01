@@ -489,7 +489,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         if (!target) return
 
         const POLL_INTERVAL_MS = 150
-        const MAX_POLL_ATTEMPTS = 20  // 20 × 150ms = 3s window for late renders
+        const MAX_POLL_ATTEMPTS = 80  // 80 × 150ms = 12s window for late renders
 
         let cancelled = false
         let pollTimer: ReturnType<typeof setTimeout> | null = null
@@ -509,6 +509,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
             el.style.animation = 'none'
             void el.offsetWidth
             el.style.animation = 'song-highlight 1.5s ease-out forwards'
+            el.dataset.animated = 'once'
             el.addEventListener('animationend', () => { el.style.animation = '' }, { once: true })
             // Remove ?song/?album from URL so subsequent letter-rail taps don't re-fire this effect
             const params = new URLSearchParams(searchParams.toString())

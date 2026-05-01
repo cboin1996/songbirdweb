@@ -1,6 +1,6 @@
 import { routes } from './routes'
 import { test, expect, APIRequestContext } from '@playwright/test'
-import { login, apiLogin, uniq, purgePlaylistsByPrefix, API_V1 } from './helpers'
+import { login, apiLoginAs, uniq, purgePlaylistsByPrefix, API_V1, BULK_USERNAME, BULK_PASSWORD } from './helpers'
 
 // Locks in the multi-select toolbar at keebox-beta-1: the fixed top-right
 // "Select" button, the bulk action bar, and the "+ Playlist" attach action.
@@ -14,9 +14,10 @@ let api: APIRequestContext
 
 test.describe('library bulk select', () => {
     test.describe.configure({ mode: 'serial' })
+    test.use({ storageState: 'e2e/.auth/bulk-user.json' })
 
     test.beforeAll(async () => {
-        api = await apiLogin()
+        api = await apiLoginAs(BULK_USERNAME, BULK_PASSWORD)
         await purgePlaylistsByPrefix(api, PREFIX)
     })
 
@@ -28,7 +29,7 @@ test.describe('library bulk select', () => {
     })
 
     test.beforeEach(async ({ page }) => {
-        await login(page)
+        await login(page, BULK_USERNAME, BULK_PASSWORD)
     })
 
     test('Select button enters select mode and reveals bulk action bar', async ({ page }) => {

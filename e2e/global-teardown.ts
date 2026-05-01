@@ -21,15 +21,9 @@ try {
 const API_BASE = process.env.E2E_API_BASE_URL || process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000'
 const API_V1 = `${API_BASE}/v1`
 
-async function globalTeardown() {
-    const TEST_USER = process.env.TEST_USERNAME
-    const TEST_PASS = process.env.TEST_PASSWORD
-    if (!TEST_USER || !TEST_PASS) return
-
+async function purgeUserPlaylists(username: string, password: string): Promise<void> {
     const ctx = await request.newContext({ baseURL: API_BASE })
-    const login = await ctx.post(`${API_V1}/auth/login`, {
-        data: { username: TEST_USER, password: TEST_PASS },
-    })
+    const login = await ctx.post(`${API_V1}/auth/login`, { data: { username, password } })
     if (!login.ok()) { await ctx.dispose(); return }
 
     const plRes = await ctx.get(`${API_V1}/playlists`)
@@ -41,9 +35,24 @@ async function globalTeardown() {
             if (r.ok()) purged++
         }
     }
-    if (purged > 0) console.log(`[global-teardown] purged ${purged} e2e playlists`)
+    if (purged > 0) console.log(`[global-teardown] purged ${purged} playlists for ${username}`)
 
     await ctx.dispose()
+}
+
+async function globalTeardown() {
+    const users = [
+        { username: process.env.TEST_USERNAME, password: process.env.TEST_PASSWORD },
+        { username: process.env.E2E_EDITOR_USERNAME, password: process.env.E2E_EDITOR_PASSWORD },
+        { username: process.env.E2E_BULK_USERNAME, password: process.env.E2E_BULK_PASSWORD },
+        { username: process.env.E2E_IMPORT_USERNAME, password: process.env.E2E_IMPORT_PASSWORD },
+    ]
+
+    for (const u of users) {
+        if (u.username && u.password) {
+            await purgeUserPlaylists(u.username, u.password)
+        }
+    }
 }
 
 export default globalTeardown

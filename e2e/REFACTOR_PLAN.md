@@ -45,7 +45,7 @@ Requires app code changes (no test-only pass). ~4–8h.
 
 ---
 
-## Phase 3 — per-suite user isolation for destructive tests
+## Phase 3 — per-suite user isolation for destructive tests ✅ done
 
 **Priority: Medium.** Needed before raising worker count above 2.
 

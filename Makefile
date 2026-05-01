@@ -42,12 +42,10 @@ build:
 	npm run build
 
 .PHONY: test-e2e
-# workers=1 for dev — the full e2e/ suite shares player + queue + library
-# state across the test user; workers=2 races on player state and flakes
-# editor/queue/player tests. Mobile + prod live in their own (smaller) dirs
-# without that shared-state surface, so they're fine at 2.
+# Destructive specs (editor, bulk-select, import) run on isolated users (phase 3).
+# Workers=2 is safe: destructive specs can't corrupt the shared test-user library.
 test-e2e:
-	npx playwright test --project=dev --workers=1
+	npx playwright test --project=dev --workers=2
 
 .PHONY: test-e2e-prod
 test-e2e-prod:
@@ -173,7 +171,13 @@ test-e2e-local: e2e-api-up e2e-next-up
 	TEST_PASSWORD=e2e-TestPass-9917 \
 	E2E_ADMIN_USERNAME=e2e-admin \
 	E2E_ADMIN_PASSWORD=e2e-admin-pass \
-	npx playwright test --project=dev --workers=1
+	E2E_EDITOR_USERNAME=e2e-editor \
+	E2E_EDITOR_PASSWORD=e2e-EditorPass-1 \
+	E2E_BULK_USERNAME=e2e-bulk \
+	E2E_BULK_PASSWORD=e2e-BulkPass-1 \
+	E2E_IMPORT_USERNAME=e2e-import \
+	E2E_IMPORT_PASSWORD=e2e-ImportPass-1 \
+	npx playwright test --project=dev --workers=2
 
 .PHONY: test-e2e-local-mobile
 test-e2e-local-mobile: e2e-api-up e2e-next-up
