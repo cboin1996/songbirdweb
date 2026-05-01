@@ -6,7 +6,7 @@
 
 ---
 
-## Phase 1 — waitForTimeout → deterministic waits ✅ done (commit 877cbff)
+## Phase 1 — waitForTimeout → deterministic waits ✅ done (commits 877cbff, b93421c)
 
 Replaced 36 of 55 hard-coded sleeps. 19 remain — all inside `test.fixme()` or
 `test.skip(!!process.env.CI)` blocks, so they have zero impact on CI.
@@ -24,7 +24,7 @@ Replacement patterns used:
 
 ---
 
-## Phase 2 — data-testid pass on fragile CSS selectors
+## Phase 2 — data-testid pass on fragile CSS selectors ← next
 
 **Priority: High.** Any Tailwind refactor silently breaks these selectors.
 
