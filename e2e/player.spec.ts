@@ -167,14 +167,16 @@ test.describe('player bar', () => {
         expect(errors).toHaveLength(0)
     })
 
-    test.fixme('timestamps render in M:SS format', async ({ page }) => {
+    test('timestamps render in M:SS format', async ({ page }) => {
         await startPlayback(page)
-        await page.waitForTimeout(500)
 
         const progress = page.getByTestId('player-progress')
         await expect(progress).toBeVisible({ timeout: 5000 })
-        const text = await progress.textContent()
-        expect(text).toMatch(/\d+:\d{2}/)
+        // Progress bar renders both elapsed and remaining timestamps. Poll
+        // until the M:SS format is present — avoids racing on the first paint.
+        await expect.poll(async () =>
+            (await progress.textContent())?.match(/\d+:\d{2}/) ? true : false
+        , { timeout: 5000 }).toBe(true)
     })
 
     test('player shows "from Library" context link', async ({ page }) => {

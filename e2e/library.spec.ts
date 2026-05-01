@@ -342,32 +342,31 @@ test.describe('library page', () => {
         await expect(activeSpan).toHaveClass(/font-bold/)
     })
 
+    // FIXME: programmatic scrollIntoViewIfNeeded() doesn't trigger the rAF-debounced
+    // scroll handler that updates the active letter — only user wheel/touch events do.
+    // The active letter stays at "A" (initial first-letter highlight) instead of
+    // updating to the target. Selector fix is correct (was filter+has → now direct
+    // class on span) but the underlying issue is the test's scroll method.
+    // Either dispatch a wheel event or wait for letter-rail to expose a way to
+    // programmatically set the active letter.
     test.fixme('letter rail active letter updates when scrolling to a different section', async ({ page }) => {
         await page.goto(routes.library)
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
 
-        // Get all present letters
         const sections = page.locator('[data-letter]')
         const allLetters = await sections.evaluateAll(els =>
             els.map(e => e.getAttribute('data-letter')).filter(Boolean)
         )
         test.skip(allLetters.length < 2, 'need at least 2 letter sections to test scroll update')
 
-        const firstLetter = allLetters[0]
-        const targetLetter = allLetters[Math.floor(allLetters.length / 2)] // Pick a letter midway
+        const targetLetter = allLetters[Math.floor(allLetters.length / 2)]
 
-        // Scroll to the target letter section
         await page.locator(`[data-letter="${targetLetter}"]`).scrollIntoViewIfNeeded()
-        // Wait for rAF-debounced scroll handler to fire
-        await page.waitForTimeout(250)
 
-        // Check that the active letter is now the target letter
         const rail = page.locator('div.touch-none.select-none.cursor-pointer')
-        const activeSpan = rail.locator('span').filter({
-            has: page.locator('.text-sky-500.font-bold')
-        })
-        const activeText = await activeSpan.textContent()
-        expect(activeText?.trim()).toBe(targetLetter)
+        await expect.poll(async () =>
+            (await rail.locator('span.font-bold.text-sky-500').textContent())?.trim()
+        , { timeout: 5000 }).toBe(targetLetter)
     })
 
     test('active letter style is larger and bold blue (text-sky-500 font-bold)', async ({ page }) => {

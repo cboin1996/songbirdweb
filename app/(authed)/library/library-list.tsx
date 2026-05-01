@@ -845,6 +845,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                 </button>
                 <EditsBanner />
                 <button
+                    data-testid="save-all-offline"
                     onClick={saveAllOffline}
                     disabled={savingAll || !online}
                     title={!online ? 'go online to save songs for offline listening' : 'save all songs for offline listening'}
