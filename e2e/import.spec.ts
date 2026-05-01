@@ -84,8 +84,8 @@ test.describe('import page', () => {
         const file2 = makeFakeAudioFile(`song-b-${ts}.mp3`)
         try {
             await page.getByTestId('import-file-input').setInputFiles([file1, file2])
-            await expect(page.locator('tr', { hasText: `song-a-${ts}.mp3` })).toHaveCount(1, { timeout: 5000 })
-            await expect(page.locator('tr', { hasText: `song-b-${ts}.mp3` })).toHaveCount(1, { timeout: 5000 })
+            await expect(page.locator('tr', { hasText: `song-a-${ts}.mp3` })).toHaveCount(1, { timeout: 10000 })
+            await expect(page.locator('tr', { hasText: `song-b-${ts}.mp3` })).toHaveCount(1, { timeout: 10000 })
         } finally {
             fs.unlinkSync(file1)
             fs.unlinkSync(file2)

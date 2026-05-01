@@ -6,7 +6,6 @@ import { ExploreData, ExploreWindow, SongWithCount, RecentlyPlayedSong, Recently
 import { routes } from "../../lib/routes"
 import { usePlayer } from "../../components/player"
 import Song from "../../components/song"
-import { useScrollRestoration } from "../../lib/use-scroll-restoration"
 import { timeAgo } from "../../lib/time"
 
 const WINDOWS: { value: ExploreWindow; label: string }[] = [
@@ -126,7 +125,6 @@ export default function ExploreClient({ data, window: timeWindow }: { data: Expl
     const [viewFilter, setViewFilter] = useState<ViewFilter>(initialView)
     const [libraryIds, setLibraryIds] = useState<Set<string>>(new Set())
     const [search, setSearch] = useState(searchParams.get('q') ?? '')
-    useScrollRestoration()
 
     useEffect(() => {
         fetchLibrary().then(entries => setLibraryIds(new Set(entries.map(e => e.song_id))))

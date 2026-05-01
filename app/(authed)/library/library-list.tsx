@@ -856,7 +856,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                         publish eligible ({eligibleCount})
                     </button>
                 )}
-                <div className="flex gap-1 ml-auto">
+                <div className="flex gap-1 ml-auto md:ml-auto justify-center md:justify-end w-full md:w-auto">
                     {(['songs', 'artists', 'albums', 'genres', 'playlists'] as ViewMode[]).map(v => (
                         <button
                             key={v}

@@ -299,6 +299,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setManualNextIds(new Set())
         setQueue(q)
         if (shuffleRef.current) generateShuffleOrder(idx)
+        if ('mediaSession' in navigator) {
+            navigator.mediaSession.setActionHandler('previoustrack', skipPrev)
+            navigator.mediaSession.setActionHandler('nexttrack', skipNext)
+        }
         loadSong(playingSong, true)
         if (context !== undefined) {
             setPlayContext(context)
@@ -561,8 +565,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 audio!.play().catch(() => {})
             }
         }
-        function onPlay() { setIsPlaying(true); setIsBuffering(false); autoplayActivatedRef.current = true; if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing' }
-        function onPause() { setIsPlaying(false); setIsBuffering(false); if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused' }
+        function onPlay() { setIsPlaying(true); setIsBuffering(false); autoplayActivatedRef.current = true }
+        function onPause() { setIsPlaying(false); setIsBuffering(false) }
         function onLoadStart() { setIsBuffering(true); setBuffered(0) }
         function onWaiting() { setIsBuffering(true) }
         function onPlaying() { setIsBuffering(false) }
@@ -661,9 +665,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         })
         navigator.mediaSession.setActionHandler('previoustrack', skipPrev)
         navigator.mediaSession.setActionHandler('nexttrack', skipNext)
-        // Explicitly disable seek controls so iOS shows prev/next instead of +10/-10
-        try { navigator.mediaSession.setActionHandler('seekforward', null) } catch {}
-        try { navigator.mediaSession.setActionHandler('seekbackward', null) } catch {}
     }, [current, skipNext, skipPrev, savePosition])
 
     useEffect(() => {

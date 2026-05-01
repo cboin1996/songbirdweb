@@ -41,7 +41,7 @@ export default function ImportPage() {
     const CONCURRENCY = 5
     for (let i = 0; i < arr.length; i += CONCURRENCY) {
       await Promise.all(arr.slice(i, i + CONCURRENCY).map(async file => {
-        const tempId = crypto.randomUUID()
+        const tempId = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`
         const optimistic: ImportJobResult = {
           job_id: tempId,
           status: 'pending',
