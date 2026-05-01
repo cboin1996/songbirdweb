@@ -708,12 +708,24 @@ test.describe('editor modal', () => {
 
         // Click "Save to Library" — handleSave creates the edit job, polls until done,
         // then router.push to /library?song=<newId>. The modal unmounts on success.
+
+        // Capture ?song= via framenavigated event — the library scroll effect clears
+        // it from the URL almost immediately, so toHaveURL (polling) misses it.
+        let capturedSongId: string | null = null
+        page.on('framenavigated', frame => {
+            if (frame === page.mainFrame()) {
+                const m = frame.url().match(/\/library\?.*song=([a-f0-9-]+)/)
+                if (m) capturedSongId = m[1]
+            }
+        })
+
         await modal.getByRole('button', { name: /^Save to Library$/i }).click()
 
-        // Wait for the post-save navigation. Encoding can take ~30-60s; allow 90s.
-        await expect(page).toHaveURL(/\/library\?song=[a-f0-9-]+/, { timeout: 90_000 })
-        const newSongId = page.url().match(/[?&]song=([a-f0-9-]+)/)?.[1]
-        expect(newSongId, 'New song ID should be present in URL').toBeTruthy()
+        // Wait for navigation to library. Encoding can take ~30-60s; allow 90s.
+        await page.waitForURL(/\/library/, { timeout: 90_000 })
+
+        expect(capturedSongId, 'New song ID should be present in redirect URL').toBeTruthy()
+        const newSongId = capturedSongId!
         expect(newSongId, 'New song ID should differ from origin').not.toBe(originSongId)
 
         // Cleanup: delete the new child song via API. 200/204 success, 404 already gone — both fine.
@@ -739,11 +751,19 @@ test.describe('editor modal', () => {
         // Toggle Normalize for an unambiguous param change (volume slider is a ScrubInput, not a real range)
         await modal1.locator('label').filter({ hasText: /normalize/i }).locator('input[type="checkbox"]').check()
 
+        // Capture the child song ID from the brief ?song= URL before the app clears it.
+        let capturedChildId: string | null = null
+        page.on('framenavigated', frame => {
+            if (frame === page.mainFrame()) {
+                const m = frame.url().match(/\/library\?.*song=([a-f0-9-]+)/)
+                if (m) capturedChildId = m[1]
+            }
+        })
         await modal1.getByRole('button', { name: /^Save to Library$/i }).click()
 
         // After save, app router.push'es to /library?song=<newId>
-        await expect(page).toHaveURL(/\/library\?song=[a-f0-9-]+/, { timeout: 90_000 })
-        const childSongId = page.url().match(/[?&]song=([a-f0-9-]+)/)?.[1]
+        await page.waitForURL(/\/library/, { timeout: 90_000 })
+        const childSongId = capturedChildId ?? page.url().match(/[?&]song=([a-f0-9-]+)/)?.[1]
         expect(childSongId, 'Could not extract child song ID').toBeTruthy()
         expect(childSongId, 'Child song ID should differ from parent').not.toBe(parentSongId)
 

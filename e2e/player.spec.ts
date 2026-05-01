@@ -473,12 +473,10 @@ test.describe('player bar', () => {
         await kebab.click()
 
         // Click "Play next"
-        const insertSavePromise = page.waitForResponse(
-            r => r.url().includes('/player/state') && r.request().method() === 'PUT',
-            { timeout: 8000 }
-        )
         await page.getByRole('button', { name: /play next/i }).click()
-        await insertSavePromise
+        // insertNext debounces scheduleSave (~2s) before writing localStorage —
+        // no server response to hook on; guard with explicit debounce wait.
+        await page.waitForTimeout(2500)
 
         // Re-read shuffle_seed
         const seedAfter = await page.evaluate(() => {

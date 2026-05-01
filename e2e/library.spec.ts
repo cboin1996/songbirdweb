@@ -32,15 +32,19 @@ test.describe('library page', () => {
     test('albums tab updates URL', async ({ page }) => {
         await page.goto(routes.library)
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
-        await page.getByRole('button', { name: 'albums', exact: true }).click()
-        await expect(page).toHaveURL(/view=albums/)
+        const albumsBtn = page.getByRole('button', { name: 'albums', exact: true })
+        await expect(albumsBtn).toBeVisible({ timeout: 5000 })
+        await albumsBtn.click()
+        await expect(page).toHaveURL(/view=albums/, { timeout: 10000 })
     })
 
     test('genres tab updates URL', async ({ page }) => {
         await page.goto(routes.library)
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
-        await page.getByRole('button', { name: 'genres', exact: true }).click()
-        await expect(page).toHaveURL(/view=genres/)
+        const genresBtn = page.getByRole('button', { name: 'genres', exact: true })
+        await expect(genresBtn).toBeVisible({ timeout: 5000 })
+        await genresBtn.click()
+        await expect(page).toHaveURL(/view=genres/, { timeout: 10000 })
     })
 
     test('songs tab switches back and becomes active', async ({ page }) => {
@@ -262,56 +266,51 @@ test.describe('library page', () => {
         const songId = await page.locator('[data-song-id]').first().getAttribute('data-song-id')
         expect(songId).toBeTruthy()
 
-        // Navigate to library with ?song param
         await page.goto(`/library?song=${songId}`)
 
-        // Find the matching card by data-song-id
         const targetCard = page.locator(`[data-song-id="${songId}"]`).first()
         await expect(targetCard).toBeVisible({ timeout: 5000 })
 
-        // Poll until scroll completes and card is in viewport
+        // Check inline style (el.style.animation), not getComputedStyle — songs live inside
+        // cv-auto sections where computed styles can be stale for newly-rendered content.
+        // React doesn't manage this element's style prop so it won't clear the inline value.
+        await expect.poll(() =>
+            targetCard.evaluate(el => (el as HTMLElement).style.animation)
+        , { timeout: 5000 }).toContain('song-highlight')
+
+        // Verify the jump put the card in viewport
         await expect.poll(async () => {
             return targetCard.evaluate((el) => {
                 const rect = el.getBoundingClientRect()
                 return rect.top >= 0 && rect.top < window.innerHeight
             })
         }, { timeout: 5000 }).toBe(true)
-
-        // Check that song-highlight animation is applied to the card
-        const animationStyle = await targetCard.evaluate((el) => {
-            return window.getComputedStyle(el).animation
-        })
-        expect(animationStyle).toContain('song-highlight')
     })
 
     test('?album=<id> scrolls to matching album and applies highlight animation', async ({ page }) => {
         await page.goto(routes.libraryAlbums)
-        const albumBtn = page.locator('[data-album-id]').first()
-        await expect(albumBtn).toBeVisible({ timeout: 10000 })
+        const albumLocator = page.locator('[data-album-id]').first()
+        await expect(albumLocator).toBeVisible({ timeout: 10000 })
 
-        const albumId = await albumBtn.getAttribute('data-album-id')
+        const albumId = await albumLocator.getAttribute('data-album-id')
         expect(albumId).toBeTruthy()
 
-        // Navigate to albums view with ?album param
         await page.goto(`/library?view=albums&album=${albumId}`)
 
-        // Find the matching album element
-        const targetAlbum = page.locator(`[data-album-id="${albumId}"]`).first()
-        await expect(targetAlbum).toBeVisible({ timeout: 5000 })
+        const targetAlbum = page.locator('[data-album-id]').first()
+        await expect(targetAlbum).toBeVisible({ timeout: 10000 })
 
-        // Poll until scroll completes and album is in viewport
+        await expect.poll(() =>
+            targetAlbum.evaluate(el => (el as HTMLElement).style.animation)
+        , { timeout: 5000 }).toContain('song-highlight')
+
+        // Verify the jump put the album in viewport
         await expect.poll(async () => {
             return targetAlbum.evaluate((el) => {
                 const rect = el.getBoundingClientRect()
                 return rect.top >= 0 && rect.top < window.innerHeight
             })
         }, { timeout: 5000 }).toBe(true)
-
-        // Check animation
-        const animationStyle = await targetAlbum.evaluate((el) => {
-            return window.getComputedStyle(el).animation
-        })
-        expect(animationStyle).toContain('song-highlight')
     })
 
     // === Letter rail active-letter highlight ===

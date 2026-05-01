@@ -12,7 +12,7 @@ test.describe('explore page', () => {
 
     test('page loads without crashing', async ({ page }) => {
         await page.goto(routes.explore)
-        await expect(page.locator('main')).toBeVisible({ timeout: 10000 })
+        await expect(page.locator('main').first()).toBeVisible({ timeout: 10000 })
     })
 
     test('window tabs visible: today, week, all time', async ({ page }) => {
@@ -75,7 +75,7 @@ test.describe('explore page', () => {
     test('search input is visible', async ({ page }) => {
         await page.goto(routes.explore)
         // Placeholder was simplified to just "search…" when toolbar was redesigned.
-        await expect(page.locator('main').getByPlaceholder(/search/i)).toBeVisible({ timeout: 5000 })
+        await expect(page.locator('main').first().getByPlaceholder(/search/i)).toBeVisible({ timeout: 5000 })
     })
 
     test('search filters results and updates URL', async ({ page }) => {
@@ -83,7 +83,7 @@ test.describe('explore page', () => {
         page.on('pageerror', err => { if (!ignoreError(err.message)) errors.push(err.message) })
 
         await page.goto(routes.explore)
-        const input = page.getByPlaceholder(/search/i)
+        const input = page.getByPlaceholder(/search/i).first()
         await expect(input).toBeVisible({ timeout: 5000 })
         await input.fill('jolene')
         await expect(page).toHaveURL(/q=jolene/, { timeout: 3000 })
@@ -93,7 +93,7 @@ test.describe('explore page', () => {
 
     test('clearing search removes q param from URL', async ({ page }) => {
         await page.goto('/explore?q=jolene')
-        const input = page.getByPlaceholder(/search/i)
+        const input = page.getByPlaceholder(/search/i).first()
         await expect(input).toBeVisible({ timeout: 5000 })
         await input.clear()
         await expect(page).not.toHaveURL(/q=/, { timeout: 3000 })
@@ -143,7 +143,7 @@ test.describe('explore page', () => {
         // Format: "added Xs ago", "Xm ago", "Xh ago", "Xd ago", "Xmo ago",
         // "Xy ago", or "added just now".
         const re = /(\d+)(s|m|h|d|mo|y) ago|just now/i
-        const html = await page.locator('main').innerText()
+        const html = await page.locator('main').first().innerText()
         expect(html, `expected relative-time text in explore page: ${html}`).toMatch(re)
     })
 
@@ -157,7 +157,7 @@ test.describe('explore page', () => {
         const cardCount = await cards.count()
         test.skip(cardCount === 0, 'no recently-played history')
         const re = /(\d+)(s|m|h|d|mo|y) ago|just now/i
-        const html = await page.locator('main').innerText()
+        const html = await page.locator('main').first().innerText()
         expect(html).toMatch(re)
     })
 
@@ -194,7 +194,7 @@ test.describe('explore page', () => {
 
     test('view filter persists in URL', async ({ page }) => {
         await page.goto(routes.explore)
-        await expect(page.locator('main')).toBeVisible({ timeout: 10000 })
+        await expect(page.locator('main').first()).toBeVisible({ timeout: 10000 })
 
         // Click the "you" filter button
         const youBtn = page.getByRole('button', { name: 'you', exact: true })
