@@ -28,7 +28,6 @@ test.describe('smoke: login → library → play', () => {
         // pause and resume to confirm playback toggles work end-to-end
         const playPause = page.getByTestId('player-play-pause')
         await playPause.click()
-        await page.waitForTimeout(300)
         await playPause.click()
 
         // logout returns to root

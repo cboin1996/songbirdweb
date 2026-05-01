@@ -264,18 +264,18 @@ test.describe('library page', () => {
 
         // Navigate to library with ?song param
         await page.goto(`/library?song=${songId}`)
-        await page.waitForTimeout(500)
 
         // Find the matching card by data-song-id
         const targetCard = page.locator(`[data-song-id="${songId}"]`).first()
         await expect(targetCard).toBeVisible({ timeout: 5000 })
 
-        // Check that the card is in viewport
-        const inViewport = await targetCard.evaluate((el) => {
-            const rect = el.getBoundingClientRect()
-            return rect.top >= 0 && rect.top < window.innerHeight
-        })
-        expect(inViewport).toBe(true)
+        // Poll until scroll completes and card is in viewport
+        await expect.poll(async () => {
+            return targetCard.evaluate((el) => {
+                const rect = el.getBoundingClientRect()
+                return rect.top >= 0 && rect.top < window.innerHeight
+            })
+        }, { timeout: 5000 }).toBe(true)
 
         // Check that song-highlight animation is applied to the card
         const animationStyle = await targetCard.evaluate((el) => {
@@ -294,18 +294,18 @@ test.describe('library page', () => {
 
         // Navigate to albums view with ?album param
         await page.goto(`/library?view=albums&album=${albumId}`)
-        await page.waitForTimeout(500)
 
         // Find the matching album element
         const targetAlbum = page.locator(`[data-album-id="${albumId}"]`).first()
         await expect(targetAlbum).toBeVisible({ timeout: 5000 })
 
-        // Check viewport
-        const inViewport = await targetAlbum.evaluate((el) => {
-            const rect = el.getBoundingClientRect()
-            return rect.top >= 0 && rect.top < window.innerHeight
-        })
-        expect(inViewport).toBe(true)
+        // Poll until scroll completes and album is in viewport
+        await expect.poll(async () => {
+            return targetAlbum.evaluate((el) => {
+                const rect = el.getBoundingClientRect()
+                return rect.top >= 0 && rect.top < window.innerHeight
+            })
+        }, { timeout: 5000 }).toBe(true)
 
         // Check animation
         const animationStyle = await targetAlbum.evaluate((el) => {

@@ -78,7 +78,7 @@ test.describe('info page', () => {
         page.on('pageerror', err => errors.push(err.message))
 
         await page.goto(routes.info)
-        await page.waitForTimeout(1000)
+        await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {})
 
         const realErrors = errors.filter(e => !ignoreError(e))
         expect(realErrors, `Console errors: ${realErrors.join('\n')}`).toHaveLength(0)

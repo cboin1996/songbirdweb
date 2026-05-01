@@ -47,10 +47,8 @@ test.describe('player bar', () => {
 
         // click to pause
         await btn.click()
-        await page.waitForTimeout(400)
         // click to resume
         await btn.click()
-        await page.waitForTimeout(400)
 
         expect(errors).toHaveLength(0)
     })
@@ -63,7 +61,7 @@ test.describe('player bar', () => {
 
         const before = await btn.getAttribute('class')
         await btn.click()
-        await page.waitForTimeout(200)
+        await expect(btn).not.toHaveAttribute('class', before || '')
         const after = await btn.getAttribute('class')
         expect(after).not.toEqual(before)
 
@@ -121,7 +119,7 @@ test.describe('player bar', () => {
             const cls = await btn.getAttribute('class') ?? ''
             if (cls.includes('text-gray-400')) break
             await btn.click()
-            await page.waitForTimeout(100)
+            await expect.poll(() => btn.getAttribute('class'), { timeout: 2000 }).not.toBe(cls)
         }
 
         // off → one (shows "1" superscript)
@@ -147,8 +145,6 @@ test.describe('player bar', () => {
         // open queue
         await btn.click()
         await expect(btn).toHaveClass(/text-sky-500/, { timeout: 2000 })
-        // panel may be present if queue has songs
-        await page.waitForTimeout(200)
 
         // close queue
         await btn.click()
@@ -160,7 +156,6 @@ test.describe('player bar', () => {
         page.on('pageerror', err => { if (!ignoreError(err.message)) errors.push(err.message) })
 
         await startPlayback(page)
-        await page.waitForTimeout(500)
 
         const progressBar = page.getByTestId('player-progress')
         await expect(progressBar).toBeVisible({ timeout: 5000 })
@@ -169,7 +164,6 @@ test.describe('player bar', () => {
         if (box) {
             await page.mouse.click(box.x + box.width * 0.5, box.y + box.height / 2)
         }
-        await page.waitForTimeout(300)
         expect(errors).toHaveLength(0)
     })
 
@@ -197,7 +191,7 @@ test.describe('player bar', () => {
         page.on('pageerror', err => { if (!ignoreError(err.message)) errors.push(err.message) })
 
         await startPlayback(page)
-        await page.waitForTimeout(2000)
+        await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {})
 
         expect(errors, `Console errors: ${errors.join('\n')}`).toHaveLength(0)
     })
@@ -366,7 +360,7 @@ test.describe('player bar', () => {
         // Open queue panel
         const queueToggle = page.getByTestId('player-queue-toggle')
         await queueToggle.click()
-        await page.waitForTimeout(300)
+        await expect(page.getByTestId('player-queue-panel')).toBeVisible({ timeout: 3000 })
 
         // Get queue rows and verify at least 2 exist
         const rows = page.locator('[data-qi]')
@@ -381,8 +375,12 @@ test.describe('player bar', () => {
         // Find drag handle (FaBars span.cursor-grab) in second row and drag it to first position
         const dragHandle = rows.nth(1).locator('span.cursor-grab').first()
         await expect(dragHandle).toBeVisible({ timeout: 3000 })
+        const dragSavePromise1 = page.waitForResponse(
+            r => r.url().includes('/player/state') && r.request().method() === 'PUT',
+            { timeout: 8000 }
+        )
         await dragHandle.dragTo(rows.nth(0))
-        await page.waitForTimeout(3500) // debounce delay
+        await dragSavePromise1
 
         // Assert shuffle_seed is unchanged
         const seedAfter = await page.evaluate(() => {
@@ -404,13 +402,15 @@ test.describe('player bar', () => {
 
         // Ensure shuffle is OFF
         const shuffleBtn = page.getByTestId('player-shuffle').filter({ visible: true }).first()
-        if (await shuffleBtn.getAttribute('aria-pressed') === 'true') await shuffleBtn.click()
-        await page.waitForTimeout(300)
+        if (await shuffleBtn.getAttribute('aria-pressed') === 'true') {
+            await shuffleBtn.click()
+            await expect(shuffleBtn).toHaveAttribute('aria-pressed', 'false')
+        }
 
         // Open queue panel
         const queueToggle = page.getByTestId('player-queue-toggle')
         await queueToggle.click()
-        await page.waitForTimeout(300)
+        await expect(page.getByTestId('player-queue-panel')).toBeVisible({ timeout: 3000 })
 
         // Get queue rows
         const rows = page.locator('[data-qi]')
@@ -425,8 +425,12 @@ test.describe('player bar', () => {
         // Drag second row to first position
         const dragHandle = rows.nth(1).locator('span.cursor-grab').first()
         await expect(dragHandle).toBeVisible({ timeout: 3000 })
+        const dragSavePromise2 = page.waitForResponse(
+            r => r.url().includes('/player/state') && r.request().method() === 'PUT',
+            { timeout: 8000 }
+        )
         await dragHandle.dragTo(rows.nth(0))
-        await page.waitForTimeout(3500) // debounce delay
+        await dragSavePromise2
 
         // Verify second song moved to first position
         const newFirstRowName = await page.locator('[data-qi]').nth(0).locator('p').first().textContent()
@@ -464,14 +468,17 @@ test.describe('player bar', () => {
 
         // Hover and open kebab menu
         await targetCard.hover()
-        await page.waitForTimeout(200)
         const kebab = targetCard.getByTestId('song-kebab')
         await expect(kebab).toBeVisible({ timeout: 3000 })
         await kebab.click()
 
         // Click "Play next"
+        const insertSavePromise = page.waitForResponse(
+            r => r.url().includes('/player/state') && r.request().method() === 'PUT',
+            { timeout: 8000 }
+        )
         await page.getByRole('button', { name: /play next/i }).click()
-        await page.waitForTimeout(2000) // wait for save
+        await insertSavePromise
 
         // Re-read shuffle_seed
         const seedAfter = await page.evaluate(() => {
@@ -506,7 +513,7 @@ test.describe('player bar', () => {
         // Open queue panel
         const queueToggle = page.getByTestId('player-queue-toggle')
         await queueToggle.click()
-        await page.waitForTimeout(300)
+        await expect(page.getByTestId('player-queue-panel')).toBeVisible({ timeout: 3000 })
 
         // Find a non-current row and remove it
         const rows = page.locator('[data-qi]')
@@ -517,8 +524,12 @@ test.describe('player bar', () => {
             // Remove second row (skip current song)
             const removeBtn = rows.nth(1).locator('button[aria-label*="Remove"]').first()
             if (await removeBtn.isVisible()) {
+                const removeSavePromise = page.waitForResponse(
+                    r => r.url().includes('/player/state') && r.request().method() === 'PUT',
+                    { timeout: 8000 }
+                )
                 await removeBtn.click()
-                await page.waitForTimeout(2000) // wait for save
+                await removeSavePromise
             }
 
             // Re-read shuffle_seed

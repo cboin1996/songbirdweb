@@ -71,8 +71,8 @@ test.describe('editor modal', () => {
         await expect(modal.getByRole('button', { name: 'audio' })).toBeVisible()
         await expect(modal.getByRole('button', { name: 'properties' })).toBeVisible()
 
-        // give waveform time to load
-        await page.waitForTimeout(3000)
+        // wait for waveform to fully load (preview button is the ready signal)
+        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 15000 })
 
         const abortErrors = errors.filter(e => /AbortError/i.test(e))
         expect(abortErrors, `AbortErrors found: ${abortErrors.join('\n')}`).toHaveLength(0)
@@ -287,14 +287,14 @@ test.describe('editor modal', () => {
         page.on('pageerror', err => overlayErrors.push(err.message))
 
         const modal = await openEditorFromLibrary(page)
-        await page.waitForTimeout(1000)
+        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
         // close modal (triggers WaveSurfer destroy)
         await modal.getByTestId('editor-close').click()
         await expect(modal).not.toBeVisible()
 
         // wait for async AbortError to surface (if any)
-        await page.waitForTimeout(1000)
+        await page.waitForTimeout(500)
 
         const abortErrors = overlayErrors.filter(e => /AbortError/i.test(e))
         expect(abortErrors, `AbortErrors after close: ${abortErrors.join('\n')}`).toHaveLength(0)
@@ -399,7 +399,7 @@ test.describe('editor modal', () => {
         // preview with the cut active — actual button title is
         // "preview with edits" (toggles to "stop preview" while running).
         await modal.locator('button[title="preview with edits"]').click()
-        await page.waitForTimeout(800)
+        await expect(modal.locator('button[title="stop preview"]')).toBeVisible({ timeout: 5000 })
         await modal.locator('button[title="stop preview"]').click()
 
         const realErrors = errors.filter(e => !/AbortError/i.test(e) && !/Failed to fetch/i.test(e) && !/favicon/i.test(e))
@@ -539,7 +539,6 @@ test.describe('editor modal', () => {
         if (box) {
             await page.mouse.click(box.x + box.width * 0.7, box.y + box.height / 2)
         }
-        await page.waitForTimeout(300)
 
         await modal.locator('button[title="stop preview"]').click()
 
@@ -604,10 +603,8 @@ test.describe('editor modal', () => {
 
         // press l (seek forward 5s)
         await modal.press('l')
-        await page.waitForTimeout(100)
         // press h (seek backward 5s)
         await modal.press('h')
-        await page.waitForTimeout(100)
 
         const realErrors = errors.filter(e => !/AbortError/i.test(e) && !/Failed to fetch/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e) && !/404/i.test(e))
         expect(realErrors, `Errors: ${realErrors.join('\n')}`).toHaveLength(0)

@@ -107,7 +107,7 @@ test.describe('download page', () => {
         page.on('pageerror', err => { if (!ignoreError(err.message)) errors.push(err.message) })
 
         await page.goto(routes.download)
-        await page.waitForTimeout(1000)
+        await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {})
         expect(errors, `Console errors: ${errors.join('\n')}`).toHaveLength(0)
     })
 
