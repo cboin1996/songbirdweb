@@ -64,21 +64,6 @@ jobs:
             make_target: test-e2e-prod
             needs_dev_server: false
     name: e2e (${{ matrix.project }})
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_DB: songbirdapi
-          POSTGRES_USER: songbirdapi
-          POSTGRES_PASSWORD: songbirdapi
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
     steps:
       - uses: actions/checkout@v4
 
@@ -93,70 +78,12 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps ${{ matrix.browser }}
 
-      - name: Create data directory
-        run: mkdir -p data/downloads
-
-      - name: Run migrations
-        run: |
-          docker run --rm --network host \
-            --entrypoint alembic \
-            -e ENV=test \
-            -e POSTGRES_HOST=localhost \
-            -e POSTGRES_PORT=5432 \
-            -e POSTGRES_USER=songbirdapi \
-            -e POSTGRES_PASSWORD=songbirdapi \
-            -e POSTGRES_DB=songbirdapi \
-            -e API_KEY=ci-test-key \
-            -e JWT_SECRET=ci-test-secret \
-            cboin/songbirdapi:latest upgrade head
-
-      - name: Start API
-        run: |
-          docker run -d --name songbirdapi --network host \
-            -e ENV=test \
-            -e POSTGRES_HOST=localhost \
-            -e POSTGRES_PORT=5432 \
-            -e POSTGRES_USER=songbirdapi \
-            -e POSTGRES_PASSWORD=songbirdapi \
-            -e POSTGRES_DB=songbirdapi \
-            -e API_KEY=ci-test-key \
-            -e JWT_SECRET=ci-test-secret \
-            -e ADMIN_USERNAME=e2e-admin \
-            -e ADMIN_EMAIL=e2e-admin@ci.local \
-            -e ADMIN_PASSWORD=e2e-admin-pass \
-            -e CORS_ORIGINS=http://localhost:3000,http://localhost:6996 \
-            -v $(pwd)/data:/songbirdapi/data \
-            cboin/songbirdapi:latest
-
-      - name: Wait for API
-        run: |
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:8000/v1/version; then
-              echo "API ready"
-              exit 0
-            fi
-            sleep 2
-          done
-          docker logs songbirdapi
-          exit 1
+      - name: Start API stack
+        run: make e2e-api-up E2E_API_PORT=8000 E2E_WEB_PORT=3000
 
       - name: Start Next.js dev server
         if: matrix.needs_dev_server
-        env:
-          NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
-        run: npm run dev &
-
-      - name: Wait for Next.js
-        if: matrix.needs_dev_server
-        run: |
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:3000; then
-              echo "Next.js ready"
-              exit 0
-            fi
-            sleep 2
-          done
-          exit 1
+        run: make e2e-next-up E2E_WEB_PORT=3000 E2E_API_PORT=8000
 
       - name: Run E2E tests (${{ matrix.project }})
         env:

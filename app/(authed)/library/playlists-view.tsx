@@ -277,7 +277,7 @@ export default function PlaylistsView({
                             key={pl.id}
                             onClick={() => openModal(pl)}
                             onContextMenu={e => openContextMenu(pl, e)}
-                            className="group flex flex-col gap-2 rounded-lg p-2 text-left transition-colors hover:bg-gray-100 dark:hover:bg-gray-900"
+                            className="group flex flex-col gap-2 rounded-lg p-2 text-left transition-colors hover:bg-gray-100 dark:hover:bg-gray-900 select-none"
                         >
                             <div className={`relative w-full aspect-square rounded-lg flex items-center justify-center ${plBg(pl.id)} ${loadingId === pl.id ? 'opacity-60' : ''}`}>
                                 {loadingId === pl.id

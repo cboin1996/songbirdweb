@@ -12,7 +12,7 @@ test.describe('admin page', () => {
 
     test('admin page loads for admin user', async ({ page }) => {
         await page.goto(routes.admin)
-        await expect(page.locator('main')).toBeVisible({ timeout: 10000 })
+        await expect(page.locator('main').filter({ visible: true })).toBeVisible({ timeout: 10000 })
     })
 
     test('system stats section renders', async ({ page }) => {

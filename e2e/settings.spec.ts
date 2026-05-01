@@ -1,7 +1,7 @@
 import { routes } from './routes'
 import { test, expect } from '@playwright/test'
 
-const API_BASE = `http://${process.env.NEXT_PUBLIC_API_HOST ?? 'localhost'}:8000/v1`
+const API_BASE = `${process.env.E2E_API_BASE_URL ?? `http://${process.env.NEXT_PUBLIC_API_HOST ?? 'localhost'}:8000`}/v1`
 const TEST_USER = 'test_pw_user'
 const TEST_EMAIL = 'test_pw@songbird.test'
 const TEST_INITIAL_PW = 'InitialPass1!'

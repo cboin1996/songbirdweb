@@ -16,7 +16,6 @@ import { DownloadedSong, downloadSongViaUrl, downloadSongToFile, addToLibrary, f
 import { usePlayer } from "./player";
 import { routes } from "../lib/routes";
 import Song from "./song";
-import { useScrollRestoration } from "../lib/use-scroll-restoration";
 import Spinner from "./spinner";
 import { FaX } from "react-icons/fa6";
 
@@ -32,8 +31,6 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
     const [readySong, setReadySong] = useState<DownloadedSong | null>(null)
     const inputRef = useRef<HTMLInputElement>(null)
     const { play, current } = usePlayer()
-    useScrollRestoration()
-
     useEffect(() => {
         fetchLibrary().then(entries => setLibraryIds(new Set(entries.map(e => e.song_id))))
     }, [])

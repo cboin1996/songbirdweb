@@ -62,15 +62,15 @@ const AlbumCard = memo(function AlbumCard({ album, isCompact, isActive, isPlayin
         return (
             <button
                 onClick={onClick}
-                className="flex items-center gap-3 w-full text-left rounded-md p-2 transition-colors hover:bg-gray-100 dark:hover:bg-gray-900"
+                className="flex items-center gap-3 w-full text-left rounded-md p-3 transition-colors hover:bg-gray-100 dark:hover:bg-gray-900 select-none"
             >
                 {smallArt
-                    ? <Image src={smallArt} alt="" width={40} height={40} className="rounded shrink-0" unoptimized={useLocalArt} />
-                    : <div className="w-10 h-10 rounded shrink-0 bg-gray-100 dark:bg-gray-800 flex items-center justify-center"><FaMusic size={12} className="text-gray-400" /></div>
+                    ? <Image src={smallArt} alt="" width={48} height={48} className="rounded shrink-0 w-12 h-12" unoptimized={useLocalArt} />
+                    : <div className="w-12 h-12 rounded shrink-0 bg-gray-100 dark:bg-gray-800 flex items-center justify-center"><FaMusic size={14} className="text-gray-400" /></div>
                 }
-                <div className="flex flex-col min-w-0 flex-1">
-                    <span className={`text-sm font-medium truncate${isActive ? ' text-sky-500' : ''}`}>{album.collectionName}</span>
-                    <span className="text-xs text-sky-500 truncate">{album.artistName} · {album.songs.length} songs</span>
+                <div className="flex flex-col min-w-0 flex-1 gap-0.5">
+                    <span className={`text-base font-medium truncate${isActive ? ' text-sky-500' : ''}`}>{album.collectionName}</span>
+                    <span className="text-sm text-sky-500 truncate">{album.artistName} · {album.songs.length} songs</span>
                 </div>
                 {isActive && isPlaying
                     ? <FaPause size={10} className="text-sky-500 shrink-0 mr-1" />
@@ -460,6 +460,11 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         setScrubLetter(null)
     }
 
+    function handleBarTouchEnd(e: React.TouchEvent) {
+        scrubbing.current = false
+        setScrubLetter(null)
+    }
+
     // Scroll restore: relying on Next.js + browser native back-button restore.
     // Forward-nav scroll-to-song uses ?song=<uuid> (deep-link in player). Letter rail
     // gives 1-tap jump-anywhere. No manual sessionStorage scroll handling — the
@@ -812,7 +817,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                         // On mobile, entering select mode is via long-press;
                         // hide the entry-point button. Keep visible while in
                         // select mode so users can cancel.
-                        className={`items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors border min-h-[36px] ${selectMode ? 'flex bg-sky-500 text-white border-sky-500' : 'hidden md:flex bg-[var(--background)]/90 backdrop-blur-md text-gray-400 hover:text-sky-500 border-gray-200 dark:border-gray-800 hover:border-sky-500'}`}
+                        className={`items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors border min-h-[36px] ${selectMode ? 'flex bg-sky-500 text-white border-sky-500' : viewMode === 'songs' ? 'hidden md:flex bg-[var(--background)]/90 backdrop-blur-md text-gray-400 hover:text-sky-500 border-gray-200 dark:border-gray-800 hover:border-sky-500' : 'hidden'}`}
                     >
                         {selectMode
                             ? selectedIds.size > 0
@@ -851,7 +856,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                         publish eligible ({eligibleCount})
                     </button>
                 )}
-                <div className="flex gap-1 ml-auto">
+                <div className="flex gap-1 ml-auto md:ml-auto justify-center md:justify-end w-full md:w-auto">
                     {(['songs', 'artists', 'albums', 'genres', 'playlists'] as ViewMode[]).map(v => (
                         <button
                             key={v}
@@ -1006,35 +1011,37 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
             {/* Bulk action bar */}
             {selectMode && selectedIds.size > 0 && (
                 <div className="fixed bottom-24 left-0 right-0 z-50 flex justify-center px-4 pointer-events-none">
-                    <div className="pointer-events-auto bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-2xl px-4 py-3 flex gap-3 items-center">
+                    <div className="pointer-events-auto bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-2xl px-3 py-3 flex flex-wrap gap-2 items-center justify-center">
                         {bulkLoading ? (
                             <span className="text-sm text-gray-500">Working…</span>
                         ) : (
                             <>
                                 <button
                                     onClick={handleBulkRemoveFromLibrary}
-                                    className="px-4 py-2 rounded-xl text-sm font-medium bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 active:bg-red-200 touch-manipulation min-h-[44px]"
+                                    className="px-3 py-2 rounded-xl text-sm font-medium bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 active:bg-red-200 touch-manipulation min-h-[44px]"
                                 >
                                     Remove
                                 </button>
                                 <button
                                     onClick={bulkSaveOffline}
-                                    className="px-4 py-2 rounded-xl text-sm font-medium bg-sky-50 dark:bg-sky-950/40 text-sky-600 dark:text-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900/50 active:bg-sky-200 touch-manipulation min-h-[44px]"
+                                    className="px-3 py-2 rounded-xl text-sm font-medium bg-sky-50 dark:bg-sky-950/40 text-sky-600 dark:text-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900/50 active:bg-sky-200 touch-manipulation min-h-[44px]"
                                 >
-                                    Save offline
+                                    <span className="hidden sm:inline">Save offline</span>
+                                    <span className="sm:hidden">Offline</span>
                                 </button>
                                 <button
                                     onClick={bulkDownload}
-                                    className="px-4 py-2 rounded-xl text-sm font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 active:bg-gray-300 touch-manipulation min-h-[44px]"
+                                    className="px-3 py-2 rounded-xl text-sm font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 active:bg-gray-300 touch-manipulation min-h-[44px]"
                                 >
                                     Download
                                 </button>
                                 {[...selectedIds].some(id => cachedIds.has(id)) && (
                                     <button
                                         onClick={bulkRemoveOffline}
-                                        className="px-4 py-2 rounded-xl text-sm font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 active:bg-gray-300 touch-manipulation min-h-[44px]"
+                                        className="px-3 py-2 rounded-xl text-sm font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 active:bg-gray-300 touch-manipulation min-h-[44px]"
                                     >
-                                        Remove offline
+                                        <span className="hidden sm:inline">Remove offline</span>
+                                        <span className="sm:hidden">Rm offline</span>
                                     </button>
                                 )}
                                 {playlists.length > 0 && (
@@ -1082,6 +1089,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                         onPointerMove={handleBarPointerMove}
                         onPointerUp={handleBarPointerUp}
                         onPointerCancel={() => { scrubbing.current = false; setScrubLetter(null) }}
+                        onTouchEnd={handleBarTouchEnd}
                     >
                         {ALPHABET.map(letter => (
                             <span

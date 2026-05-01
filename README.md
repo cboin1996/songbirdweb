@@ -31,10 +31,10 @@ npm install
 
 **2. Configure the API host**
 
-`.env.development` already sets `NEXT_PUBLIC_API_HOST=localhost`. If your API runs elsewhere, override it:
+`.env.development` leaves `NEXT_PUBLIC_API_BASE_URL` empty (defaults to `http://localhost:8000`). Override in `.env.local` if your API runs elsewhere:
 
 ```bash
-echo "NEXT_PUBLIC_API_HOST=192.168.1.10" > .env.local
+echo "NEXT_PUBLIC_API_BASE_URL=http://192.168.1.10:8000" > .env.local
 ```
 
 **3. Run the dev server**
@@ -54,7 +54,7 @@ npm run start
 
 ```bash
 docker build -t songbirdweb:latest .
-docker run -e NEXT_PUBLIC_API_HOST=<api-host> -p 3000:3000 songbirdweb:latest
+docker run -e NEXT_PUBLIC_API_BASE_URL=http://<api-host>:8000 -p 3000:3000 songbirdweb:latest
 ```
 
 The Dockerfile uses the Next.js standalone output and runs as a non-root user on port 3000.
@@ -63,11 +63,12 @@ The Dockerfile uses the Next.js standalone output and runs as a non-root user on
 
 | Variable | Required | Default (dev) | Description |
 |---|---|---|---|
-| `NEXT_PUBLIC_API_HOST` | yes | `localhost` | Hostname of the `songbirdapi` instance. The app constructs `http://<host>:8000` as the base URL. |
+| `NEXT_PUBLIC_API_BASE_URL` | yes | `http://localhost:8000` | Full base URL of the `songbirdapi` instance (client-side fetches). |
+| `API_BASE_URL` | yes | `http://localhost:8000` | Full base URL used by server components (SSR fetches). Usually the same as above. |
 | `TEST_USERNAME` | e2e only | — | Username for Playwright e2e tests (`.env.local`) |
 | `TEST_PASSWORD` | e2e only | — | Password for Playwright e2e tests (`.env.local`) |
 
-`NEXT_PUBLIC_API_HOST` is embedded at build time for client components and forwarded as a cookie header for server components. For production, set it to the public hostname of the API (e.g. via Docker `-e` or a CI build arg).
+`NEXT_PUBLIC_API_BASE_URL` is embedded at build time for client components. `API_BASE_URL` is used at runtime by server components. For production set both via Docker `-e` or CI build args.
 
 ## Key Concepts
 
@@ -100,7 +101,9 @@ The Dockerfile uses the Next.js standalone output and runs as a non-root user on
 | `/download` | Download hub (by URL, song search, or album) |
 | `/library` | Personal library list with play, edit, and remove actions |
 | `/explore` | Global and personal play/download stats |
+| `/import` | Upload local audio files (.mp3/.m4a) directly to the library |
 | `/settings` | Change password, view and clear offline cache |
+| `/info` | App info and version |
 | `/admin` | User management (admin only) |
 | `/share/[token]` | Public share page — no login required |
 | `/offline` | Fallback page served by the service worker when offline |
@@ -118,10 +121,25 @@ npm test        # Jest + React Testing Library
 **End-to-end tests**:
 
 ```bash
-npm run test:e2e    # Playwright
+make test-e2e-local        # CI-parity: spins up isolated Docker API + Postgres, runs dev suite
+make e2e-down              # tear down containers when done
+
+make test-e2e              # dev suite against your local API on :8000 (single worker required)
+make test-e2e-mobile       # mobile viewport suite
 ```
 
-E2e tests require a running API and valid credentials in `.env.local` (`TEST_USERNAME`, `TEST_PASSWORD`). They should not run in CI without a live API.
+`make test-e2e-local` is the canonical way to run e2e — it uses the same `cboin/songbirdapi:latest` Docker image as CI with seeded test data. Use `make test-e2e` only for quick iteration against your own dev API.
+
+For manual debugging:
+```bash
+npx playwright test --project=dev --ui         # Playwright UI mode (recommended)
+npx playwright test --project=dev --headed     # headed, no step-through
+```
+
+Download tests (`e2e/download.spec.ts`) are skipped in CI (require yt-dlp + network). Run locally with `CI=` prefix:
+```bash
+CI= make test-e2e
+```
 
 **Linting**:
 

@@ -2,7 +2,7 @@
 import { useEffect, useImperativeHandle, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { FaDove } from 'react-icons/fa6'
-import { ImportJobResult, listImportJobs } from '../lib/data'
+import { ImportJobResult, listImportJobs, pollImportJob } from '../lib/data'
 import { routes } from '../lib/routes'
 import SearchInput from './search-input'
 import Spinner from './spinner'
@@ -29,7 +29,6 @@ export default function ImportJobsTable({
   const [total, setTotal] = useState(initialTotal)
   const [counts, setCounts] = useState<Record<string, number>>(initialCounts ?? {})
   const [filter, setFilter] = useState('')
-  const [statusFilter, setStatusFilter] = useState<string | null>(null)
   const [page, setPage] = useState(0)
   const [loading, setLoading] = useState(false)
   // Session in-flight tracking — survives pagination/filter changes.
@@ -41,10 +40,11 @@ export default function ImportJobsTable({
   const isPending = (s: string) => s === 'pending' || s === 'processing'
 
   useEffect(() => {
+    if (activeIds.size > 0) return
     setJobs(initialJobs)
     setTotal(initialTotal)
     if (initialCounts) setCounts(initialCounts)
-  }, [initialJobs, initialTotal, initialCounts])
+  }, [initialJobs, initialTotal, initialCounts]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reset session counter when there's a fresh wave (no active → some active).
   function trackJob(job: ImportJobResult, replaceId?: string) {
@@ -88,10 +88,17 @@ export default function ImportJobsTable({
   useEffect(() => {
     if (!hasInFlight) return
     const tick = async () => {
-      const need = Math.max(PAGE_SIZE, activeIds.size + 10)
-      const data = await listImportJobs(need, 0)
-      if (!data?.jobs?.length) return
-      const byId = new Map(data.jobs.map(j => [j.job_id, j]))
+      const data = await listImportJobs(PAGE_SIZE, 0)
+      if (!data) return
+      const byId = new Map((data.jobs ?? []).map(j => [j.job_id, j]))
+      // Fetch any active jobs not on page 1 individually.
+      const missing = [...activeIds].filter(id => !byId.has(id))
+      if (missing.length > 0) {
+        await Promise.all(missing.map(async id => {
+          const job = await pollImportJob(id)
+          if (job) byId.set(id, job)
+        }))
+      }
       // update in-flight tracker
       setActiveIds(prev => {
         let finishedDelta = 0
@@ -108,7 +115,7 @@ export default function ImportJobsTable({
       })
       // update visible page
       setJobs(prev => prev.map(j => byId.get(j.job_id) ?? j))
-      setTotal(data.total)
+      if (data.total) setTotal(data.total)
       if (data.status_counts) setCounts(data.status_counts)
     }
     const interval = setInterval(tick, POLL_INTERVAL_MS)
@@ -127,15 +134,14 @@ export default function ImportJobsTable({
   }
 
   const filtered = useMemo(() => {
-    const result = statusFilter ? jobs.filter(j => j.status === statusFilter) : jobs
-    if (!filter.trim()) return result
+    if (!filter.trim()) return jobs
     const q = filter.trim().toLowerCase()
-    return result.filter(j =>
+    return jobs.filter(j =>
       (j.track_name ?? '').toLowerCase().includes(q) ||
       (j.filename ?? '').toLowerCase().includes(q) ||
       j.status.toLowerCase().includes(q)
     )
-  }, [jobs, filter, statusFilter])
+  }, [jobs, filter])
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
@@ -183,31 +189,19 @@ export default function ImportJobsTable({
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-gray-400 text-sm font-medium uppercase tracking-wide">Import history</span>
           {(counts.done ?? 0) > 0 && (
-            <button
-              data-testid="filter-done"
-              onClick={() => setStatusFilter(s => s === 'done' ? null : 'done')}
-              className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${statusFilter === 'done' ? 'bg-green-500 text-white border-green-500' : 'bg-green-50 dark:bg-green-950/30 text-green-600 dark:text-green-400 border-green-200 dark:border-green-900 hover:border-green-400'}`}
-            >
-              {counts.done} done{statusFilter === 'done' ? ' ×' : ''}
-            </button>
+            <span className="text-xs px-2 py-0.5 rounded-full border bg-green-50 dark:bg-green-950/30 text-green-600 dark:text-green-400 border-green-200 dark:border-green-900">
+              {counts.done} done
+            </span>
           )}
           {(counts.duplicate ?? 0) > 0 && (
-            <button
-              data-testid="filter-duplicate"
-              onClick={() => setStatusFilter(s => s === 'duplicate' ? null : 'duplicate')}
-              className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${statusFilter === 'duplicate' ? 'bg-amber-500 text-white border-amber-500' : 'bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-900 hover:border-amber-400'}`}
-            >
-              {counts.duplicate} duplicate{statusFilter === 'duplicate' ? ' ×' : ''}
-            </button>
+            <span className="text-xs px-2 py-0.5 rounded-full border bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-900">
+              {counts.duplicate} duplicate
+            </span>
           )}
           {(counts.failed ?? 0) > 0 && (
-            <button
-              data-testid="filter-failed"
-              onClick={() => setStatusFilter(s => s === 'failed' ? null : 'failed')}
-              className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${statusFilter === 'failed' ? 'bg-red-500 text-white border-red-500' : 'bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 border-red-200 dark:border-red-900 hover:border-red-400'}`}
-            >
-              {counts.failed} failed{statusFilter === 'failed' ? ' ×' : ''}
-            </button>
+            <span className="text-xs px-2 py-0.5 rounded-full border bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 border-red-200 dark:border-red-900">
+              {counts.failed} failed
+            </span>
           )}
         </div>
         <SearchInput

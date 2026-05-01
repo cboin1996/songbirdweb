@@ -90,9 +90,9 @@ test.describe('mobile responsive behaviors', () => {
       if (await artwork.isVisible()) {
         const bbox = await artwork.boundingBox()
         expect(bbox).not.toBeNull()
-        // Mobile player artwork: 44px (w-11 h-11), allow 40-48 for padding/margin
+        // Mobile player artwork: 44px (w-11 h-11) at 16px root, ~49.5px at 18px root (mobile font scale)
         expect(bbox!.width).toBeGreaterThanOrEqual(40)
-        expect(bbox!.width).toBeLessThanOrEqual(48)
+        expect(bbox!.width).toBeLessThanOrEqual(52)
       }
     }
   })

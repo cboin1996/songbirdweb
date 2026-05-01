@@ -299,6 +299,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setManualNextIds(new Set())
         setQueue(q)
         if (shuffleRef.current) generateShuffleOrder(idx)
+        if ('mediaSession' in navigator) {
+            navigator.mediaSession.setActionHandler('previoustrack', skipPrev)
+            navigator.mediaSession.setActionHandler('nexttrack', skipNext)
+        }
         loadSong(playingSong, true)
         if (context !== undefined) {
             setPlayContext(context)
@@ -589,7 +593,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             audio.removeEventListener('timeupdate', onTimeUpdate)
             audio.removeEventListener('durationchange', onDurationChange)
         }
-     
+
     }, [])
 
     // current-dependent: onEnded needs current to save position
@@ -730,6 +734,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             }
             const fallbackCtx = contextFromId(state?.play_context ?? null)
             const restoredQueue = await resolveUuids(queueUuids)
+            if (hasUserPlayedRef.current) return
 
             const warmArtworkCache = (songs: PlayableSong[]) => {
                 const urls = songs.flatMap(s => [
@@ -928,13 +933,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                                     data-qi={qi}
                                                     data-dpos={dpos}
                                                     style={{ height: QUEUE_ROW_H }}
-                                                    className={`flex items-center gap-3 px-4 border-t-2 border-b-2 transition-colors ${isDropTarget ? 'border-t-sky-500' : 'border-t-transparent'} ${isDropAfter ? 'border-b-sky-500' : 'border-b-transparent'} ${isBeingDragged ? 'opacity-40' : ''} ${isActive ? 'bg-sky-50 dark:bg-sky-950/30' : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'}`}
+                                                    className={`flex items-center gap-3 px-4 border-t-2 border-b-2 transition-colors select-none ${isDropTarget ? 'border-t-sky-500' : 'border-t-transparent'} ${isDropAfter ? 'border-b-sky-500' : 'border-b-transparent'} ${isBeingDragged ? 'opacity-40' : ''} ${isActive ? 'bg-sky-50 dark:bg-sky-950/30' : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'}`}
                                                 >
                                                     <span
-                                                        className="text-gray-300 dark:text-gray-600 cursor-grab active:cursor-grabbing shrink-0 touch-none"
+                                                        className="text-gray-300 dark:text-gray-600 cursor-grab active:cursor-grabbing shrink-0 touch-none select-none p-2 -m-2"
                                                         onPointerDown={e => { e.preventDefault(); dragFromRef.current = dpos; setDraggedQi(dpos); setQueueDropTarget(null) }}
                                                     >
-                                                        <FaBars size={11} />
+                                                        <FaBars size={14} />
                                                     </span>
                                                     <button onClick={() => { if (isActive) { isPlaying ? pause() : audioRef.current?.play() } else { playAt(qi) } }} className="flex items-center gap-3 flex-1 text-left min-w-0">
                                                         {(() => { const a = songArtworkUrl(song.uuid, song.artwork_cached, sp?.artworkUrl100, 200); return a ? <Image src={a} alt="" width={36} height={36} className="rounded shrink-0 object-cover" unoptimized={!!song.artwork_cached} /> : <div className="w-9 h-9 rounded shrink-0 bg-gray-100 dark:bg-gray-800 flex items-center justify-center"><FaMusic size={11} className="text-gray-400" /></div> })()}
@@ -992,7 +997,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
                                 {/* Center: transport (desktop only — on mobile lives in right section) */}
                                 <div className="hidden md:flex items-center gap-4">
-                                    <button data-testid="player-shuffle" onClick={toggleShuffle} className={`shrink-0 ${shuffle ? activeClass : idleClass}`}>
+                                    <button data-testid="player-shuffle" aria-pressed={shuffle} onClick={toggleShuffle} className={`shrink-0 ${shuffle ? activeClass : idleClass}`}>
                                         <FaRandom size={13} />
                                     </button>
                                     <button data-testid="player-prev" onClick={skipPrev} disabled={!hasQueue} className={`shrink-0 disabled:opacity-30 ${idleClass}`}>
@@ -1016,7 +1021,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                 <div className="flex items-center gap-3 shrink-0 md:justify-end">
                                     {/* Mobile-only transport */}
                                     <div className="flex md:hidden items-center gap-1">
-                                        <button data-testid="player-shuffle" onClick={toggleShuffle} className={`shrink-0 p-2 -m-1 touch-manipulation ${shuffle ? activeClass : idleClass}`}>
+                                        <button data-testid="player-shuffle" aria-pressed={shuffle} onClick={toggleShuffle} className={`shrink-0 p-2 -m-1 touch-manipulation ${shuffle ? activeClass : idleClass}`}>
                                             <FaRandom size={16} />
                                         </button>
                                         <button data-testid="player-prev" onClick={skipPrev} disabled={!hasQueue} className={`shrink-0 p-2 -m-1 touch-manipulation disabled:opacity-30 ${idleClass}`}>

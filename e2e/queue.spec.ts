@@ -65,12 +65,15 @@ test.describe('player queue', () => {
         await expect(cards.first()).toBeVisible({ timeout: 10000 })
         test.skip((await cards.count()) < 2, 'need at least 2 library songs to test skip')
 
-        await cards.first().click()
+        await page.getByRole('button', { name: 'play all' }).click()
         await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
         const trackNameEl = page.getByTestId('player-track-name').first()
+        await expect(trackNameEl).not.toBeEmpty({ timeout: 5000 })
         const beforeName = (await trackNameEl.textContent())?.trim() ?? ''
 
-        await page.getByTestId('player-next').first().click()
+        const nextBtn = page.getByTestId('player-next').first()
+        await expect(nextBtn).not.toBeDisabled({ timeout: 5000 })
+        await nextBtn.click()
         // wait for the player to settle on the new track
         await expect.poll(async () => (await trackNameEl.textContent())?.trim(), { timeout: 5000 }).not.toBe(beforeName)
     })
