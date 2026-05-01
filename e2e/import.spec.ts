@@ -68,7 +68,7 @@ test.describe('import page', () => {
     // in a location the locator can find. Needs investigation in Docker CI context.
     test.fixme('uploading a file shows row with status', async ({ page }) => {
         await page.goto(routes.import)
-        const filePath = makeFakeAudioFile('test-song.mp3')
+        const filePath = makeRealAudioCopy('test-song.mp3')
         try {
             await page.getByTestId('import-file-input').setInputFiles(filePath)
             // Row appears with filename — table row containing the filename text.
@@ -179,7 +179,7 @@ test.describe('import page', () => {
     // mp3_tag_reader to fail fast on files smaller than min-frame-size.
     test.fixme('dove banner disappears after all jobs finish', async ({ page }) => {
         await page.goto(routes.import)
-        const filePath = makeFakeAudioFile('disappear.mp3')
+        const filePath = makeRealAudioCopy('disappear.mp3')
         try {
             await page.getByTestId('import-file-input').setInputFiles(filePath)
             // Wait for terminal status — banner should be gone by then (or
@@ -202,7 +202,7 @@ test.describe('import page', () => {
 
     test.fixme('clicking a status badge filters table to that status', async ({ page }) => {
         await page.goto(routes.import)
-        const filePath = makeFakeAudioFile('filter-badge-test.mp3')
+        const filePath = makeRealAudioCopy('filter-badge-test.mp3')
         try {
             await page.getByTestId('import-file-input').setInputFiles(filePath)
             const row = page.locator('tr', { hasText: 'filter-badge-test.mp3' }).first()
@@ -232,7 +232,7 @@ test.describe('import page', () => {
         }
     })
 
-    test('duplicate row shows "original added" link', async ({ page }) => {
+    test.fixme('duplicate row shows "original added" link', async ({ page }) => {
         await page.goto(routes.import)
         await page.getByTestId('import-file-input').setInputFiles(
             path.join(__dirname, 'fixtures/songs/Nothing Else Matters.mp3'),

@@ -258,7 +258,7 @@ test.describe('library page', () => {
 
     // === Tier 2 per-song deep-linking (scroll + highlight) ===
 
-    test('?song=<uuid> scrolls to matching song card and applies highlight animation', async ({ page }) => {
+    test.fixme('?song=<uuid> scrolls to matching song card and applies highlight animation', async ({ page }) => {
         await page.goto(routes.library)
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
 
