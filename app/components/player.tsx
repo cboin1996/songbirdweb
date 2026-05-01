@@ -661,6 +661,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         })
         navigator.mediaSession.setActionHandler('previoustrack', skipPrev)
         navigator.mediaSession.setActionHandler('nexttrack', skipNext)
+        // Explicitly disable seek controls so iOS shows prev/next instead of +10/-10
+        try { navigator.mediaSession.setActionHandler('seekforward', null) } catch {}
+        try { navigator.mediaSession.setActionHandler('seekbackward', null) } catch {}
     }, [current, skipNext, skipPrev, savePosition])
 
     useEffect(() => {
