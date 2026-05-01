@@ -1011,35 +1011,37 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
             {/* Bulk action bar */}
             {selectMode && selectedIds.size > 0 && (
                 <div className="fixed bottom-24 left-0 right-0 z-50 flex justify-center px-4 pointer-events-none">
-                    <div className="pointer-events-auto bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-2xl px-4 py-3 flex gap-3 items-center">
+                    <div className="pointer-events-auto bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-2xl px-3 py-3 flex flex-wrap gap-2 items-center justify-center">
                         {bulkLoading ? (
                             <span className="text-sm text-gray-500">Working…</span>
                         ) : (
                             <>
                                 <button
                                     onClick={handleBulkRemoveFromLibrary}
-                                    className="px-4 py-2 rounded-xl text-sm font-medium bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 active:bg-red-200 touch-manipulation min-h-[44px]"
+                                    className="px-3 py-2 rounded-xl text-sm font-medium bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 active:bg-red-200 touch-manipulation min-h-[44px]"
                                 >
                                     Remove
                                 </button>
                                 <button
                                     onClick={bulkSaveOffline}
-                                    className="px-4 py-2 rounded-xl text-sm font-medium bg-sky-50 dark:bg-sky-950/40 text-sky-600 dark:text-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900/50 active:bg-sky-200 touch-manipulation min-h-[44px]"
+                                    className="px-3 py-2 rounded-xl text-sm font-medium bg-sky-50 dark:bg-sky-950/40 text-sky-600 dark:text-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900/50 active:bg-sky-200 touch-manipulation min-h-[44px]"
                                 >
-                                    Save offline
+                                    <span className="hidden sm:inline">Save offline</span>
+                                    <span className="sm:hidden">Offline</span>
                                 </button>
                                 <button
                                     onClick={bulkDownload}
-                                    className="px-4 py-2 rounded-xl text-sm font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 active:bg-gray-300 touch-manipulation min-h-[44px]"
+                                    className="px-3 py-2 rounded-xl text-sm font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 active:bg-gray-300 touch-manipulation min-h-[44px]"
                                 >
                                     Download
                                 </button>
                                 {[...selectedIds].some(id => cachedIds.has(id)) && (
                                     <button
                                         onClick={bulkRemoveOffline}
-                                        className="px-4 py-2 rounded-xl text-sm font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 active:bg-gray-300 touch-manipulation min-h-[44px]"
+                                        className="px-3 py-2 rounded-xl text-sm font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 active:bg-gray-300 touch-manipulation min-h-[44px]"
                                     >
-                                        Remove offline
+                                        <span className="hidden sm:inline">Remove offline</span>
+                                        <span className="sm:hidden">Rm offline</span>
                                     </button>
                                 )}
                                 {playlists.length > 0 && (
