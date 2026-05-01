@@ -344,7 +344,7 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
                     onTouchStart={handleTouchStart}
                     onTouchEnd={cancelLongPress}
                     onTouchMove={cancelLongPress}
-                    className={`relative flex items-center gap-3 w-full text-left rounded-md p-3 transition-colors cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-900 touch-manipulation ${isSelected ? 'bg-sky-50 dark:bg-sky-950/30' : selected ? 'bg-gray-100 dark:bg-gray-800' : ''}`}
+                    className={`relative flex items-center gap-3 w-full text-left rounded-md p-3 transition-colors cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-900 touch-manipulation select-none ${isSelected ? 'bg-sky-50 dark:bg-sky-950/30' : selected ? 'bg-gray-100 dark:bg-gray-800' : ''}`}
                 >
                     {checkboxOverlay}
                     {rank !== undefined && (
@@ -388,7 +388,7 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
                 onTouchStart={handleTouchStart}
                 onTouchEnd={cancelLongPress}
                 onTouchMove={cancelLongPress}
-                className={`relative dark:hover:bg-gray-900 hover:bg-gray-200 rounded-md p-2 w-full cursor-pointer touch-manipulation ${isSelected ? 'bg-sky-50 dark:bg-sky-950/30' : selected ? 'bg-gray-300 dark:bg-gray-800' : ''}`}
+                className={`relative dark:hover:bg-gray-900 hover:bg-gray-200 rounded-md p-2 w-full cursor-pointer touch-manipulation select-none ${isSelected ? 'bg-sky-50 dark:bg-sky-950/30' : selected ? 'bg-gray-300 dark:bg-gray-800' : ''}`}
             >
                 {checkboxOverlay}
                 <div className="flex flex-row justify-between">
