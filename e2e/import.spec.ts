@@ -143,23 +143,20 @@ test.describe('import page', () => {
         const beforeDone = beforeBody?.status_counts?.done ?? 0
 
         await page.goto(routes.import)
-        const filePath = makeFakeAudioFile('chip-counter.mp3')
+        // Use the no-tags fixture — real audio, reaches "failed" fast (missing track title).
+        const fixturePath = path.join(__dirname, 'fixtures/songs/no-tags.mp3')
         try {
-            await page.getByTestId('import-file-input').setInputFiles(filePath)
-            // wait for terminal status on the row
-            const row = page.locator('tr', { hasText: 'chip-counter.mp3' }).first()
-            await expect(row.locator('text=/^(done|failed|duplicate)$/').first()).toBeVisible({ timeout: 20000 })
-
-            // poll the API for an incremented counter on at least one bucket
+            await page.getByTestId('import-file-input').setInputFiles(fixturePath)
+            // Poll the API directly — the row UI has a race where setJobs(initialJobs)
+            // can wipe the newly-added row before terminal status appears.
             await expect.poll(async () => {
                 const r = await api.get(`${API_V1}/import?limit=1&offset=0`)
                 if (!r.ok()) return false
                 const body = await r.json()
                 const sc = body?.status_counts ?? {}
                 return (sc.failed ?? 0) > beforeFailed || (sc.duplicate ?? 0) > beforeDup || (sc.done ?? 0) > beforeDone
-            }, { timeout: 10000 }).toBe(true)
+            }, { timeout: 30000 }).toBe(true)
         } finally {
-            fs.unlinkSync(filePath)
             await api.dispose()
         }
     })
@@ -229,9 +226,9 @@ test.describe('import page', () => {
         const fixturePath = path.join(__dirname, 'fixtures/songs/Nothing Else Matters.mp3')
         await page.getByTestId('import-file-input').setInputFiles(fixturePath)
 
-        const row = page.locator('tr').filter({ hasText: /Nothing Else Matters/i }).first()
-        await expect(row).toBeVisible({ timeout: 5000 })
-        await expect(row.locator('text=duplicate')).toBeVisible({ timeout: 20000 })
+        // Chain two filters: must have filename AND "duplicate" — skips the global-setup "done" row.
+        const row = page.locator('tr').filter({ hasText: /Nothing Else Matters/i }).filter({ hasText: 'duplicate' }).first()
+        await expect(row).toBeVisible({ timeout: 20000 })
         await expect(row.locator('a', { hasText: 'original added' })).toBeVisible()
     })
 

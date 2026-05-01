@@ -62,15 +62,15 @@ const AlbumCard = memo(function AlbumCard({ album, isCompact, isActive, isPlayin
         return (
             <button
                 onClick={onClick}
-                className="flex items-center gap-3 w-full text-left rounded-md p-2 transition-colors hover:bg-gray-100 dark:hover:bg-gray-900"
+                className="flex items-center gap-3 w-full text-left rounded-md p-3 transition-colors hover:bg-gray-100 dark:hover:bg-gray-900"
             >
                 {smallArt
-                    ? <Image src={smallArt} alt="" width={40} height={40} className="rounded shrink-0" unoptimized={useLocalArt} />
-                    : <div className="w-10 h-10 rounded shrink-0 bg-gray-100 dark:bg-gray-800 flex items-center justify-center"><FaMusic size={12} className="text-gray-400" /></div>
+                    ? <Image src={smallArt} alt="" width={48} height={48} className="rounded shrink-0 w-12 h-12" unoptimized={useLocalArt} />
+                    : <div className="w-12 h-12 rounded shrink-0 bg-gray-100 dark:bg-gray-800 flex items-center justify-center"><FaMusic size={14} className="text-gray-400" /></div>
                 }
-                <div className="flex flex-col min-w-0 flex-1">
-                    <span className={`text-sm font-medium truncate${isActive ? ' text-sky-500' : ''}`}>{album.collectionName}</span>
-                    <span className="text-xs text-sky-500 truncate">{album.artistName} · {album.songs.length} songs</span>
+                <div className="flex flex-col min-w-0 flex-1 gap-0.5">
+                    <span className={`text-base font-medium truncate${isActive ? ' text-sky-500' : ''}`}>{album.collectionName}</span>
+                    <span className="text-sm text-sky-500 truncate">{album.artistName} · {album.songs.length} songs</span>
                 </div>
                 {isActive && isPlaying
                     ? <FaPause size={10} className="text-sky-500 shrink-0 mr-1" />
@@ -457,6 +457,11 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         scrubbing.current = false
         const letter = letterFromPointer(e)
         if (letter && presentLetters.has(letter)) scrollTo(letter)
+        setScrubLetter(null)
+    }
+
+    function handleBarTouchEnd(e: React.TouchEvent) {
+        scrubbing.current = false
         setScrubLetter(null)
     }
 
@@ -1082,6 +1087,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                         onPointerMove={handleBarPointerMove}
                         onPointerUp={handleBarPointerUp}
                         onPointerCancel={() => { scrubbing.current = false; setScrubLetter(null) }}
+                        onTouchEnd={handleBarTouchEnd}
                     >
                         {ALPHABET.map(letter => (
                             <span

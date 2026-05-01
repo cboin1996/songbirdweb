@@ -561,8 +561,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 audio!.play().catch(() => {})
             }
         }
-        function onPlay() { setIsPlaying(true); setIsBuffering(false); autoplayActivatedRef.current = true }
-        function onPause() { setIsPlaying(false); setIsBuffering(false) }
+        function onPlay() { setIsPlaying(true); setIsBuffering(false); autoplayActivatedRef.current = true; if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing' }
+        function onPause() { setIsPlaying(false); setIsBuffering(false); if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused' }
         function onLoadStart() { setIsBuffering(true); setBuffered(0) }
         function onWaiting() { setIsBuffering(true) }
         function onPlaying() { setIsBuffering(false) }
@@ -589,7 +589,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             audio.removeEventListener('timeupdate', onTimeUpdate)
             audio.removeEventListener('durationchange', onDurationChange)
         }
-     
+
     }, [])
 
     // current-dependent: onEnded needs current to save position
@@ -730,6 +730,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             }
             const fallbackCtx = contextFromId(state?.play_context ?? null)
             const restoredQueue = await resolveUuids(queueUuids)
+            if (hasUserPlayedRef.current) return
 
             const warmArtworkCache = (songs: PlayableSong[]) => {
                 const urls = songs.flatMap(s => [
@@ -992,7 +993,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
                                 {/* Center: transport (desktop only — on mobile lives in right section) */}
                                 <div className="hidden md:flex items-center gap-4">
-                                    <button data-testid="player-shuffle" onClick={toggleShuffle} className={`shrink-0 ${shuffle ? activeClass : idleClass}`}>
+                                    <button data-testid="player-shuffle" aria-pressed={shuffle} onClick={toggleShuffle} className={`shrink-0 ${shuffle ? activeClass : idleClass}`}>
                                         <FaRandom size={13} />
                                     </button>
                                     <button data-testid="player-prev" onClick={skipPrev} disabled={!hasQueue} className={`shrink-0 disabled:opacity-30 ${idleClass}`}>
@@ -1016,7 +1017,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                 <div className="flex items-center gap-3 shrink-0 md:justify-end">
                                     {/* Mobile-only transport */}
                                     <div className="flex md:hidden items-center gap-1">
-                                        <button data-testid="player-shuffle" onClick={toggleShuffle} className={`shrink-0 p-2 -m-1 touch-manipulation ${shuffle ? activeClass : idleClass}`}>
+                                        <button data-testid="player-shuffle" aria-pressed={shuffle} onClick={toggleShuffle} className={`shrink-0 p-2 -m-1 touch-manipulation ${shuffle ? activeClass : idleClass}`}>
                                             <FaRandom size={16} />
                                         </button>
                                         <button data-testid="player-prev" onClick={skipPrev} disabled={!hasQueue} className={`shrink-0 p-2 -m-1 touch-manipulation disabled:opacity-30 ${idleClass}`}>
