@@ -97,25 +97,30 @@ Effort: ~8–12h.
 
 ---
 
-## Phase 5 — fixme triage
+## Phase 5 — fixme triage (partial — 9faa7a2)
 
-17 `test.fixme` markers exist. Some are real Playwright/environment limits;
-some are stale. Triage pass:
+First pass attempted 4 fixmes; 2 landed, 2 re-fixme'd with deeper notes:
 
-**Keep (environment limits, document clearly):**
-- `player.spec.ts` — position persistence: headless Chromium won't advance `audio.currentTime`
-- `editor.spec.ts` — waveform drag handle (no stable selector until phase 2 adds testid)
-- `editor.spec.ts` — close-guard "don't show again" (banner disappears before Playwright can click)
+**Landed:**
+- `navigation.spec.ts` — added `.first()` defensively against link text matches outside the navbar
+- `player.spec.ts` — timestamps render in M:SS: replaced one-shot regex with `expect.poll`
 
-**Fix (has a clear path):**
-- `editor.spec.ts` — version badge: add `data-testid="version-badge"` (phase 2)
-- `editor.spec.ts` — add-cut button disabled before wsReady: rewrite using preview-btn ready signal
-- `library.spec.ts` — letter rail active updates on scroll: replace `waitForTimeout(250)` with `expect.poll`
+**Re-fixme'd with new notes:**
+- `library.spec.ts` — letter-rail selector fix was correct (`filter+has` was looking for descendant span; classes are ON the span itself), but root cause is `scrollIntoViewIfNeeded()` doesn't fire the rAF-debounced active-letter handler
+- `offline.spec.ts` — library-list returns the empty-state message instead of the toolbar when offline AND no cached songs, so `save-all-offline` button doesn't render for the seed user. Needs to first cache a song while online, then flip offline
 
-**Delete (premise no longer valid):**
-- `editor.spec.ts` — global fade-in/out sliders, zoom slider, loop button: UI was redesigned, tests reference controls that don't exist
+**Still pending (categorized but not yet attempted):**
+- *Keep (environment limits)*:
+  - `player.spec.ts` — position persistence: headless Chromium won't advance `audio.currentTime`
+  - `editor.spec.ts` — waveform drag handle (no stable selector until phase 2 adds testid)
+  - `editor.spec.ts` — close-guard "don't show again" (banner disappears before Playwright can click)
+- *Fix (has a clear path)*:
+  - `editor.spec.ts` — version badge: add `data-testid="version-badge"` (phase 2)
+  - `editor.spec.ts` — add-cut button disabled before wsReady: rewrite using preview-btn ready signal
+- *Delete (premise no longer valid)*:
+  - `editor.spec.ts` — global fade-in/out sliders, zoom slider, loop button: UI was redesigned, tests reference controls that don't exist
 
-Effort: ~4–6h.
+Remaining effort: ~3–5h.
 
 ---
 

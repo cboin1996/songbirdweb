@@ -1,64 +1,138 @@
 # Playwright E2E Suite
 
-Locks in observable behavior at the `keebox-beta-1` baseline. Tests describe what the app does *today*; failures are bugs to file, not signals to "fix the test."
+End-to-end coverage for songbirdweb. Three Playwright projects share configuration but
+target different concerns:
 
-## Running
+| Project  | Test dir       | Viewport         | Server                | What it covers                              |
+|----------|----------------|------------------|-----------------------|---------------------------------------------|
+| `dev`    | `e2e/`         | Desktop Chrome   | Next dev (`:3000`)    | Business logic, navigation, auth            |
+| `prod`   | `e2e-prod/`    | Desktop Chrome   | Next prod (`:6996`)   | Service worker lifecycle, offline cache, PWA |
+| `mobile` | `e2e-mobile/`  | iPhone 13        | Next dev (`:3000`)    | Mobile-only layout/UX (long-press, etc.)    |
+
+The mobile and prod projects exist because dev-server SW is disabled (`sw-register.tsx`)
+and mobile-specific behavior (long-press, sticky-header) only manifests at the right
+viewport.
+
+## Running tests
+
+The recommended path is the **CI-parity Docker harness** — same image, same ports, same
+seed data as CI:
 
 ```bash
-# Local dev server must be running on :3000 with API on :8000
-ENV=dev make local-run            # in songbirdapi (separate terminal)
-npm run dev                       # in songbirdweb
+make test-e2e-local         # project=dev (default)
+make test-e2e-local-mobile  # project=mobile
+```
 
-# Run the full suite
-npx playwright test --reporter=line
+The harness brings up an isolated API on `:8001` and a Next prod build on `:3001` and
+runs Playwright with `--workers=4`. Bring it down with `make e2e-next-down` /
+`make e2e-api-down` between code changes (otherwise the harness reuses the prior
+build).
 
-# Single spec
-npx playwright test e2e/library.spec.ts
+For non-Docker iteration:
 
-# Headed (watch the browser)
+```bash
+# Direct playwright (assumes local dev server on :3000 + API on :8000)
+npx playwright test --project=dev e2e/library.spec.ts
 npx playwright test --headed e2e/player.spec.ts
-
-# Open the HTML report after a run
 npx playwright show-report
 ```
 
+The `prod` project has its own `webServer` block in `playwright.config.ts` that builds
+and starts a prod server automatically; just run `npx playwright test --project=prod`.
+
+## Spec inventory
+
+### `e2e/` (dev project)
+
+| File                   | Coverage                                                         |
+|------------------------|------------------------------------------------------------------|
+| `smoke.spec.ts`        | Login + library load + nav top-level                              |
+| `login.spec.ts`        | Auth happy path + bad creds                                      |
+| `navigation.spec.ts`   | Every authed page loads without console errors                   |
+| `library.spec.ts`      | View tabs, search, letter rail, scrub bar                        |
+| `bulk-select.spec.ts`  | Select mode, bulk action bar, bulk add to playlist               |
+| `player.spec.ts`       | Play/pause, skip, shuffle, repeat, queue drag, source links      |
+| `queue.spec.ts`        | Queue panel, skip-next, manual-next                              |
+| `playlist.spec.ts`     | Create / add / rename / delete                                    |
+| `editor.spec.ts`       | Modal open, properties, cuts/fades, draft save                    |
+| `import.spec.ts`       | Drop file, dove banner, status counts, history                    |
+| `download.spec.ts`     | Song / album / URL modes                                         |
+| `explore.spec.ts`      | Window/sort/view filters, search                                 |
+| `settings.spec.ts`     | Password change, clear cache                                     |
+| `share.spec.ts`        | Share kebab + `/share/[token]` page                              |
+| `offline.spec.ts`      | OfflineGuard pages, banner, cached-only library                   |
+| `info.spec.ts`         | Info page renders, no console errors                             |
+| `admin.spec.ts`        | Admin gating, system stats, user table                           |
+| `investigate-401.spec.ts` | Auth-failure repro (kept as a debugging aid)                  |
+
+### `e2e-prod/` (prod project — SW-gated)
+
+| File              | Coverage                                                              |
+|-------------------|-----------------------------------------------------------------------|
+| `sw.spec.ts`      | SW registers, becomes controller, version bumps purge old caches      |
+| `offline.spec.ts` | `/library` from cache when offline, `/offline` fallback, manifest, full auth→play flow no errors |
+
+### `e2e-mobile/` (mobile project)
+
+| File                  | Coverage                                                            |
+|-----------------------|---------------------------------------------------------------------|
+| `responsive.spec.ts`  | Long-press → select mode, sticky header off, compact card layout, mobile player tap targets, queue→source link closes panel |
+
 ## Environment
 
-Tests read from `.env.local`:
+Tests read from `.env.local` at repo root:
 
-| Var | Purpose | Example |
-|---|---|---|
-| `TEST_USERNAME` | account used in browser + API logins | `cboin` |
-| `TEST_PASSWORD` | password for that account | (your dev password) |
-| `NEXT_PUBLIC_API_BASE_URL` | empty in dev — browser uses relative URLs | `''` |
-| `E2E_API_BASE_URL` | optional override for tests when API is on a different host | `http://staging:8000` |
+| Var                       | Purpose                                                        |
+|---------------------------|----------------------------------------------------------------|
+| `TEST_USERNAME` / `TEST_PASSWORD` | Shared read-only test user                            |
+| `E2E_ADMIN_USERNAME` / `_PASSWORD` | Admin spec                                           |
+| `E2E_EDITOR_USERNAME` / `_PASSWORD` | Per-suite isolation for editor mutations            |
+| `E2E_BULK_USERNAME` / `_PASSWORD`   | Per-suite isolation for bulk-select mutations       |
+| `E2E_IMPORT_USERNAME` / `_PASSWORD` | Per-suite isolation for import mutations            |
+| `NEXT_PUBLIC_API_BASE_URL`        | Empty in dev (browser uses relative URLs through Next proxy) |
+| `E2E_API_BASE_URL`                | Override when API is on a different host                |
+
+`API_BASE` resolution in `helpers.ts` falls back via
+`E2E_API_BASE_URL || NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000'`. The fallback
+matters because `NEXT_PUBLIC_API_BASE_URL` is intentionally empty in dev — without it,
+`apiLogin()` produces invalid URLs.
 
 ## Architecture
 
 ```
-Playwright runner ─── browser context ── (cookies, login) ── songbirdweb (3000)
-        │                                                         │
-        └─── APIRequestContext ── direct calls ────────── songbirdapi (8000)
+Playwright runner ─── browser context (cookies, login) ── songbirdweb (3000 / 3001 / 6996)
+        │                                                              │
+        └─── APIRequestContext (direct calls) ─────────── songbirdapi (8000 / 8001)
 ```
 
-The browser-side flow uses `page.goto`, real clicks, etc. The API-side flow (via `apiLogin()`) calls the FastAPI directly for state init/cleanup — faster and less brittle than driving the UI for setup.
-
-**Important**: `API_BASE` resolution in `helpers.ts` falls back via `E2E_API_BASE_URL || NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000'` because `NEXT_PUBLIC_API_BASE_URL` is intentionally empty in dev (so the browser uses relative paths through the Next.js proxy). Without the fallback, `apiLogin()` produces invalid URLs.
+Browser-side flows use `page.goto`, real clicks, etc. API-side flows (via `apiLogin()`)
+hit FastAPI directly for state init/cleanup — faster and less brittle than driving the
+UI for setup.
 
 ## Helpers (`helpers.ts`)
 
-| Function | Purpose |
-|---|---|
-| `login(page)` | Sets httpOnly cookies in the browser context; lands on `/download` |
-| `apiLogin()` | Returns an `APIRequestContext` already authenticated — for state setup outside the browser |
-| `uniq(prefix)` | Returns `<prefix>-<timestamp>-<rand>` for collision-free test data |
-| `purgePlaylistsByPrefix(api, prefix)` | Cleanup helper — deletes any playlist whose name starts with `prefix` |
-| `pickFirstLibrarySong(api)` | Grab any library song UUID + track for tests that just need *a* song |
-| `ignoreError(msg)` | Console-error allow-list (AbortError, favicon 404, fetch-during-nav, etc.) |
+| Function                              | Purpose                                                   |
+|---------------------------------------|-----------------------------------------------------------|
+| `login(page)`                         | Sets httpOnly cookies in the browser; lands on `/download`|
+| `apiLogin()`                          | Authenticated `APIRequestContext` for state setup         |
+| `uniq(prefix)`                        | `<prefix>-<timestamp>-<rand>` for collision-free test data |
+| `purgePlaylistsByPrefix(api, prefix)` | Delete any playlist whose name starts with `prefix`       |
+| `pickFirstLibrarySong(api)`           | Grab any library song UUID + track for tests that just need *a* song |
+| `ignoreError(msg)`                    | Console-error allow-list (AbortError, favicon 404, fetch-during-nav, etc.) |
 
 ## State isolation
 
-Default strategy: **shared dev DB, per-test data with unique prefixes, cleanup at end**.
+**Read-only specs** share the main test user — library is seeded with 9 fixture songs
+in `global-setup.ts` and is NOT wiped between tests. Write specs that tolerate existing
+library data.
+
+**Destructive specs** (`editor.spec.ts`, `bulk-select.spec.ts`, `import.spec.ts`) get
+their own user provisioned in `global-setup.ts`, each with its own seeded library and
+storageState file. This is the per-suite isolation pass from `REFACTOR_PLAN.md` Phase
+3.
+
+User-scoped data created during a test (drafts, playlists, share tokens) should be
+prefixed with `pw-test-` and purged in `afterAll`:
 
 ```ts
 test.afterAll(async () => {
@@ -67,82 +141,13 @@ test.afterAll(async () => {
 })
 ```
 
-If you create user-scoped data (drafts, playlists, share tokens), prefix it with `pw-test-` and purge in `afterAll`. Songs and the library itself are NOT wiped between tests — write specs that tolerate existing library data.
-
-For tests that need a *clean* library, run `ENV=dev make dev-wipe` in songbirdapi between test runs (manual). A future "test database" mode would isolate fully but isn't built yet.
-
-## Spec inventory
-
-| File | Coverage |
-|---|---|
-| `smoke.spec.ts` | login + library load + nav top-level |
-| `login.spec.ts` | auth happy path + bad creds |
-| `navigation.spec.ts` | every authed page loads without console errors |
-| `library.spec.ts` | view tabs (songs/artists/albums/genres/playlists), search, scrub bar |
-| `bulk-select.spec.ts` | Select mode + bulk action bar + bulk add to playlist |
-| `player.spec.ts` | play, pause, skip, shuffle, repeat |
-| `queue.spec.ts` | queue panel open, skip-next |
-| `playlist.spec.ts` | create / add songs / rename / delete |
-| `editor.spec.ts` | open modal, properties, cuts/fades, draft save |
-| `import.spec.ts` | drop file, dove banner, status counts, history |
-| `download.spec.ts` | song / album / URL modes |
-| `explore.spec.ts` | window/sort/view filters, search |
-| `settings.spec.ts` | password change, clear cache |
-| `share.spec.ts` | "copy share link" kebab + `/share/[token]` page |
-| `offline.spec.ts` | OfflineGuard pages, banner, cached-only library |
-| `info.spec.ts` | info page renders, no console errors |
-| `admin.spec.ts` | admin gating, system stats, user table |
-
-## Known issues (punch list)
-
-Tests document the broken behavior — a `.skip()` or `xfail` marks something for follow-up. Bug fixes go in *separate* PRs, not the test PR.
-
-### Real source bugs found by the harness
-
-| Severity | Test | File:line | Symptom | Likely fix |
-|---|---|---|---|---|
-| MED | `Album button switches to /download/album` | `e2e/download.spec.ts:31` | Clicking the album button on `/download` lands on `/download?mode=album` instead of `/download/album?mode=album`. Two `router.replace` calls in `Search` component race (`handleModeChange` + `useEffect` on `mode` change). | Drop the `useEffect`-driven replace; do all URL updates inside `handleModeChange`. |
-
-### Tests blocked on missing UI / refactor
-
-Marked `test.fixme()` — tests describe intended behavior but the helper or selector doesn't exist:
-
-- `bulk-select.spec.ts` — "exit select mode by clicking Cancel", "bulk add to playlist". Select mode is entered via long-press on a song card (no "Select" button). Need to drive a touch long-press in Playwright.
-- `bulk-select.spec.ts` — "bulk Remove confirms and removes". Destructive in shared dev DB; gate behind `TEST_BULK_REMOVE` once per-test isolation exists.
-- `bulk-select.spec.ts` — "bulk Save offline triggers cache writes". Network/IndexedDB heavy; needs separate offline-suite harness.
-- `bulk-select.spec.ts` — "bulk Download triggers a download per song". Needs `page.waitForEvent('download')` orchestration.
-- `editor.spec.ts` — "opens editor modal for Jolene", "sliders are interactive". Helper `openEditorForJolene` uses iTunes search flow (network dep + fragile kebab `title="more"`). Refactor to open editor from a song already in the user's library.
-- `editor.spec.ts` — "fade-cut ear collision: add cut → expand fade-out ear left → add second cut respects fade range". Requires precise pointer drag on the waveform-rendered fade-out handle (no stable testid). Locks in the simpler "two cuts can coexist" assertion as a baseline.
-- `import.spec.ts` — "removing a row works". Import history rows have no remove button (server-persisted jobs).
-- `library.spec.ts` — "save all offline: beforeunload warning fires while in-flight". `savingAll` flag drains too quickly for a small library — beforeunload listener registers/unregisters before navigation can fire.
-- `offline.spec.ts` — "library loads cached songs when offline". SW is disabled in dev (`sw-register.tsx`). Test requires production build.
-
-### Watch list (flaky / timing-sensitive)
-
-- `info.spec.ts` "info page accessible via navbar link" — sometimes `a[href="/info"]` matches multiple; use `.first()` (already done).
-- `library.spec.ts:24` "artists tab updates URL" — bumped timeout, may still be flaky.
-- `playlist.spec.ts:33` "create playlist via UI then verify via API" — UI tile rendering can lag the API response; we now poll the API first then assert UI.
-- `share.spec.ts:17` "Link copied!" — depends on backend share-token POST round-trip.
-
-## Status snapshot (last triage pass)
-
-Against the `keebox-beta-1` baseline:
-
-- ~47 passing, ~13 marked `.fixme()`, several flakies on the watch list
-- 1 real source bug surfaced (`Search` component double-replace race — see punch list)
-- `did not run` count is high because Playwright skips dependent tests after a worker fails; resolving the flakies should unstick most of those
-
-To get the most reliable run locally:
-
-```bash
-# Single-worker run avoids dev-server contention under parallelism
-npx playwright test --workers=1 --reporter=line
-```
-
 ## Conventions
 
-- One `describe` per spec, `beforeEach` for per-test setup (login)
-- Use `data-testid` over text where possible — text changes break tests cosmetically
-- Avoid hard-coded sleeps; use `expect.poll` or `toBeVisible({ timeout: ... })`
-- Don't assert on toast / animation timing — they're race-prone
+- One `describe` per spec; `beforeEach` for per-test setup (login)
+- Prefer `data-testid` over text/CSS selectors — text drift / Tailwind refactors break the others
+- No hard-coded sleeps; use `expect.poll` or `toBeVisible({ timeout: ... })`
+- Don't assert on toast / animation timing — race-prone
 - New helpers go in `helpers.ts`, not inline in specs
+
+See `REFACTOR_PLAN.md` for in-progress refactor phases (testid pass, page object models,
+fixme triage).
