@@ -886,6 +886,15 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     useEffect(() => {
         function onVisible() {
             if (document.hidden) return
+
+            // iOS sometimes forgets the previoustrack/nexttrack handlers after
+            // backgrounded suspension, falling back to ±10s seek markers on the
+            // lock-screen. Re-bind on every re-foreground.
+            if ('mediaSession' in navigator) {
+                navigator.mediaSession.setActionHandler('previoustrack', skipPrev)
+                navigator.mediaSession.setActionHandler('nexttrack', skipNext)
+            }
+
             const audio = audioRef.current
             if (!audio) return
             if (!sessionKeepAliveRef.current) return
@@ -906,7 +915,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         }
         document.addEventListener('visibilitychange', onVisible)
         return () => document.removeEventListener('visibilitychange', onVisible)
-    }, [])
+    }, [skipPrev, skipNext])
 
     useEffect(() => {
         Promise.all([fetchPlayerState(), fetchLibrarySongs()]).then(async ([serverState, libSongs]) => {
