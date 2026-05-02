@@ -445,39 +445,45 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         try { navigator.mediaSession.setPositionState() } catch {}
     }
 
+    // In-app pause is a clean audio.pause(). No silent-loop keep-alive here:
+    // iOS Now Playing reads element.paused = true and shows "paused" in sync
+    // with our UI. The lock-screen 'pause' MediaSession action handler still
+    // does the silent-loop trick — iOS commits its widget to paused on the
+    // user's gesture before our handler runs, so the widget shows paused there
+    // too. See cboin1996/songbirdweb#16 for the iOS quirk.
+    //
+    // Trade-off: after ~10s in-app paused + locked, iOS releases the audio
+    // session and lock-screen play stops responding. User unlocks and resumes
+    // in-app to recover.
     function pause() {
         const audio = audioRef.current
         if (!audio || !current) return
-        // Already in silent-loop pause — nothing to do.
         if (sessionKeepAliveRef.current) {
-            setIsPlaying(false)
-            return
-        }
-        // No real source loaded yet — fall back to a hard pause.
-        if (!audio.src || audio.paused) {
-            audio.pause()
-            setIsPlaying(false)
-            return
-        }
-        const realPos = audio.currentTime
-        const realDur = audio.duration
-        savePosition(current, realPos)
-        pendingPosition.current = realPos
-        pinnedPosRef.current = realPos
-        pinnedDurRef.current = realDur
-        savedSrcBeforeSilenceRef.current = audio.src
-        sessionKeepAliveRef.current = true
-        audio.src = SILENT_LOOP_SRC
-        audio.loop = true
-        audio.load()
-        audio.play().catch(() => {
-            // Silent loop failed to start — drop the keep-alive and fall back to a hard pause.
+            // Came from lock-screen pause (silent loop running). Tear it down
+            // and hard-pause at the pinned position, so we end up in a clean
+            // paused state regardless of which path triggered the in-app pause.
+            const realSrc = savedSrcBeforeSilenceRef.current
+            const realPos = pinnedPosRef.current
             sessionKeepAliveRef.current = false
+            savedSrcBeforeSilenceRef.current = null
             audio.loop = false
-            audio.pause()
-        })
+            if (realSrc) {
+                audio.src = realSrc
+                pendingPosition.current = realPos
+                shouldPlayRef.current = false
+                audio.load()
+            }
+            setIsPlaying(false)
+            if ('mediaSession' in navigator) {
+                navigator.mediaSession.playbackState = 'paused'
+                try { navigator.mediaSession.setPositionState() } catch {}
+            }
+            return
+        }
+        if (audio.src && !audio.paused) savePosition(current, audio.currentTime)
+        audio.pause()
         setIsPlaying(false)
-        pinLockScreenPosition(realPos, realDur)
+        if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused'
     }
 
     function resume() {
