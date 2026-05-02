@@ -2,6 +2,12 @@ import { Page, expect, APIRequestContext, request as pwRequest } from '@playwrig
 
 export const USERNAME = process.env.TEST_USERNAME!
 export const PASSWORD = process.env.TEST_PASSWORD!
+export const EDITOR_USERNAME = process.env.E2E_EDITOR_USERNAME!
+export const EDITOR_PASSWORD = process.env.E2E_EDITOR_PASSWORD!
+export const BULK_USERNAME = process.env.E2E_BULK_USERNAME!
+export const BULK_PASSWORD = process.env.E2E_BULK_PASSWORD!
+export const IMPORT_USERNAME = process.env.E2E_IMPORT_USERNAME!
+export const IMPORT_PASSWORD = process.env.E2E_IMPORT_PASSWORD!
 // .env.local sets NEXT_PUBLIC_API_BASE_URL='' (empty) so the browser uses
 // relative URLs in dev. Tests call the API directly from outside the browser
 // and need an absolute URL — use `||` so empty string also falls through.
@@ -18,7 +24,7 @@ export function ignoreError(msg: string) {
 // Bypass the React form: call the API from inside the browser so httpOnly cookies
 // are set correctly in the Playwright browser context. If already authenticated via
 // storageState, this is a no-op (visit /library to verify auth; if 200, skip login).
-export async function login(page: Page) {
+export async function login(page: Page, username = USERNAME, password = PASSWORD) {
     // Check if already authenticated by visiting a protected page.
     await page.goto('/library', { waitUntil: 'domcontentloaded' })
     const isAuth = page.url().includes('/library')
@@ -40,9 +46,9 @@ export async function login(page: Page) {
             })
             return resp.ok
         },
-        { url: `${API_BASE}/v1/auth/login`, username: USERNAME, password: PASSWORD },
+        { url: `${API_BASE}/v1/auth/login`, username, password },
     )
-    if (!ok) throw new Error(`Login API call failed for user: ${USERNAME}`)
+    if (!ok) throw new Error(`Login API call failed for user: ${username}`)
     await page.goto('/download')
     await expect(page).toHaveURL(/\/download/, { timeout: 10000 })
 }
@@ -50,11 +56,16 @@ export async function login(page: Page) {
 // Build an APIRequestContext logged in as the test user — useful for state
 // init/cleanup that doesn't need a browser context.
 export async function apiLogin(): Promise<APIRequestContext> {
+    return apiLoginAs(USERNAME, PASSWORD)
+}
+
+// Build an APIRequestContext logged in as an arbitrary user.
+export async function apiLoginAs(username: string, password: string): Promise<APIRequestContext> {
     const ctx = await pwRequest.newContext({ baseURL: API_BASE })
     const res = await ctx.post(`${API_V1}/auth/login`, {
-        data: { username: USERNAME, password: PASSWORD },
+        data: { username, password },
     })
-    if (!res.ok()) throw new Error(`apiLogin failed: ${res.status()}`)
+    if (!res.ok()) throw new Error(`apiLogin failed for ${username}: ${res.status()}`)
     return ctx
 }
 

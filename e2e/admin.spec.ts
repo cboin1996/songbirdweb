@@ -18,13 +18,13 @@ test.describe('admin page', () => {
     test('system stats section renders', async ({ page }) => {
         await page.goto(routes.admin)
         // Page shows numbered stat cards labeled songs / users / active share tokens.
-        await expect(page.getByText('songs', { exact: true })).toBeVisible({ timeout: 10000 })
+        await expect(page.getByText('songs', { exact: true }).first()).toBeVisible({ timeout: 10000 })
         await expect(page.getByText('users', { exact: true }).first()).toBeVisible()
     })
 
     test('disk stats show used / free / total', async ({ page }) => {
         await page.goto(routes.admin)
-        await expect(page.getByText('disk')).toBeVisible({ timeout: 10000 })
+        await expect(page.getByText('disk').first()).toBeVisible({ timeout: 10000 })
         await expect(page.getByText('used').first()).toBeVisible()
         await expect(page.getByText('free').first()).toBeVisible()
         await expect(page.getByText('total').first()).toBeVisible()
@@ -54,10 +54,10 @@ test.describe('admin page', () => {
 
     test('invite user form has username / email / password fields', async ({ page }) => {
         await page.goto(routes.admin)
-        await expect(page.getByText('invite user')).toBeVisible({ timeout: 10000 })
-        await expect(page.getByPlaceholder('username', { exact: true })).toBeVisible()
-        await expect(page.getByPlaceholder('email', { exact: true })).toBeVisible()
-        await expect(page.getByPlaceholder('password', { exact: true })).toBeVisible()
+        await expect(page.getByText('invite user').first()).toBeVisible({ timeout: 10000 })
+        await expect(page.getByPlaceholder('username', { exact: true }).first()).toBeVisible()
+        await expect(page.getByPlaceholder('email', { exact: true }).first()).toBeVisible()
+        await expect(page.getByPlaceholder('password', { exact: true }).first()).toBeVisible()
     })
 
     test('page is stable with no uncaught errors', async ({ page }) => {
@@ -66,7 +66,7 @@ test.describe('admin page', () => {
         page.on('pageerror', err => { if (!ignoreError(err.message)) errors.push(err.message) })
 
         await page.goto(routes.admin)
-        await page.waitForTimeout(2000)
+        await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {})
         expect(errors, `Console errors: ${errors.join('\n')}`).toHaveLength(0)
     })
 })

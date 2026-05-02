@@ -96,24 +96,31 @@ DevTools tips:
 
 ```bash
 npm test               # Jest + React Testing Library (unit)
-npm run test:e2e       # Playwright (e2e)
 npm run lint           # next lint (ESLint)
+
+# E2E — recommended (CI-parity Docker harness, isolated API + Postgres)
+make test-e2e-local        # dev project (Desktop Chrome on prod build)
+make test-e2e-local-mobile  # mobile project (iPhone 13 viewport)
+make e2e-down              # tear down containers when done
+
+# E2E — against your local dev API on :8000 (faster iteration)
+make test-e2e              # dev project (single worker)
+make test-e2e-mobile       # mobile project
+make test-e2e-prod         # service worker + offline (prod project)
+
+npm run test:e2e           # raw Playwright (no harness, no env injection)
 ```
 
-E2E tests require:
-
-- A live `songbirdapi` (run `ENV=dev make local-run` in the API repo).
-- A real user — set `TEST_USERNAME` and `TEST_PASSWORD` in `.env.local`.
-- The web app running on port 3000 (Playwright config starts `npm run dev` automatically — see `playwright.config.ts`).
-
-E2E tests should NOT run in CI without a live API (and we don't currently spin one up in CI).
+`make test-e2e-local` is the canonical way to run e2e — same image and seeded data as
+CI. `make test-e2e` is for fast iteration against your own dev API. See
+[`e2e/README.md`](e2e/README.md) for project layout, env vars, and conventions.
 
 ## Pre-PR checklist
 
 - [ ] Branch is off `main` and up to date (`git fetch && git rebase origin/main`).
 - [ ] `npm run lint` passes.
 - [ ] `npm test` green.
-- [ ] If you touched the player or offline path, also run `npm run test:e2e` locally.
+- [ ] If you touched the player or offline path, also run `make test-e2e-local` locally.
 - [ ] If you touched the SW or service-worker registration, do a manual `npm run build && npm run start` smoke (offline + online navigation, login flow, artwork load).
 - [ ] If you added an env var, update `docs/ENV.md` and any `.env.*` placeholders.
 - [ ] If you added a route, update `docs/ARCHITECTURE.md`'s route map and `nav-links.tsx`.

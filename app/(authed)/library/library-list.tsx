@@ -489,7 +489,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         if (!target) return
 
         const POLL_INTERVAL_MS = 150
-        const MAX_POLL_ATTEMPTS = 20  // 20 × 150ms = 3s window for late renders
+        const MAX_POLL_ATTEMPTS = 80  // 80 × 150ms = 12s window for late renders
 
         let cancelled = false
         let pollTimer: ReturnType<typeof setTimeout> | null = null
@@ -507,9 +507,16 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
             }
             el.scrollIntoView({ behavior: 'instant' as ScrollBehavior, block: 'center' })
             el.style.animation = 'none'
-            void el.offsetWidth // force reflow so the animation restarts on same element
+            void el.offsetWidth
             el.style.animation = 'song-highlight 1.5s ease-out forwards'
+            el.dataset.animated = 'once'
             el.addEventListener('animationend', () => { el.style.animation = '' }, { once: true })
+            // Remove ?song/?album from URL so subsequent letter-rail taps don't re-fire this effect
+            const params = new URLSearchParams(searchParams.toString())
+            params.delete('song')
+            params.delete('album')
+            const qs = params.toString()
+            router.replace(qs ? `?${qs}` : window.location.pathname, { scroll: false })
         }
 
         tryScroll(0)
@@ -838,6 +845,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                 </button>
                 <EditsBanner />
                 <button
+                    data-testid="save-all-offline"
                     onClick={saveAllOffline}
                     disabled={savingAll || !online}
                     title={!online ? 'go online to save songs for offline listening' : 'save all songs for offline listening'}

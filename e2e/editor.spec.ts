@@ -1,6 +1,6 @@
 import { routes } from './routes'
 import { test, expect, Page, Locator } from '@playwright/test'
-import { USERNAME, PASSWORD, login, ignoreError, apiLogin, API_V1 } from './helpers'
+import { USERNAME, PASSWORD, login, ignoreError, apiLogin, apiLoginAs, API_V1, EDITOR_USERNAME, EDITOR_PASSWORD } from './helpers'
 
 
 // Volume / Speed are ScrubInput components — role="spinbutton", aria-label
@@ -56,9 +56,10 @@ async function openEditorFromLibrary(page: Page) {
 
 test.describe('editor modal', () => {
     test.describe.configure({ mode: 'serial' })
+    test.use({ storageState: 'e2e/.auth/editor-user.json' })
 
     test.beforeEach(async ({ page }) => {
-        await login(page)
+        await login(page, EDITOR_USERNAME, EDITOR_PASSWORD)
     })
 
     test('opens editor modal for first library song', async ({ page }) => {
@@ -71,8 +72,8 @@ test.describe('editor modal', () => {
         await expect(modal.getByRole('button', { name: 'audio' })).toBeVisible()
         await expect(modal.getByRole('button', { name: 'properties' })).toBeVisible()
 
-        // give waveform time to load
-        await page.waitForTimeout(3000)
+        // wait for waveform to fully load (preview button is the ready signal)
+        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 15000 })
 
         const abortErrors = errors.filter(e => /AbortError/i.test(e))
         expect(abortErrors, `AbortErrors found: ${abortErrors.join('\n')}`).toHaveLength(0)
@@ -287,14 +288,14 @@ test.describe('editor modal', () => {
         page.on('pageerror', err => overlayErrors.push(err.message))
 
         const modal = await openEditorFromLibrary(page)
-        await page.waitForTimeout(1000)
+        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
         // close modal (triggers WaveSurfer destroy)
         await modal.getByTestId('editor-close').click()
         await expect(modal).not.toBeVisible()
 
         // wait for async AbortError to surface (if any)
-        await page.waitForTimeout(1000)
+        await page.waitForTimeout(500)
 
         const abortErrors = overlayErrors.filter(e => /AbortError/i.test(e))
         expect(abortErrors, `AbortErrors after close: ${abortErrors.join('\n')}`).toHaveLength(0)
@@ -399,7 +400,7 @@ test.describe('editor modal', () => {
         // preview with the cut active — actual button title is
         // "preview with edits" (toggles to "stop preview" while running).
         await modal.locator('button[title="preview with edits"]').click()
-        await page.waitForTimeout(800)
+        await expect(modal.locator('button[title="stop preview"]')).toBeVisible({ timeout: 5000 })
         await modal.locator('button[title="stop preview"]').click()
 
         const realErrors = errors.filter(e => !/AbortError/i.test(e) && !/Failed to fetch/i.test(e) && !/favicon/i.test(e))
@@ -539,7 +540,6 @@ test.describe('editor modal', () => {
         if (box) {
             await page.mouse.click(box.x + box.width * 0.7, box.y + box.height / 2)
         }
-        await page.waitForTimeout(300)
 
         await modal.locator('button[title="stop preview"]').click()
 
@@ -555,10 +555,12 @@ test.describe('editor modal', () => {
         await scrubFill(modal, 'volume', '+2.0 dB')
         await modal.getByTestId('editor-close').click()
 
-        // banner appears while draft saves, then modal closes automatically
-        const banner = page.locator('.bg-amber-50, .bg-amber-950\\/40').first()
-        await expect(banner).toBeVisible({ timeout: 3000 })
-        await expect(banner).toContainText(/Draft auto-saved/i)
+        // Single atomic check: banner appears while draft saves then auto-closes.
+        // filter({ hasText }) is evaluated atomically — avoids a sequential race
+        // where the banner disappears between toBeVisible and toContainText.
+        await expect(
+            page.locator('.bg-amber-50, .bg-amber-950\\/40').filter({ hasText: /Draft auto-saved/i })
+        ).toBeVisible({ timeout: 5000 })
         await expect(modal).not.toBeVisible({ timeout: 10000 })
     })
 
@@ -604,10 +606,8 @@ test.describe('editor modal', () => {
 
         // press l (seek forward 5s)
         await modal.press('l')
-        await page.waitForTimeout(100)
         // press h (seek backward 5s)
         await modal.press('h')
-        await page.waitForTimeout(100)
 
         const realErrors = errors.filter(e => !/AbortError/i.test(e) && !/Failed to fetch/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e) && !/404/i.test(e))
         expect(realErrors, `Errors: ${realErrors.join('\n')}`).toHaveLength(0)
@@ -694,7 +694,7 @@ test.describe('editor modal', () => {
     test('save to library: encodes and creates new song version', async ({ page }) => {
         test.skip(!!process.env.CI, 'encoding job too slow for CI runners — run locally')
         test.slow()
-        const api = await apiLogin()
+        const api = await apiLoginAs(EDITOR_USERNAME, EDITOR_PASSWORD)
         const modal = await openEditorFromLibrary(page)
         await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
 
@@ -711,12 +711,24 @@ test.describe('editor modal', () => {
 
         // Click "Save to Library" — handleSave creates the edit job, polls until done,
         // then router.push to /library?song=<newId>. The modal unmounts on success.
+
+        // Capture ?song= via framenavigated event — the library scroll effect clears
+        // it from the URL almost immediately, so toHaveURL (polling) misses it.
+        let capturedSongId: string | null = null
+        page.on('framenavigated', frame => {
+            if (frame === page.mainFrame()) {
+                const m = frame.url().match(/\/library\?.*song=([a-f0-9-]+)/)
+                if (m) capturedSongId = m[1]
+            }
+        })
+
         await modal.getByRole('button', { name: /^Save to Library$/i }).click()
 
-        // Wait for the post-save navigation. Encoding can take ~30-60s; allow 90s.
-        await expect(page).toHaveURL(/\/library\?song=[a-f0-9-]+/, { timeout: 90_000 })
-        const newSongId = page.url().match(/[?&]song=([a-f0-9-]+)/)?.[1]
-        expect(newSongId, 'New song ID should be present in URL').toBeTruthy()
+        // Wait for navigation to library. Encoding can take ~30-60s; allow 90s.
+        await page.waitForURL(/\/library/, { timeout: 90_000 })
+
+        expect(capturedSongId, 'New song ID should be present in redirect URL').toBeTruthy()
+        const newSongId = capturedSongId!
         expect(newSongId, 'New song ID should differ from origin').not.toBe(originSongId)
 
         // Cleanup: delete the new child song via API. 200/204 success, 404 already gone — both fine.
@@ -730,7 +742,7 @@ test.describe('editor modal', () => {
     test('restore original: child song shows restore button and navigates to parent', async ({ page }) => {
         test.skip(!!process.env.CI, 'encoding job too slow for CI runners — run locally')
         test.slow()
-        const api = await apiLogin()
+        const api = await apiLoginAs(EDITOR_USERNAME, EDITOR_PASSWORD)
 
         // Step 1: Open editor on a library song, capture parent ID, make an edit, save → creates a child.
         const modal1 = await openEditorFromLibrary(page)
@@ -742,11 +754,19 @@ test.describe('editor modal', () => {
         // Toggle Normalize for an unambiguous param change (volume slider is a ScrubInput, not a real range)
         await modal1.locator('label').filter({ hasText: /normalize/i }).locator('input[type="checkbox"]').check()
 
+        // Capture the child song ID from the brief ?song= URL before the app clears it.
+        let capturedChildId: string | null = null
+        page.on('framenavigated', frame => {
+            if (frame === page.mainFrame()) {
+                const m = frame.url().match(/\/library\?.*song=([a-f0-9-]+)/)
+                if (m) capturedChildId = m[1]
+            }
+        })
         await modal1.getByRole('button', { name: /^Save to Library$/i }).click()
 
         // After save, app router.push'es to /library?song=<newId>
-        await expect(page).toHaveURL(/\/library\?song=[a-f0-9-]+/, { timeout: 90_000 })
-        const childSongId = page.url().match(/[?&]song=([a-f0-9-]+)/)?.[1]
+        await page.waitForURL(/\/library/, { timeout: 90_000 })
+        const childSongId = capturedChildId ?? page.url().match(/[?&]song=([a-f0-9-]+)/)?.[1]
         expect(childSongId, 'Could not extract child song ID').toBeTruthy()
         expect(childSongId, 'Child song ID should differ from parent').not.toBe(parentSongId)
 
@@ -761,7 +781,7 @@ test.describe('editor modal', () => {
         const restoreBtn = childModal.getByRole('button', { name: 'Restore Original' })
         await expect(restoreBtn).toBeVisible({ timeout: 10000 })
         await restoreBtn.click()
-        await expect(page.getByText(/Restore original\?/i)).toBeVisible({ timeout: 5000 })
+        await expect(page.getByText('Restore original?', { exact: true })).toBeVisible({ timeout: 5000 })
         await page.getByRole('button', { name: 'Yes, restore' }).click()
 
         // Step 4: Assert URL navigates back to parent's editor route.

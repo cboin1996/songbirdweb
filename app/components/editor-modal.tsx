@@ -13,6 +13,7 @@ import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { usePlayer } from './player'
 import { routes, editSongRoute } from '../lib/routes'
+import { makeLocalId } from '../lib/uuid'
 
 import { snap as _snap } from '../lib/snap'
 import ScrubInput from './scrub-input'
@@ -454,8 +455,8 @@ export default function EditorModal({
       if (draftWithMeta) {
         const draft = draftWithMeta.params
         setDraftUpdatedAt(draftWithMeta.updated_at)
-        const cuts: Cut[] = (draft.cuts ?? []).map(c => ({ ...c, fade_in: c.fade_in ?? 0, fade_out: c.fade_out ?? 0, id: crypto.randomUUID() }))
-        const fades: FadeEdit[] = (draft.fades ?? []).map(f => ({ ...f, id: crypto.randomUUID() }))
+        const cuts: Cut[] = (draft.cuts ?? []).map(c => ({ ...c, fade_in: c.fade_in ?? 0, fade_out: c.fade_out ?? 0, id: makeLocalId() }))
+        const fades: FadeEdit[] = (draft.fades ?? []).map(f => ({ ...f, id: makeLocalId() }))
         const p = { ...draft, cuts, fades }
         setParams(p)
         if (wsReadyRef.current) { syncCutRegions(cuts); syncFadeRegions(fades) }
@@ -658,14 +659,14 @@ export default function EditorModal({
       })
       p.cuts.forEach(cut => {
         regions.addRegion({
-          id: cut.id ?? crypto.randomUUID(),
+          id: cut.id ?? makeLocalId(),
           start: cut.start, end: cut.end,
           color: 'transparent', drag: true, resize: true,
         })
       })
       p.fades.forEach(fade => {
         regions.addRegion({
-          id: `fade-${fade.id ?? crypto.randomUUID()}`,
+          id: `fade-${fade.id ?? makeLocalId()}`,
           start: fade.start, end: fade.end,
           color: 'transparent',
           drag: true, resize: true,
@@ -1263,7 +1264,7 @@ export default function EditorModal({
     regionsRef.current.getRegions().filter(r => r.id !== 'trim' && !r.id.startsWith('fade-')).forEach(r => r.remove())
     cuts.forEach(cut => {
       regionsRef.current!.addRegion({
-        id: cut.id ?? crypto.randomUUID(),
+        id: cut.id ?? makeLocalId(),
         start: cut.start, end: cut.end,
         color: 'rgba(239,68,68,0.15)', drag: true, resize: true,
       })
@@ -1277,7 +1278,7 @@ export default function EditorModal({
     regionsRef.current.getRegions().filter(r => r.id.startsWith('fade-')).forEach(r => r.remove())
     fades.forEach(fade => {
       regionsRef.current!.addRegion({
-        id: `fade-${fade.id ?? crypto.randomUUID()}`,
+        id: `fade-${fade.id ?? makeLocalId()}`,
         start: fade.start, end: fade.end,
         color: 'transparent',
         drag: true, resize: true,
@@ -1316,7 +1317,7 @@ export default function EditorModal({
     }
     const end = Math.min(trimEnd, start + span)
     if (end - start < MIN_REGION_DUR) { showPasteWarning('No room for a new cut — remove or shrink existing regions first'); return }
-    const id = crypto.randomUUID()
+    const id = makeLocalId()
     pushHistory(p)
     regionsRef.current?.addRegion({ id, start, end, color: 'transparent', drag: true, resize: true })
     setParams(prev => ({ ...prev, cuts: [...prev.cuts, { id, start, end, fade_in: 0, fade_out: 0 }] }))
@@ -1380,7 +1381,7 @@ export default function EditorModal({
       }
     }
     if (end - start < MIN_REGION_DUR) { showPasteWarning('No room for a new fade — remove or shrink existing regions first'); return }
-    const id = crypto.randomUUID()
+    const id = makeLocalId()
     pushHistory(paramsRef.current)
     regionsRef.current?.addRegion({ id: `fade-${id}`, start, end, color: 'transparent', drag: true, resize: true })
     setParams(prev => ({ ...prev, fades: [...prev.fades, { id, start, end, type }] }))
@@ -1406,7 +1407,7 @@ export default function EditorModal({
     }
     const end = Math.min(trimEnd, start + span)
     if (end - start < MIN_REGION_DUR) return
-    const id = crypto.randomUUID()
+    const id = makeLocalId()
     pushHistory(p)
     regionsRef.current?.addRegion({ id, start, end, color: 'transparent', drag: true, resize: true })
     setParams(prev => ({ ...prev, cuts: [...prev.cuts, { id, start, end, fade_in: 0, fade_out: 0 }] }))
@@ -1426,7 +1427,7 @@ export default function EditorModal({
       start = Math.max(trimStart, end - DEFAULT_FADE_DUR)
     }
     if (end - start < 0.5) return
-    const id = crypto.randomUUID()
+    const id = makeLocalId()
     pushHistory(p)
     regionsRef.current?.addRegion({ id: `fade-${id}`, start, end, color: 'transparent', drag: true, resize: true })
     setParams(prev => ({ ...prev, fades: [...prev.fades, { id, start, end, type }] }))
@@ -1480,11 +1481,11 @@ export default function EditorModal({
     if (entry.kind === 'all') {
       const newCuts = entry.cuts.flatMap(c => {
         const b = applyBounds(c.start + delta, c.end + delta)
-        return b ? [{ ...c, id: crypto.randomUUID(), ...b }] : []
+        return b ? [{ ...c, id: makeLocalId(), ...b }] : []
       })
       const newFades = entry.fades.flatMap(f => {
         const b = applyBounds(f.start + delta, f.end + delta)
-        return b ? [{ ...f, id: crypto.randomUUID(), ...b }] : []
+        return b ? [{ ...f, id: makeLocalId(), ...b }] : []
       })
       const ac = [...p.cuts, ...newCuts]; const af = [...p.fades, ...newFades]
       setParams(prev => ({ ...prev, cuts: ac, fades: af }))
@@ -1493,7 +1494,7 @@ export default function EditorModal({
     } else if (entry.kind === 'cut') {
       const b = applyBounds(entry.data.start + delta, entry.data.end + delta)
       if (b) {
-        const id = crypto.randomUUID()
+        const id = makeLocalId()
         const nc: Cut = { ...entry.data, id, ...b }
         setParams(prev => ({ ...prev, cuts: [...prev.cuts, nc] }))
         syncCutRegions([...p.cuts, nc])
@@ -1502,7 +1503,7 @@ export default function EditorModal({
     } else {
       const b = applyBounds(entry.data.start + delta, entry.data.end + delta)
       if (b) {
-        const id = crypto.randomUUID()
+        const id = makeLocalId()
         const nf: FadeEdit = { ...entry.data, id, ...b }
         setParams(prev => ({ ...prev, fades: [...prev.fades, nf] }))
         syncFadeRegions([...p.fades, nf])

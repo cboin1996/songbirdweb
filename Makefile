@@ -42,12 +42,10 @@ build:
 	npm run build
 
 .PHONY: test-e2e
-# workers=1 for dev — the full e2e/ suite shares player + queue + library
-# state across the test user; workers=2 races on player state and flakes
-# editor/queue/player tests. Mobile + prod live in their own (smaller) dirs
-# without that shared-state surface, so they're fine at 2.
+# Destructive specs (editor, bulk-select, import) run on isolated users (phase 3).
+# Workers=2 is safe: destructive specs can't corrupt the shared test-user library.
 test-e2e:
-	npx playwright test --project=dev --workers=1
+	npx playwright test --project=dev --workers=2
 
 .PHONY: test-e2e-prod
 test-e2e-prod:
@@ -139,14 +137,22 @@ e2e-next-up:
 	@curl -sf http://localhost:$(E2E_API_PORT)/v1/version >/dev/null || \
 		(echo "✗ e2e api not reachable on :$(E2E_API_PORT). Run make e2e-api-up first." && exit 1)
 	@if [ -f $(E2E_NEXT_PIDFILE) ] && kill -0 $$(cat $(E2E_NEXT_PIDFILE)) 2>/dev/null; then \
-		echo "e2e next already running"; \
+		echo "e2e next already running (pid=$$(cat $(E2E_NEXT_PIDFILE)))"; \
 	else \
-		nohup env NEXT_PUBLIC_API_BASE_URL=http://localhost:$(E2E_API_PORT) API_BASE_URL=http://localhost:$(E2E_API_PORT) npm run dev:e2e > /tmp/songbirdweb-e2e-next.log 2>&1 & echo $$! > $(E2E_NEXT_PIDFILE); \
+		echo "Building Next.js for e2e (production build — no hot-reload watcher)..."; \
+		NEXT_PUBLIC_API_BASE_URL=http://localhost:$(E2E_API_PORT) \
+		API_BASE_URL=http://localhost:$(E2E_API_PORT) \
+		npm run build > /tmp/songbirdweb-e2e-build.log 2>&1 || \
+			(echo "✗ next build failed — check /tmp/songbirdweb-e2e-build.log" && exit 1); \
+		nohup env \
+			NEXT_PUBLIC_API_BASE_URL=http://localhost:$(E2E_API_PORT) \
+			API_BASE_URL=http://localhost:$(E2E_API_PORT) \
+			npx next start -p $(E2E_WEB_PORT) > /tmp/songbirdweb-e2e-next.log 2>&1 & echo $$! > $(E2E_NEXT_PIDFILE); \
 		for i in $$(seq 1 60); do \
 			curl -sf http://localhost:$(E2E_WEB_PORT) -o /dev/null && echo "✓ next ready" && exit 0; \
 			sleep 1; \
 		done; \
-		echo "next dev:e2e failed to start — check /tmp/songbirdweb-e2e-next.log" && exit 1; \
+		echo "✗ next start failed — check /tmp/songbirdweb-e2e-next.log" && exit 1; \
 	fi
 
 .PHONY: e2e-next-down
@@ -165,7 +171,13 @@ test-e2e-local: e2e-api-up e2e-next-up
 	TEST_PASSWORD=e2e-TestPass-9917 \
 	E2E_ADMIN_USERNAME=e2e-admin \
 	E2E_ADMIN_PASSWORD=e2e-admin-pass \
-	npx playwright test --project=dev --workers=1
+	E2E_EDITOR_USERNAME=e2e-editor \
+	E2E_EDITOR_PASSWORD=e2e-EditorPass-1 \
+	E2E_BULK_USERNAME=e2e-bulk \
+	E2E_BULK_PASSWORD=e2e-BulkPass-1 \
+	E2E_IMPORT_USERNAME=e2e-import \
+	E2E_IMPORT_PASSWORD=e2e-ImportPass-1 \
+	npx playwright test --project=dev --workers=2
 
 .PHONY: test-e2e-local-mobile
 test-e2e-local-mobile: e2e-api-up e2e-next-up

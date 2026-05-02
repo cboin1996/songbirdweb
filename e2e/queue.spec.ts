@@ -52,7 +52,8 @@ test.describe('player queue', () => {
         await menu.getByRole('button', { name: 'Play next' }).click()
 
         // Track name should NOT have changed — only the queue order should change.
-        await page.waitForTimeout(500)
+        // Wait for menu to close as signal the action completed.
+        await expect(menu).not.toBeVisible({ timeout: 3000 })
         const afterName = (await trackNameEl.textContent())?.trim() ?? ''
         expect(afterName).toBe(beforeName)
 

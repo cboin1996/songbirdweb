@@ -10,7 +10,7 @@ This doc maps the contexts and the most state-heavy components. For the page/rou
 
 ## `PlayerProvider` — `app/components/player.tsx`
 
-Mounted once in `app/layout.tsx` so a single `<audio>` element survives every navigation. Owns queue, current song, shuffle/repeat, queue sources, and persists all of it to the server (`/v1/player/state`). No longer uses localStorage — state is server-authoritative.
+Mounted once in `app/layout.tsx` so a single `<audio>` element survives every navigation. Owns queue, current song, shuffle/repeat, queue sources, and persists all of it to the server (`/v1/player/state`). Server is the source of truth; localStorage holds a mirror that's used as a fallback if the server fetch fails on restore.
 
 ### Public API — `usePlayer()`
 
@@ -51,6 +51,9 @@ interface PlayerContextValue {
 | `shouldPlayRef` | Set to true between `audio.load()` and the metadata event so we know to call `play()` then. |
 | `autoplayActivatedRef` | First play must call `audio.play()` synchronously inside the user-gesture window. After that, awaits before touching the audio element are safe. |
 | `saveTimerRef` | Throttles server-state saves (queue mutations + position checkpoints). |
+| `sessionKeepAliveRef` | True while the audio element is looping `silence.mp3` to keep the iOS audio session warm during a logical pause. Listeners early-return when set so silent-loop events don't clobber UI state. |
+| `savedSrcBeforeSilenceRef` | The real song's `audio.src` captured at pause time, so resume can restore it. |
+| `pinnedPosRef`, `pinnedDurRef` | Real position + duration captured at pause; re-asserted to `mediaSession.setPositionState` on every silent-loop tick so iOS lock-screen shows the static paused position instead of the silent file's `audio.currentTime`. |
 
 ### Persistence schedule
 
@@ -60,7 +63,21 @@ interface PlayerContextValue {
 
 ### Keyboard shortcuts
 
-`Space` play/pause, `←/→` skip prev/next. Wired in a `useEffect` that listens on `window`. Media Session API integration sets `navigator.mediaSession.setActionHandler('previoustrack' | 'nexttrack')` so the OS-level controls work.
+`Space` play/pause, `←/→` skip prev/next. Wired in a `useEffect` that listens on `window`.
+
+### Media Session API + iOS lock-screen
+
+`navigator.mediaSession.setActionHandler` is bound for `play`, `pause`, `previoustrack`, and `nexttrack` so OS-level controls (Android notification, iOS lock-screen / Control Center) work.
+
+iOS Safari releases the audio session ~10s after a normal `audio.pause()` in the background, after which the lock-screen play button becomes unresponsive until the user reopens Safari. To keep the session warm, **`pause()` swaps `audio.src` to a 4 KB looping `silence.mp3`** instead of actually pausing the element. `resume()` swaps the song's src back and seeks to `pendingPosition`.
+
+Because the silent file's `audio.currentTime`/`audio.duration` are ~0/1s, iOS would show those on the lock-screen scrubber. To override:
+
+- `mediaSession.playbackState = 'paused'` — tells the OS to render a play button + treat position as static.
+- `mediaSession.setPositionState({ position: realPos, duration: realDur, playbackRate: 1 })` — must use `playbackRate=1` (the spec rejects 0; `try/catch` would silently swallow the `TypeError` if you pass 0).
+- The position state is **re-asserted on every silent-loop `timeupdate`** because iOS otherwise polls `audio.currentTime` for the playhead and the lock-screen position drifts back to 0:00.
+
+After ~20s in the background iOS sometimes suspends the page, killing the silent loop. A `visibilitychange` listener detects this on re-foreground (silent-loop active + `audio.paused === true`) and resets the UI to "ready to play" — restores the real `audio.src`, drops the keep-alive flag, clears `isBuffering`/`isPlaying` — so the user sees a tappable play button instead of a stuck spinner. The same handler re-binds `previoustrack`/`nexttrack` because iOS forgets them across suspension and falls back to ±10s seek markers.
 
 ## `UserProvider` — `app/lib/user-context.tsx`
 

@@ -36,20 +36,22 @@ test.describe('navigation: every authenticated page loads', () => {
         })
     }
 
-    test.fixme('navbar links are visible and clickable', async ({ page }) => {
+    test('navbar links are visible and clickable', async ({ page }) => {
         await page.goto(routes.download)
-        await expect(page.getByRole('link', { name: 'library' })).toBeVisible()
-        await expect(page.getByRole('link', { name: 'explore' })).toBeVisible()
-        await expect(page.getByRole('link', { name: 'import' })).toBeVisible()
-        await expect(page.getByRole('link', { name: 'download' })).toBeVisible()
+        // .first() guards against any incidental matches inside page content
+        // (e.g. card text matching link name) — only the navbar is under test.
+        await expect(page.getByRole('link', { name: 'library' }).first()).toBeVisible()
+        await expect(page.getByRole('link', { name: 'explore' }).first()).toBeVisible()
+        await expect(page.getByRole('link', { name: 'import' }).first()).toBeVisible()
+        await expect(page.getByRole('link', { name: 'download' }).first()).toBeVisible()
 
-        await page.getByRole('link', { name: 'library' }).click()
+        await page.getByRole('link', { name: 'library' }).first().click()
         await expect(page).toHaveURL(/\/library/)
 
-        await page.getByRole('link', { name: 'explore' }).click()
+        await page.getByRole('link', { name: 'explore' }).first().click()
         await expect(page).toHaveURL(/\/explore/)
 
-        await page.getByRole('link', { name: 'download' }).click()
+        await page.getByRole('link', { name: 'download' }).first().click()
         await expect(page).toHaveURL(/\/download/)
     })
 })

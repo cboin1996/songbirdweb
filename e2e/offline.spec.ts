@@ -48,12 +48,17 @@ test.describe('offline mode', () => {
         await expect(page.getByText(/needs internet/i)).toBeVisible()
     })
 
+    // FIXME: library-list returns the empty-state message instead of the toolbar
+    // when offline AND no songs cached locally — so the save-all button doesn't
+    // exist for the e2e seed user (no offline cache). Test would need to first
+    // cache a song while online, then flip offline. data-testid is wired
+    // (`save-all-offline`) and waits to be exercised.
     test.fixme('save all offline button is disabled when offline', async ({ page }) => {
         await page.goto(routes.library)
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
         await page.context().setOffline(true)
         await page.evaluate(() => window.dispatchEvent(new Event('offline')))
-        const saveAllBtn = page.getByRole('button', { name: /save all offline/i })
+        const saveAllBtn = page.getByTestId('save-all-offline')
         await expect(saveAllBtn).toBeVisible({ timeout: 5000 })
         await expect(saveAllBtn).toBeDisabled()
     })

@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useImperativeHandle, useMemo, useState } from 'react'
+import { useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { FaDove } from 'react-icons/fa6'
 import { ImportJobResult, listImportJobs, pollImportJob } from '../lib/data'
@@ -33,6 +33,7 @@ export default function ImportJobsTable({
   const [loading, setLoading] = useState(false)
   // Session in-flight tracking — survives pagination/filter changes.
   const [activeIds, setActiveIds] = useState<Set<string>>(new Set())
+  const activeIdsRef = useRef<Set<string>>(new Set())
   const [sessionFinished, setSessionFinished] = useState(0)
   const inFlight = activeIds.size
   const hasInFlight = inFlight > 0
@@ -62,6 +63,7 @@ export default function ImportJobsTable({
         finishedDelta = 1
       }
       if (finishedDelta) setSessionFinished(d => d + finishedDelta)
+      activeIdsRef.current = next
       return next
     })
   }
@@ -92,7 +94,8 @@ export default function ImportJobsTable({
       if (!data) return
       const byId = new Map((data.jobs ?? []).map(j => [j.job_id, j]))
       // Fetch any active jobs not on page 1 individually.
-      const missing = [...activeIds].filter(id => !byId.has(id))
+      // Use ref to avoid stale closure over activeIds state.
+      const missing = [...activeIdsRef.current].filter(id => !byId.has(id))
       if (missing.length > 0) {
         await Promise.all(missing.map(async id => {
           const job = await pollImportJob(id)
@@ -111,6 +114,7 @@ export default function ImportJobsTable({
           }
         }
         if (finishedDelta) setSessionFinished(d => d + finishedDelta)
+        activeIdsRef.current = next
         return next
       })
       // update visible page

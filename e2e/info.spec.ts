@@ -58,9 +58,9 @@ test.describe('info page', () => {
 
     test('all three repo links present', async ({ page }) => {
         await page.goto(routes.info)
-        await expect(page.locator('a[href*="songbirdweb"]')).toBeVisible({ timeout: 5000 })
-        await expect(page.locator('a[href*="songbirdapi"]')).toBeVisible()
-        await expect(page.locator('a[href*="songbirdcore"]')).toBeVisible()
+        await expect(page.locator('a[href*="songbirdweb"]').first()).toBeVisible({ timeout: 5000 })
+        await expect(page.locator('a[href*="songbirdapi"]').first()).toBeVisible()
+        await expect(page.locator('a[href*="songbirdcore"]').first()).toBeVisible()
     })
 
     test('version cards have border styling (rendered)', async ({ page }) => {
@@ -78,7 +78,7 @@ test.describe('info page', () => {
         page.on('pageerror', err => errors.push(err.message))
 
         await page.goto(routes.info)
-        await page.waitForTimeout(1000)
+        await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {})
 
         const realErrors = errors.filter(e => !ignoreError(e))
         expect(realErrors, `Console errors: ${realErrors.join('\n')}`).toHaveLength(0)
