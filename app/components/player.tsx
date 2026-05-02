@@ -467,6 +467,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         pinnedDurRef.current = realDur
         savedSrcBeforeSilenceRef.current = audio.src
         sessionKeepAliveRef.current = true
+        // Fire a real 'pause' event + declare paused BEFORE swapping to the
+        // silent track. The lock-screen 'pause' MediaSession action handler
+        // works because iOS's own gesture commits the Now Playing widget to
+        // paused; mimic that for in-app pause by giving iOS a real pause
+        // signal on the audio element first.
+        audio.pause()
+        pinLockScreenPosition(realPos, realDur)
         audio.src = SILENT_LOOP_SRC
         audio.loop = true
         audio.load()
@@ -477,7 +484,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             audio.pause()
         })
         setIsPlaying(false)
-        pinLockScreenPosition(realPos, realDur)
     }
 
     function resume() {
@@ -834,6 +840,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             pinnedDurRef.current = realDur
             savedSrcBeforeSilenceRef.current = audio.src
             sessionKeepAliveRef.current = true
+            audio.pause()
+            pinLockScreenPosition(realPos, realDur)
             audio.src = SILENT_LOOP_SRC
             audio.loop = true
             audio.load()
@@ -843,7 +851,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 audio.pause()
             })
             setIsPlaying(false)
-            pinLockScreenPosition(realPos, realDur)
         })
         navigator.mediaSession.setActionHandler('previoustrack', skipPrev)
         navigator.mediaSession.setActionHandler('nexttrack', skipNext)
