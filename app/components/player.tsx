@@ -445,76 +445,39 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         try { navigator.mediaSession.setPositionState() } catch {}
     }
 
-    // Build & set MediaMetadata for the current song. Called when current
-    // changes, and again on resume to restore the Now Playing widget after
-    // an in-app pause cleared it.
-    function setMediaSessionMetadata(song: PlayableSong) {
-        if (!song.properties || !('mediaSession' in navigator)) return
-        const p = song.properties
-        const origin = typeof window !== 'undefined' ? window.location.origin : ''
-        const sizes = [128, 192, 256, 384, 512]
-        const artwork: { src: string; sizes: string; type: string }[] = []
-        for (const s of sizes) {
-            const url = songArtworkUrl(song.uuid, song.artwork_cached, p.artworkUrl100, s)
-            if (!url) continue
-            const absolute = url.startsWith('/') ? `${origin}${url}` : url
-            artwork.push({ src: absolute, sizes: `${s}x${s}`, type: 'image/jpeg' })
-        }
-        navigator.mediaSession.metadata = new MediaMetadata({
-            title: p.trackName,
-            artist: p.artistName,
-            album: p.collectionName,
-            artwork,
-        })
-    }
-
-    // In-app pause clears the iOS Now Playing widget. Setting both metadata
-    // and playbackState lets iOS hide the widget entirely (or at least show
-    // a neutral state) instead of the misleading "playing" indicator that
-    // sticks when the audio element is paused but iOS hasn't refreshed.
-    function clearMediaSessionForInAppPause() {
-        if (!('mediaSession' in navigator)) return
-        navigator.mediaSession.metadata = null
-        navigator.mediaSession.playbackState = 'none'
-        try { navigator.mediaSession.setPositionState() } catch {}
-    }
-
-    // In-app pause is a clean audio.pause(). No silent-loop keep-alive here:
-    // iOS Now Playing reads element.paused = true and shows "paused" in sync
-    // with our UI. The lock-screen 'pause' MediaSession action handler still
-    // does the silent-loop trick — iOS commits its widget to paused on the
-    // user's gesture before our handler runs, so the widget shows paused there
-    // too. See cboin1996/songbirdweb#16 for the iOS quirk.
-    //
-    // Trade-off: after ~10s in-app paused + locked, iOS releases the audio
-    // session and lock-screen play stops responding. User unlocks and resumes
-    // in-app to recover.
     function pause() {
         const audio = audioRef.current
         if (!audio || !current) return
+        // Already in silent-loop pause — nothing to do.
         if (sessionKeepAliveRef.current) {
-            // Came from lock-screen pause (silent loop running). Tear it down
-            // and hard-pause at the pinned position, so we end up in a clean
-            // paused state regardless of which path triggered the in-app pause.
-            const realSrc = savedSrcBeforeSilenceRef.current
-            const realPos = pinnedPosRef.current
-            sessionKeepAliveRef.current = false
-            savedSrcBeforeSilenceRef.current = null
-            audio.loop = false
-            if (realSrc) {
-                audio.src = realSrc
-                pendingPosition.current = realPos
-                shouldPlayRef.current = false
-                audio.load()
-            }
             setIsPlaying(false)
-            clearMediaSessionForInAppPause()
             return
         }
-        if (audio.src && !audio.paused) savePosition(current, audio.currentTime)
-        audio.pause()
+        // No real source loaded yet — fall back to a hard pause.
+        if (!audio.src || audio.paused) {
+            audio.pause()
+            setIsPlaying(false)
+            return
+        }
+        const realPos = audio.currentTime
+        const realDur = audio.duration
+        savePosition(current, realPos)
+        pendingPosition.current = realPos
+        pinnedPosRef.current = realPos
+        pinnedDurRef.current = realDur
+        savedSrcBeforeSilenceRef.current = audio.src
+        sessionKeepAliveRef.current = true
+        audio.src = SILENT_LOOP_SRC
+        audio.loop = true
+        audio.load()
+        audio.play().catch(() => {
+            // Silent loop failed to start — drop the keep-alive and fall back to a hard pause.
+            sessionKeepAliveRef.current = false
+            audio.loop = false
+            audio.pause()
+        })
         setIsPlaying(false)
-        clearMediaSessionForInAppPause()
+        pinLockScreenPosition(realPos, realDur)
     }
 
     function resume() {
@@ -534,9 +497,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             unpinLockScreenPosition()
             return
         }
-        // Restore Now Playing widget after an in-app pause cleared it.
-        if (current) setMediaSessionMetadata(current)
-        if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing'
         setIsPlaying(true)
         audio.play().catch(() => {})
     }
@@ -813,7 +773,27 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     useEffect(() => {
         if (!current?.properties || !('mediaSession' in navigator)) return
-        setMediaSessionMetadata(current)
+        const p = current.properties
+        // iOS lock screen prefers several sizes; provide both small and large so the OS picks what fits.
+        // Use the absolute origin for cached artwork URLs since Media Session needs fully-qualified URLs.
+        const origin = typeof window !== 'undefined' ? window.location.origin : ''
+        const buildArtwork = (): { src: string; sizes: string; type: string }[] => {
+            const sizes = [128, 192, 256, 384, 512]
+            const out: { src: string; sizes: string; type: string }[] = []
+            for (const s of sizes) {
+                const url = songArtworkUrl(current.uuid, current.artwork_cached, p.artworkUrl100, s)
+                if (!url) continue
+                const absolute = url.startsWith('/') ? `${origin}${url}` : url
+                out.push({ src: absolute, sizes: `${s}x${s}`, type: 'image/jpeg' })
+            }
+            return out
+        }
+        navigator.mediaSession.metadata = new MediaMetadata({
+            title: p.trackName,
+            artist: p.artistName,
+            album: p.collectionName,
+            artwork: buildArtwork(),
+        })
         navigator.mediaSession.setActionHandler('play', () => {
             const audio = audioRef.current
             if (!audio) return
