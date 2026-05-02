@@ -149,5 +149,5 @@ test.afterAll(async () => {
 - Don't assert on toast / animation timing — race-prone
 - New helpers go in `helpers.ts`, not inline in specs
 
-See `REFACTOR_PLAN.md` for in-progress refactor phases (testid pass, page object models,
-fixme triage).
+In-progress refactor phases (testid pass, page object models, fixme triage) are tracked
+in [the E2E refactor epic](https://github.com/cboin1996/songbirdweb/issues/10).
