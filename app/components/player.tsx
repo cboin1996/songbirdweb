@@ -445,6 +445,48 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         try { navigator.mediaSession.setPositionState() } catch {}
     }
 
+    // Lock-screen seek (scrubber drag, ±10 buttons). During silent-loop pause
+    // the audio element is on the silence file, so we update our pinned refs
+    // and re-assert lock-screen position; the real seek happens when resume
+    // restores the song's src and seeks to pendingPosition. While playing
+    // normally, just move audio.currentTime.
+    const applySeek = useCallback((targetSeconds: number) => {
+        const audio = audioRef.current
+        if (!audio) return
+        const dur = pinnedDurRef.current || audio.duration || 0
+        if (!isFinite(dur) || dur <= 0) return
+        const t = Math.max(0, Math.min(targetSeconds, dur))
+        if (sessionKeepAliveRef.current) {
+            pinnedPosRef.current = t
+            pendingPosition.current = t
+            pinLockScreenPosition(t, pinnedDurRef.current)
+            return
+        }
+        audio.currentTime = t
+        setCurrentTime(t)
+    }, [])
+
+    function bindSeekHandlers() {
+        if (!('mediaSession' in navigator)) return
+        navigator.mediaSession.setActionHandler('seekto', (e) => {
+            if (typeof e.seekTime === 'number') applySeek(e.seekTime)
+        })
+        navigator.mediaSession.setActionHandler('seekbackward', (e) => {
+            const offset = e.seekOffset ?? 10
+            const base = sessionKeepAliveRef.current
+                ? pinnedPosRef.current
+                : (audioRef.current?.currentTime ?? 0)
+            applySeek(base - offset)
+        })
+        navigator.mediaSession.setActionHandler('seekforward', (e) => {
+            const offset = e.seekOffset ?? 10
+            const base = sessionKeepAliveRef.current
+                ? pinnedPosRef.current
+                : (audioRef.current?.currentTime ?? 0)
+            applySeek(base + offset)
+        })
+    }
+
     function pause() {
         const audio = audioRef.current
         if (!audio || !current) return
@@ -847,7 +889,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         })
         navigator.mediaSession.setActionHandler('previoustrack', skipPrev)
         navigator.mediaSession.setActionHandler('nexttrack', skipNext)
-    }, [current, skipNext, skipPrev, savePosition])
+        bindSeekHandlers()
+    }, [current, skipNext, skipPrev, savePosition, applySeek])
 
     useEffect(() => {
         function onKeyDown(e: KeyboardEvent) {
@@ -887,12 +930,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         function onVisible() {
             if (document.hidden) return
 
-            // iOS sometimes forgets the previoustrack/nexttrack handlers after
-            // backgrounded suspension, falling back to ±10s seek markers on the
-            // lock-screen. Re-bind on every re-foreground.
+            // iOS sometimes forgets the action handlers after backgrounded
+            // suspension, falling back to ±10s seek markers on the lock-screen.
+            // Re-bind on every re-foreground.
             if ('mediaSession' in navigator) {
                 navigator.mediaSession.setActionHandler('previoustrack', skipPrev)
                 navigator.mediaSession.setActionHandler('nexttrack', skipNext)
+                bindSeekHandlers()
             }
 
             const audio = audioRef.current
