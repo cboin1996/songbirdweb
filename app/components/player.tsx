@@ -445,41 +445,39 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         try { navigator.mediaSession.setPositionState() } catch {}
     }
 
-    // In-app pause: clean audio.pause(). No silent loop — we want the iOS Now
-    // Playing widget to show "paused" in sync with our UI. Trade-off: after ~10s
-    // backgrounded, iOS releases the audio session and the lock-screen play
-    // button goes unresponsive (user must unlock and tap play in the app to
-    // resume). The silent-loop keep-alive is preserved on the lock-screen
-    // 'pause' MediaSession action handler, where iOS's own gesture commits the
-    // widget to "paused" before we run.
     function pause() {
         const audio = audioRef.current
         if (!audio || !current) return
+        // Already in silent-loop pause — nothing to do.
         if (sessionKeepAliveRef.current) {
-            // Tear down the silent loop and hard-pause at the pinned position.
-            // Reaches here when the user pressed pause-on-lock-screen (silent
-            // loop running) and then opens the app and presses pause in-UI.
-            const realSrc = savedSrcBeforeSilenceRef.current
-            const realPos = pinnedPosRef.current
-            sessionKeepAliveRef.current = false
-            savedSrcBeforeSilenceRef.current = null
-            audio.loop = false
-            if (realSrc) {
-                audio.src = realSrc
-                pendingPosition.current = realPos
-                shouldPlayRef.current = false
-                audio.load()
-            }
             setIsPlaying(false)
-            if ('mediaSession' in navigator) {
-                navigator.mediaSession.playbackState = 'paused'
-                try { navigator.mediaSession.setPositionState() } catch {}
-            }
             return
         }
-        if (audio.src && !audio.paused) savePosition(current, audio.currentTime)
-        audio.pause()
+        // No real source loaded yet — fall back to a hard pause.
+        if (!audio.src || audio.paused) {
+            audio.pause()
+            setIsPlaying(false)
+            return
+        }
+        const realPos = audio.currentTime
+        const realDur = audio.duration
+        savePosition(current, realPos)
+        pendingPosition.current = realPos
+        pinnedPosRef.current = realPos
+        pinnedDurRef.current = realDur
+        savedSrcBeforeSilenceRef.current = audio.src
+        sessionKeepAliveRef.current = true
+        audio.src = SILENT_LOOP_SRC
+        audio.loop = true
+        audio.load()
+        audio.play().catch(() => {
+            // Silent loop failed to start — drop the keep-alive and fall back to a hard pause.
+            sessionKeepAliveRef.current = false
+            audio.loop = false
+            audio.pause()
+        })
         setIsPlaying(false)
+        pinLockScreenPosition(realPos, realDur)
     }
 
     function resume() {
