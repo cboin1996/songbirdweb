@@ -79,7 +79,16 @@ Mobile UI has been compacted: larger card sizes, artwork, and player transport b
 
 ## Media Session API
 
-The player integrates with the OS-level media session for lock-screen controls on iOS/Android. Artwork is provided in multiple sizes (small, large) via `navigator.mediaSession.metadata` to accommodate different platform requirements.
+The player integrates with the OS-level media session for lock-screen controls on iOS/Android. Artwork is provided in multiple sizes via `navigator.mediaSession.metadata` to accommodate different platform requirements.
+
+iOS-specific quirks the player works around:
+
+- **Audio session release after pause.** iOS Safari releases the audio session ~10s after `audio.pause()` in the background, leaving the lock-screen play button unresponsive. Worked around by looping `public/silence.mp3` while "paused" instead of actually pausing the element.
+- **Lock-screen position drift.** iOS polls `audio.currentTime`/`audio.duration` continuously for the lock-screen scrubber, so the silent file would show 0:00 / 0:01. Worked around by setting `mediaSession.playbackState = 'paused'` and re-asserting `setPositionState({ playbackRate: 1, position, duration })` on every silent-loop tick (must use non-zero playbackRate per spec).
+- **Action handler loss after suspension.** iOS forgets registered `setActionHandler` bindings after backgrounded suspension and falls back to default ±10s seek markers. Re-bound on `visibilitychange` when the page becomes visible.
+- **Stuck-spinner recovery.** When the silent loop dies during suspension, the same `visibilitychange` handler resets the UI to "ready to play" so the user sees a tappable play button instead of a stuck spinner.
+
+See `docs/STATE.md` (PlayerProvider section) for the implementation details.
 
 ## Service worker — `public/sw.js`
 
