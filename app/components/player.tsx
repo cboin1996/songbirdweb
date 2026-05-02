@@ -222,6 +222,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     // UI side-effects (timeupdate, isPlaying flips) caused by the silent track.
     const sessionKeepAliveRef = useRef(false)
     const savedSrcBeforeSilenceRef = useRef<string | null>(null)
+    // Captured at pause time, re-asserted to MediaSession on each silent-loop
+    // tick so iOS doesn't fall back to reading audio.currentTime (which is the
+    // silent file's ~0). Cleared on resume.
+    const pinnedPosRef = useRef(0)
+    const pinnedDurRef = useRef(0)
 
     const showToast = useCallback((msg: string, error?: boolean) => {
         if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
@@ -458,6 +463,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         const realDur = audio.duration
         savePosition(current, realPos)
         pendingPosition.current = realPos
+        pinnedPosRef.current = realPos
+        pinnedDurRef.current = realDur
         savedSrcBeforeSilenceRef.current = audio.src
         sessionKeepAliveRef.current = true
         audio.src = SILENT_LOOP_SRC
@@ -680,7 +687,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             setIsBuffering(false)
         }
         function onTimeUpdate() {
-            if (sessionKeepAliveRef.current) return
+            if (sessionKeepAliveRef.current) {
+                // Re-assert the pinned position on every silent-loop tick so iOS
+                // can't fall back to reading audio.currentTime (=0 on the silent
+                // file). Without this the lock-screen playhead drifts to 0:00.
+                pinLockScreenPosition(pinnedPosRef.current, pinnedDurRef.current)
+                return
+            }
             setCurrentTime(audio!.currentTime)
             if (audio!.buffered.length > 0) setBuffered(audio!.buffered.end(audio!.buffered.length - 1))
         }
@@ -817,6 +830,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             const realDur = audio.duration
             savePosition(current, realPos)
             pendingPosition.current = realPos
+            pinnedPosRef.current = realPos
+            pinnedDurRef.current = realDur
             savedSrcBeforeSilenceRef.current = audio.src
             sessionKeepAliveRef.current = true
             audio.src = SILENT_LOOP_SRC
