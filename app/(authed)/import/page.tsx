@@ -5,7 +5,6 @@ import { FaUpload } from 'react-icons/fa'
 import ImportJobsTable, { ImportJobsTableHandle } from '../../components/import-jobs-table'
 import { useOnline } from '../../lib/use-online'
 import { useUser } from '../../lib/user-context'
-import { makeLocalId } from '../../lib/uuid'
 
 export default function ImportPage() {
   const online = useOnline()
@@ -42,7 +41,7 @@ export default function ImportPage() {
     const CONCURRENCY = 5
     for (let i = 0; i < arr.length; i += CONCURRENCY) {
       await Promise.all(arr.slice(i, i + CONCURRENCY).map(async file => {
-        const tempId = makeLocalId()
+        const tempId = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`
         const optimistic: ImportJobResult = {
           job_id: tempId,
           status: 'pending',
