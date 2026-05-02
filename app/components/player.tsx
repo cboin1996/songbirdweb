@@ -877,6 +877,37 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [current, skipPrev, skipNext])
 
+    // iOS suspends backgrounded tabs after ~20s, killing the silent loop that
+    // keeps the audio session warm. When the user reopens the app (especially
+    // in full-screen mode where there's no pull-to-refresh), the audio element
+    // can be in a stuck buffering state with no path back. Detect that on
+    // visibilitychange and reset the UI to "ready to play" so a user tap
+    // initiates a fresh load instead of staring at a spinner.
+    useEffect(() => {
+        function onVisible() {
+            if (document.hidden) return
+            const audio = audioRef.current
+            if (!audio) return
+            if (!sessionKeepAliveRef.current) return
+            if (!audio.paused) return  // silent loop still alive — nothing to do
+
+            const realSrc = savedSrcBeforeSilenceRef.current
+            sessionKeepAliveRef.current = false
+            savedSrcBeforeSilenceRef.current = null
+            audio.loop = false
+            shouldPlayRef.current = false
+            if (realSrc) {
+                audio.src = realSrc
+                audio.load()
+            }
+            setIsPlaying(false)
+            setIsBuffering(false)
+            unpinLockScreenPosition()
+        }
+        document.addEventListener('visibilitychange', onVisible)
+        return () => document.removeEventListener('visibilitychange', onVisible)
+    }, [])
+
     useEffect(() => {
         Promise.all([fetchPlayerState(), fetchLibrarySongs()]).then(async ([serverState, libSongs]) => {
             const libMap = new Map((libSongs ?? []).map(s => [s.uuid, s]))
