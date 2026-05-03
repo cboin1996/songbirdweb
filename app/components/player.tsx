@@ -445,6 +445,44 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         try { navigator.mediaSession.setPositionState() } catch {}
     }
 
+    // Swap audio element to the silent loop (preserves iOS audio session). Same
+    // single-element approach main has always used — keeps iOS's gesture-priority
+    // widget commit intact (a separate <audio> element breaks it).
+    function kickSilentLoop() {
+        const audio = audioRef.current
+        if (!audio || sessionKeepAliveRef.current) return
+        savedSrcBeforeSilenceRef.current = audio.src
+        sessionKeepAliveRef.current = true
+        audio.src = SILENT_LOOP_SRC
+        audio.loop = true
+        audio.load()
+        audio.play().catch(() => {
+            sessionKeepAliveRef.current = false
+            savedSrcBeforeSilenceRef.current = null
+            audio.loop = false
+        })
+        pinLockScreenPosition(pinnedPosRef.current, pinnedDurRef.current)
+    }
+
+    // Restore real song src from silent loop. autoplay=true for resume,
+    // false when transitioning back to visible (user is logically paused).
+    function stopSilentLoop(autoplay: boolean) {
+        if (!sessionKeepAliveRef.current) return
+        const audio = audioRef.current
+        const realSrc = savedSrcBeforeSilenceRef.current
+        sessionKeepAliveRef.current = false
+        savedSrcBeforeSilenceRef.current = null
+        if (audio) {
+            audio.loop = false
+            if (realSrc) {
+                audio.src = realSrc
+                shouldPlayRef.current = autoplay
+                audio.load()
+            }
+        }
+        unpinLockScreenPosition()
+    }
+
     function pause() {
         const audio = audioRef.current
         if (!audio || !current) return
@@ -465,36 +503,26 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         pendingPosition.current = realPos
         pinnedPosRef.current = realPos
         pinnedDurRef.current = realDur
-        savedSrcBeforeSilenceRef.current = audio.src
-        sessionKeepAliveRef.current = true
-        audio.src = SILENT_LOOP_SRC
-        audio.loop = true
-        audio.load()
-        audio.play().catch(() => {
-            // Silent loop failed to start — drop the keep-alive and fall back to a hard pause.
-            sessionKeepAliveRef.current = false
-            audio.loop = false
+        // Page visible (in-app pause): clean pause so widget syncs to "paused".
+        // Page hidden (lock-screen pause from another path): silent-loop swap so
+        // session stays warm. visibilitychange:hidden will kick silent loop later.
+        if (typeof document !== 'undefined' && document.hidden) {
+            kickSilentLoop()
+        } else {
             audio.pause()
-        })
+            if ('mediaSession' in navigator) {
+                navigator.mediaSession.playbackState = 'paused'
+            }
+        }
         setIsPlaying(false)
-        pinLockScreenPosition(realPos, realDur)
     }
 
     function resume() {
         const audio = audioRef.current
         if (!audio) return
         if (sessionKeepAliveRef.current) {
-            const realSrc = savedSrcBeforeSilenceRef.current
-            sessionKeepAliveRef.current = false
-            savedSrcBeforeSilenceRef.current = null
-            audio.loop = false
-            if (realSrc) {
-                audio.src = realSrc
-                shouldPlayRef.current = true
-                audio.load()
-            }
+            stopSilentLoop(true)
             setIsPlaying(true)
-            unpinLockScreenPosition()
             return
         }
         setIsPlaying(true)
@@ -798,17 +826,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             const audio = audioRef.current
             if (!audio) return
             if (sessionKeepAliveRef.current) {
-                const realSrc = savedSrcBeforeSilenceRef.current
-                sessionKeepAliveRef.current = false
-                savedSrcBeforeSilenceRef.current = null
-                audio.loop = false
-                if (realSrc) {
-                    audio.src = realSrc
-                    shouldPlayRef.current = true
-                    audio.load()
-                }
+                stopSilentLoop(true)
                 setIsPlaying(true)
-                unpinLockScreenPosition()
                 return
             }
             setIsPlaying(true)
@@ -832,21 +851,22 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             pendingPosition.current = realPos
             pinnedPosRef.current = realPos
             pinnedDurRef.current = realDur
-            savedSrcBeforeSilenceRef.current = audio.src
-            sessionKeepAliveRef.current = true
-            audio.src = SILENT_LOOP_SRC
-            audio.loop = true
-            audio.load()
-            audio.play().catch(() => {
-                sessionKeepAliveRef.current = false
-                audio.loop = false
+            // Lock-screen pause is the iOS gesture path — page is hidden, so
+            // silent-loop swap (main's behavior). iOS gesture priority should
+            // keep the widget on "paused" through the src transition.
+            if (typeof document !== 'undefined' && document.hidden) {
+                kickSilentLoop()
+            } else {
+                // Hardware/media-key pause from foreground (rare). Clean pause.
                 audio.pause()
-            })
+                navigator.mediaSession.playbackState = 'paused'
+            }
             setIsPlaying(false)
-            pinLockScreenPosition(realPos, realDur)
         })
         navigator.mediaSession.setActionHandler('previoustrack', skipPrev)
         navigator.mediaSession.setActionHandler('nexttrack', skipNext)
+    // kickSilentLoop / stopSilentLoop only touch refs — stale closures are fine.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [current, skipNext, skipPrev, savePosition])
 
     useEffect(() => {
@@ -877,44 +897,44 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [current, skipPrev, skipNext])
 
-    // iOS suspends backgrounded tabs after ~20s, killing the silent loop that
-    // keeps the audio session warm. When the user reopens the app (especially
-    // in full-screen mode where there's no pull-to-refresh), the audio element
-    // can be in a stuck buffering state with no path back. Detect that on
-    // visibilitychange and reset the UI to "ready to play" so a user tap
-    // initiates a fresh load instead of staring at a spinner.
+    // Visibility-gated silent loop:
+    // - hidden + audio cleanly paused → kick silent loop to keep session warm
+    // - visible → stop silent loop so widget can sync to "paused"
+    //
+    // Also handles the iOS-suspension case: if silent loop died during
+    // backgrounding, real-src restore + clearing state when foregrounded.
     useEffect(() => {
         function onVisible() {
-            if (document.hidden) return
+            const audio = audioRef.current
+            if (!audio) return
 
-            // iOS sometimes forgets the previoustrack/nexttrack handlers after
-            // backgrounded suspension, falling back to ±10s seek markers on the
-            // lock-screen. Re-bind on every re-foreground.
+            if (document.hidden) {
+                // Going hidden while logically paused: silent loop kicks in to
+                // preserve lock-screen play. iOS may flip the widget to
+                // "playing" since this isn't a user gesture, but the session
+                // stays warm and lock-screen controls work.
+                if (sessionKeepAliveRef.current) return
+                if (!audio.src || !audio.paused) return
+                kickSilentLoop()
+                return
+            }
+
+            // Becoming visible. Re-bind track handlers (iOS forgets them after
+            // backgrounded suspension) and stop silent loop so widget re-syncs.
             if ('mediaSession' in navigator) {
                 navigator.mediaSession.setActionHandler('previoustrack', skipPrev)
                 navigator.mediaSession.setActionHandler('nexttrack', skipNext)
             }
-
-            const audio = audioRef.current
-            if (!audio) return
-            if (!sessionKeepAliveRef.current) return
-            if (!audio.paused) return  // silent loop still alive — nothing to do
-
-            const realSrc = savedSrcBeforeSilenceRef.current
-            sessionKeepAliveRef.current = false
-            savedSrcBeforeSilenceRef.current = null
-            audio.loop = false
-            shouldPlayRef.current = false
-            if (realSrc) {
-                audio.src = realSrc
-                audio.load()
+            if (sessionKeepAliveRef.current) {
+                stopSilentLoop(false)
+                setIsPlaying(false)
+                setIsBuffering(false)
             }
-            setIsPlaying(false)
-            setIsBuffering(false)
-            unpinLockScreenPosition()
         }
         document.addEventListener('visibilitychange', onVisible)
         return () => document.removeEventListener('visibilitychange', onVisible)
+    // kickSilentLoop / stopSilentLoop only touch refs — stale closures are fine.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [skipPrev, skipNext])
 
     useEffect(() => {
