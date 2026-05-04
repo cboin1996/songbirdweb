@@ -150,19 +150,21 @@ function ProgressBar({ current, duration, buffered, onSeek }: {
                 onMouseDown={onMouseDown}
                 onTouchStart={onTouchStart}
                 onTouchMove={onTouchMove}
-                className="flex-1 h-0.5 bg-gray-200 dark:bg-gray-700 rounded-full cursor-pointer group relative"
+                className="flex-1 py-3 cursor-pointer group relative touch-manipulation select-none"
             >
-                {/* buffer track */}
-                <div
-                    className="absolute inset-y-0 left-0 bg-gray-400/40 dark:bg-gray-500/40 rounded-full"
-                    style={{ width: `${bufferedPct}%` }}
-                />
-                {/* played track */}
-                <div
-                    className="h-full bg-sky-500 rounded-full relative"
-                    style={{ width: `${pct}%` }}
-                >
-                    <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-sky-500 rounded-full opacity-0 group-hover:opacity-100 group-active:opacity-100 transition-opacity touch-manipulation" />
+                <div className="h-0.5 bg-gray-200 dark:bg-gray-700 rounded-full relative">
+                    {/* buffer track */}
+                    <div
+                        className="absolute inset-y-0 left-0 bg-gray-400/40 dark:bg-gray-500/40 rounded-full"
+                        style={{ width: `${bufferedPct}%` }}
+                    />
+                    {/* played track */}
+                    <div
+                        className="h-full bg-sky-500 rounded-full relative"
+                        style={{ width: `${pct}%` }}
+                    >
+                        <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-sky-500 rounded-full opacity-0 group-hover:opacity-100 group-active:opacity-100 transition-opacity" />
+                    </div>
                 </div>
             </div>
             <span className="text-xs text-gray-400 tabular-nums w-8 shrink-0">-{fmt((duration || 0) - current)}</span>
@@ -173,6 +175,7 @@ function ProgressBar({ current, duration, buffered, onSeek }: {
 export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const audioRef = useRef<HTMLAudioElement>(null)
     const [current, setCurrent] = useState<PlayableSong | null>(null)
+    const currentRef = useRef<PlayableSong | null>(null)
     const [isPlaying, setIsPlaying] = useState(false)
     const [isBuffering, setIsBuffering] = useState(false)
     const [currentTime, setCurrentTime] = useState(0)
@@ -196,6 +199,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const blobUrlRef = useRef<string | null>(null)
     const autoplayActivatedRef = useRef(false)
+    const wantsPlayingRef = useRef(false)
     // refs mirror state so stable callbacks always see latest values
     const queueRef = useRef<PlayableSong[]>([])
     const queueIndexRef = useRef(-1)
@@ -267,6 +271,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setDuration(0)
         setCurrent(song)
         setIsPlaying(true)
+        wantsPlayingRef.current = true
 
         if (autoplayActivatedRef.current) {
             const src = await resolveAudioSrc(song.uuid)
@@ -398,6 +403,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         scheduleSave()
     }
 
+    function setMediaAction(action: MediaSessionAction, handler: MediaSessionActionHandler | null) {
+        try { navigator.mediaSession.setActionHandler(action, handler) } catch {}
+    }
+
     function syncMediaSession(song: PlayableSong) {
         if (!('mediaSession' in navigator) || !song.properties) return
         const p = song.properties
@@ -416,10 +425,17 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             album: p.collectionName,
             artwork,
         })
-        navigator.mediaSession.setActionHandler('play', () => resume())
-        navigator.mediaSession.setActionHandler('pause', () => pause())
-        navigator.mediaSession.setActionHandler('previoustrack', skipPrev)
-        navigator.mediaSession.setActionHandler('nexttrack', skipNext)
+        setMediaAction('play', () => resume())
+        setMediaAction('pause', () => pause())
+        setMediaAction('previoustrack', skipPrev)
+        setMediaAction('nexttrack', skipNext)
+        setMediaAction('seekto', (details) => {
+            const audio = audioRef.current
+            if (!audio || details.seekTime == null) return
+            audio.currentTime = details.seekTime
+            setCurrentTime(details.seekTime)
+            updatePositionState()
+        })
     }
 
     function updatePositionState() {
@@ -433,21 +449,25 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         })
     }
 
-    function pause() {
+    const pause = useCallback(() => {
         const audio = audioRef.current
-        if (!audio || !current) return
+        const song = currentRef.current
+        if (!audio || !song) return
+        wantsPlayingRef.current = false
         audio.pause()
-        savePosition(current, audio.currentTime)
+        savePosition(song, audio.currentTime)
         setIsPlaying(false)
         if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused'
-    }
+    }, [savePosition])
 
-    function resume() {
-        if (current) syncMediaSession(current)
+    const resume = useCallback(() => {
+        wantsPlayingRef.current = true
         audioRef.current?.play().catch(() => {})
         setIsPlaying(true)
         if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing'
-    }
+        const song = currentRef.current
+        if (song) syncMediaSession(song)
+    }, [])
 
     function handleSeek(t: number) {
         const audio = audioRef.current
@@ -606,8 +626,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 audio!.play().catch(() => {})
             }
         }
-        function onPlay() { setIsPlaying(true); setIsBuffering(false); autoplayActivatedRef.current = true }
-        function onPause() { setIsPlaying(false); setIsBuffering(false) }
+        function onPlay() {
+            setIsPlaying(true); setIsBuffering(false); autoplayActivatedRef.current = true
+            if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing'
+        }
+        function onPause() {
+            setIsPlaying(false); setIsBuffering(false)
+            if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused'
+        }
         function onLoadStart() { setIsBuffering(true); setBuffered(0) }
         function onWaiting() { setIsBuffering(true) }
         function onPlaying() { setIsBuffering(false) }
@@ -644,13 +670,23 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             if (document.visibilityState !== 'visible') return
             const audio = audioRef.current
             if (!audio) return
-            setIsPlaying(!audio.paused)
+            if (wantsPlayingRef.current && audio.paused) {
+                setIsPlaying(true)
+                audio.play().catch(() => {
+                    wantsPlayingRef.current = false
+                    setIsPlaying(false)
+                })
+            } else {
+                setIsPlaying(!audio.paused)
+            }
             setCurrentTime(audio.currentTime)
             if (isFinite(audio.duration)) setDuration(audio.duration)
         }
         document.addEventListener('visibilitychange', onVisibilityChange)
         return () => document.removeEventListener('visibilitychange', onVisibilityChange)
     }, [])
+
+    useEffect(() => { currentRef.current = current }, [current])
 
     // current-dependent: onEnded needs current to save position
     useEffect(() => {
@@ -687,18 +723,18 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     useEffect(() => {
         if (current) syncMediaSession(current)
-    }, [current, skipNext, skipPrev, savePosition])
+    }, [current, skipNext, skipPrev, pause, resume])
 
     useEffect(() => {
         function onKeyDown(e: KeyboardEvent) {
             const tag = (e.target as HTMLElement).tagName
             if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement).isContentEditable) return
             const audio = audioRef.current
-            if (!audio || !current) return
+            if (!audio || !currentRef.current) return
             if (e.code === 'Space') {
                 e.preventDefault()
-                if (audio.paused) { audio.play().catch(() => {}); setIsPlaying(true) }
-                else { audio.pause(); savePosition(current, audio.currentTime); setIsPlaying(false) }
+                if (audio.paused) resume()
+                else pause()
             } else if (e.code === 'ArrowLeft') {
                 e.preventDefault()
                 skipPrev()
@@ -709,7 +745,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         }
         window.addEventListener('keydown', onKeyDown)
         return () => window.removeEventListener('keydown', onKeyDown)
-    }, [current, skipPrev, skipNext, savePosition])
+    }, [pause, resume, skipPrev, skipNext])
 
     useEffect(() => {
         Promise.all([fetchPlayerState(), fetchLibrarySongs()]).then(async ([serverState, libSongs]) => {
@@ -954,7 +990,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                                     >
                                                         <FaBars size={14} />
                                                     </span>
-                                                    <button onClick={() => { if (isActive) { isPlaying ? pause() : audioRef.current?.play() } else { playAt(qi) } }} className="flex items-center gap-3 flex-1 text-left min-w-0">
+                                                    <button onClick={() => { if (isActive) { isPlaying ? pause() : resume() } else { playAt(qi) } }} className="flex items-center gap-3 flex-1 text-left min-w-0">
                                                         {(() => { const a = songArtworkUrl(song.uuid, song.artwork_cached, sp?.artworkUrl100, 200); return a ? <Image src={a} alt="" width={36} height={36} className="rounded shrink-0 object-cover" unoptimized={!!song.artwork_cached} /> : <div className="w-9 h-9 rounded shrink-0 bg-gray-100 dark:bg-gray-800 flex items-center justify-center"><FaMusic size={11} className="text-gray-400" /></div> })()}
                                                         <div className="flex-1 min-w-0">
                                                             <div className="flex items-center gap-1.5">
