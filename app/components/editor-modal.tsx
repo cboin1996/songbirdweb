@@ -2729,7 +2729,7 @@ export default function EditorModal({
                   type="text"
                   value={String(props[key] ?? '')}
                   onChange={e => setProps(p => ({ ...p, [key]: e.target.value }))}
-                  className="rounded-lg bg-gray-100 dark:bg-gray-900 border border-transparent focus:border-sky-500 px-3 py-1.5 text-sm outline-none transition-colors"
+                  className="rounded-lg bg-gray-100 dark:bg-gray-900 border border-transparent focus:border-sky-500 px-3 py-1.5 text-base md:text-sm outline-none transition-colors"
                 />
               </label>
             ))}
@@ -2782,7 +2782,7 @@ export default function EditorModal({
                   type="text"
                   value={props.releaseDate ?? ''}
                   onChange={e => setProps(p => ({ ...p, releaseDate: e.target.value }))}
-                  className="rounded-lg bg-gray-100 dark:bg-gray-900 border border-transparent focus:border-sky-500 px-3 py-1.5 text-sm outline-none transition-colors"
+                  className="rounded-lg bg-gray-100 dark:bg-gray-900 border border-transparent focus:border-sky-500 px-3 py-1.5 text-base md:text-sm outline-none transition-colors"
                 />
               </label>
               <label className="flex flex-col gap-1">
@@ -2792,13 +2792,13 @@ export default function EditorModal({
                     type="number"
                     value={props.trackNumber ?? ''}
                     onChange={e => setProps(p => ({ ...p, trackNumber: parseInt(e.target.value) || 0 }))}
-                    className="w-full rounded-lg bg-gray-100 dark:bg-gray-900 border border-transparent focus:border-sky-500 px-3 py-1.5 text-sm outline-none transition-colors"
+                    className="w-full rounded-lg bg-gray-100 dark:bg-gray-900 border border-transparent focus:border-sky-500 px-3 py-1.5 text-base md:text-sm outline-none transition-colors"
                   />
                   <input
                     type="number"
                     value={props.trackCount ?? ''}
                     onChange={e => setProps(p => ({ ...p, trackCount: parseInt(e.target.value) || 0 }))}
-                    className="w-full rounded-lg bg-gray-100 dark:bg-gray-900 border border-transparent focus:border-sky-500 px-3 py-1.5 text-sm outline-none transition-colors"
+                    className="w-full rounded-lg bg-gray-100 dark:bg-gray-900 border border-transparent focus:border-sky-500 px-3 py-1.5 text-base md:text-sm outline-none transition-colors"
                   />
                 </div>
               </label>
@@ -2809,13 +2809,13 @@ export default function EditorModal({
                     type="number"
                     value={props.discNumber ?? ''}
                     onChange={e => setProps(p => ({ ...p, discNumber: parseInt(e.target.value) || 0 }))}
-                    className="w-full rounded-lg bg-gray-100 dark:bg-gray-900 border border-transparent focus:border-sky-500 px-3 py-1.5 text-sm outline-none transition-colors"
+                    className="w-full rounded-lg bg-gray-100 dark:bg-gray-900 border border-transparent focus:border-sky-500 px-3 py-1.5 text-base md:text-sm outline-none transition-colors"
                   />
                   <input
                     type="number"
                     value={props.discCount ?? ''}
                     onChange={e => setProps(p => ({ ...p, discCount: parseInt(e.target.value) || 0 }))}
-                    className="w-full rounded-lg bg-gray-100 dark:bg-gray-900 border border-transparent focus:border-sky-500 px-3 py-1.5 text-sm outline-none transition-colors"
+                    className="w-full rounded-lg bg-gray-100 dark:bg-gray-900 border border-transparent focus:border-sky-500 px-3 py-1.5 text-base md:text-sm outline-none transition-colors"
                   />
                 </div>
               </label>
@@ -2839,7 +2839,7 @@ export default function EditorModal({
                       type="text"
                       value={props.artworkUrl100 ?? ''}
                       onChange={e => { setProps(p => ({ ...p, artworkUrl100: e.target.value })); setArtworkPreviewError(false) }}
-                      className="rounded-lg bg-gray-100 dark:bg-gray-900 border border-transparent focus:border-sky-500 px-3 py-1.5 text-sm outline-none transition-colors"
+                      className="rounded-lg bg-gray-100 dark:bg-gray-900 border border-transparent focus:border-sky-500 px-3 py-1.5 text-base md:text-sm outline-none transition-colors"
                     />
                   </label>
                 </div>

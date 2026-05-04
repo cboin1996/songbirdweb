@@ -90,7 +90,7 @@ export default function ScrubInput({
         onChange={e => setText(e.target.value)}
         onBlur={commitEdit}
         onKeyDown={handleKeyDown}
-        className="w-20 text-center text-xs font-mono bg-transparent border-b border-sky-500 outline-none text-sky-500"
+        className="w-20 text-center text-base md:text-xs font-mono bg-transparent border-b border-sky-500 outline-none text-sky-500"
         aria-label={label}
       />
     )
