@@ -202,6 +202,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const [shuffleOrder, setShuffleOrder] = useState<number[]>([])
     const shuffleOrderRef = useRef<number[]>([])
     const shufflePosRef = useRef(0)
+    const [audioSrc, setAudioSrc] = useState('')
     const [toast, setToast] = useState<{ msg: string; error?: boolean } | null>(null)
     const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const dragFromRef = useRef<number | null>(null)
@@ -230,6 +231,25 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setShuffleOrder([...order])
     }
 
+    async function resolveAudioSrc(songUuid: string): Promise<string> {
+        if (blobUrlRef.current) {
+            URL.revokeObjectURL(blobUrlRef.current)
+            blobUrlRef.current = null
+        }
+        const cached = await getSongFile(songUuid)
+        if (cached) {
+            blobUrlRef.current = URL.createObjectURL(cached)
+            return blobUrlRef.current
+        }
+        return `${DOWNLOAD_URL}/${songUuid}`
+    }
+
+    function applyAudioSrc(audio: HTMLAudioElement, src: string) {
+        audio.src = src
+        setAudioSrc(src)
+        audio.load()
+    }
+
     const savePosition = useCallback((song: PlayableSong, time: number) => {
         updatePosition(song.uuid, time)
     }, [])
@@ -239,10 +259,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         if (!audio) return
         const gen = ++loadGenRef.current
         pendingPosition.current = fromStart ? 0 : (song.last_position ?? 0)
-        if (blobUrlRef.current) {
-            URL.revokeObjectURL(blobUrlRef.current)
-            blobUrlRef.current = null
-        }
 
         setCurrentTime(0)
         setDuration(0)
@@ -250,37 +266,23 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setIsPlaying(true)
 
         if (autoplayActivatedRef.current) {
-            // Page already activated — safe to await before touching audio element.
-            // Use offline blob directly if available, no streaming→blob swap needed.
-            const cachedFile = await getSongFile(song.uuid)
+            const src = await resolveAudioSrc(song.uuid)
             if (gen !== loadGenRef.current) return
-            if (cachedFile) {
-                blobUrlRef.current = URL.createObjectURL(cachedFile)
-                audio.src = blobUrlRef.current
-            } else {
-                audio.src = `${DOWNLOAD_URL}/${song.uuid}`
-            }
             shouldPlayRef.current = true
-            audio.load()
-            // Call play() directly as well as setting shouldPlayRef. canplay can be
-            // throttled / delayed in background tabs (Chrome on Android, iOS PWA),
-            // which would leave the next song loaded-but-paused. Once
-            // autoplayActivated, the browser allows non-gesture play() calls.
+            applyAudioSrc(audio, src)
             audio.play().catch(() => {})
         } else {
-            // First play — must call play() within the user-gesture window before any await.
-            audio.src = `${DOWNLOAD_URL}/${song.uuid}`
+            // First play — must set src + play() synchronously within user-gesture window.
+            const streamSrc = `${DOWNLOAD_URL}/${song.uuid}`
             shouldPlayRef.current = true
-            audio.load()
+            applyAudioSrc(audio, streamSrc)
             audio.play().catch(() => {})
             // Swap to offline blob if available after gesture window
-            const cachedFile = await getSongFile(song.uuid)
+            const src = await resolveAudioSrc(song.uuid)
             if (gen !== loadGenRef.current) return
-            if (cachedFile) {
-                blobUrlRef.current = URL.createObjectURL(cachedFile)
-                audio.src = blobUrlRef.current
+            if (src !== streamSrc) {
                 shouldPlayRef.current = true
-                audio.load()
+                applyAudioSrc(audio, src)
             }
         }
     }
@@ -299,10 +301,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setManualNextIds(new Set())
         setQueue(q)
         if (shuffleRef.current) generateShuffleOrder(idx)
-        if ('mediaSession' in navigator) {
-            navigator.mediaSession.setActionHandler('previoustrack', skipPrev)
-            navigator.mediaSession.setActionHandler('nexttrack', skipNext)
-        }
+        syncMediaSession(playingSong)
         loadSong(playingSong, true)
         if (context !== undefined) {
             setPlayContext(context)
@@ -396,6 +395,39 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         scheduleSave()
     }
 
+    function syncMediaSession(song: PlayableSong) {
+        if (!('mediaSession' in navigator) || !song.properties) return
+        const p = song.properties
+        const origin = typeof window !== 'undefined' ? window.location.origin : ''
+        const sizes = [128, 192, 256, 384, 512]
+        const artwork: { src: string; sizes: string; type: string }[] = []
+        for (const s of sizes) {
+            const url = songArtworkUrl(song.uuid, song.artwork_cached, p.artworkUrl100, s)
+            if (!url) continue
+            const absolute = url.startsWith('/') ? `${origin}${url}` : url
+            artwork.push({ src: absolute, sizes: `${s}x${s}`, type: 'image/jpeg' })
+        }
+        navigator.mediaSession.metadata = new MediaMetadata({
+            title: p.trackName,
+            artist: p.artistName,
+            album: p.collectionName,
+            artwork,
+        })
+        navigator.mediaSession.setActionHandler('play', () => {
+            audioRef.current?.play().catch(() => {})
+            setIsPlaying(true)
+        })
+        navigator.mediaSession.setActionHandler('pause', () => {
+            const audio = audioRef.current
+            if (!audio) return
+            audio.pause()
+            savePosition(song, audio.currentTime)
+            setIsPlaying(false)
+        })
+        navigator.mediaSession.setActionHandler('previoustrack', skipPrev)
+        navigator.mediaSession.setActionHandler('nexttrack', skipNext)
+    }
+
     function pause() {
         const audio = audioRef.current
         if (!audio || !current) return
@@ -405,6 +437,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     }
 
     function resume() {
+        if (current) syncMediaSession(current)
         audioRef.current?.play().catch(() => {})
         setIsPlaying(true)
     }
@@ -630,41 +663,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     }, [isPlaying, current, savePosition])
 
     useEffect(() => {
-        if (!current?.properties || !('mediaSession' in navigator)) return
-        const p = current.properties
-        // iOS lock screen prefers several sizes; provide both small and large so the OS picks what fits.
-        // Use the absolute origin for cached artwork URLs since Media Session needs fully-qualified URLs.
-        const origin = typeof window !== 'undefined' ? window.location.origin : ''
-        const buildArtwork = (): { src: string; sizes: string; type: string }[] => {
-            const sizes = [128, 192, 256, 384, 512]
-            const out: { src: string; sizes: string; type: string }[] = []
-            for (const s of sizes) {
-                const url = songArtworkUrl(current.uuid, current.artwork_cached, p.artworkUrl100, s)
-                if (!url) continue
-                const absolute = url.startsWith('/') ? `${origin}${url}` : url
-                out.push({ src: absolute, sizes: `${s}x${s}`, type: 'image/jpeg' })
-            }
-            return out
-        }
-        navigator.mediaSession.metadata = new MediaMetadata({
-            title: p.trackName,
-            artist: p.artistName,
-            album: p.collectionName,
-            artwork: buildArtwork(),
-        })
-        navigator.mediaSession.setActionHandler('play', () => {
-            audioRef.current?.play().catch(() => {})
-            setIsPlaying(true)
-        })
-        navigator.mediaSession.setActionHandler('pause', () => {
-            const audio = audioRef.current
-            if (!audio) return
-            audio.pause()
-            savePosition(current, audio.currentTime)
-            setIsPlaying(false)
-        })
-        navigator.mediaSession.setActionHandler('previoustrack', skipPrev)
-        navigator.mediaSession.setActionHandler('nexttrack', skipNext)
+        if (current) syncMediaSession(current)
     }, [current, skipNext, skipPrev, savePosition])
 
     useEffect(() => {
@@ -781,14 +780,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 const audio = audioRef.current
                 if (audio) {
                     pendingPosition.current = song.last_position ?? 0
-                    const cached = await getSongFile(song.uuid)
-                    if (cached) {
-                        blobUrlRef.current = URL.createObjectURL(cached)
-                        audio.src = blobUrlRef.current
-                    } else {
-                        audio.src = `${DOWNLOAD_URL}/${song.uuid}`
-                    }
-                    audio.load()
+                    const src = await resolveAudioSrc(song.uuid)
+                    applyAudioSrc(audio, src)
                 }
             } else {
                 // fallback: restore last played song
@@ -805,14 +798,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                     const audio = audioRef.current
                     if (audio) {
                         pendingPosition.current = last.last_position ?? 0
-                        const cached = await getSongFile(last.uuid)
-                        if (cached) {
-                            blobUrlRef.current = URL.createObjectURL(cached)
-                            audio.src = blobUrlRef.current
-                        } else {
-                            audio.src = `${DOWNLOAD_URL}/${last.uuid}`
-                        }
-                        audio.load()
+                        const src = await resolveAudioSrc(last.uuid)
+                        applyAudioSrc(audio, src)
                     }
                 }
             }
@@ -854,7 +841,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     return (
         <PlayerContext.Provider value={contextValue}>
-            <audio ref={audioRef} />
+            <audio ref={audioRef} src={audioSrc || undefined}/>
             {children}
             {toast && (
                 <div className={`fixed bottom-24 left-1/2 -translate-x-1/2 z-[60] px-4 py-2 rounded-full text-xs font-medium shadow-lg pointer-events-none whitespace-nowrap ${toast.error ? 'bg-red-900 text-red-200' : 'bg-gray-900 text-white'}`}>
@@ -1004,7 +991,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                         <FaStepBackward size={13} />
                                     </button>
                                     <button data-testid="player-play-pause" onClick={isPlaying ? pause : resume} className={`shrink-0 ${idleClass}`}>
-                                        {isBuffering ? <Spinner /> : isPlaying ? <FaPause size={18} /> : <FaPlay size={18} />}
+                                        {isBuffering && isPlaying ? <Spinner /> : isPlaying ? <FaPause size={18} /> : <FaPlay size={18} />}
                                     </button>
                                     <button data-testid="player-next" onClick={skipNext} disabled={!hasQueue} className={`shrink-0 disabled:opacity-30 ${idleClass}`}>
                                         <FaStepForward size={13} />
@@ -1028,7 +1015,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                             <FaStepBackward size={16} />
                                         </button>
                                         <button onClick={isPlaying ? pause : resume} className={`shrink-0 p-2 -m-1 touch-manipulation ${idleClass}`}>
-                                            {isBuffering ? <Spinner size={20} /> : isPlaying ? <FaPause size={20} /> : <FaPlay size={20} />}
+                                            {isBuffering && isPlaying ? <Spinner size={20} /> : isPlaying ? <FaPause size={20} /> : <FaPlay size={20} />}
                                         </button>
                                         <button data-testid="player-next" onClick={skipNext} disabled={!hasQueue} className={`shrink-0 p-2 -m-1 touch-manipulation disabled:opacity-30 ${idleClass}`}>
                                             <FaStepForward size={16} />
