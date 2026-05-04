@@ -638,6 +638,20 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     }, [])
 
+    // Sync React state with actual audio state when app returns to foreground
+    useEffect(() => {
+        function onVisibilityChange() {
+            if (document.visibilityState !== 'visible') return
+            const audio = audioRef.current
+            if (!audio) return
+            setIsPlaying(!audio.paused)
+            setCurrentTime(audio.currentTime)
+            if (isFinite(audio.duration)) setDuration(audio.duration)
+        }
+        document.addEventListener('visibilitychange', onVisibilityChange)
+        return () => document.removeEventListener('visibilitychange', onVisibilityChange)
+    }, [])
+
     // current-dependent: onEnded needs current to save position
     useEffect(() => {
         const audio = audioRef.current
@@ -786,6 +800,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                     setManualNextIds(new Set(savedManualNext))
                 }
                 setCurrent(song)
+                setCurrentTime(song.last_position ?? 0)
                 const audio = audioRef.current
                 if (audio) {
                     pendingPosition.current = song.last_position ?? 0
@@ -800,6 +815,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 if (last?.properties) {
                     const song = { uuid: last.uuid, properties: last.properties, last_position: last.last_position, last_played_at: last.last_played_at, artwork_cached: last.artwork_cached, source: sourceMap[last.uuid] ?? fallbackCtx }
                     setCurrent(song)
+                    setCurrentTime(last.last_position ?? 0)
                     queueRef.current = [song]
                     queueIndexRef.current = 0
                     setQueue([song])
