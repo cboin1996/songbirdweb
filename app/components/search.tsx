@@ -86,7 +86,7 @@ export default function Search() {
                         onChange={e => handleChange(e.target.value)}
                         onKeyDown={e => { if (e.key === 'Escape' && text) { handleChange(''); e.preventDefault() } }}
                         placeholder={PLACEHOLDERS[mode]}
-                        className="w-full pl-8 pr-8 py-1.5 rounded-lg text-sm bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200 placeholder-gray-400 outline-none focus:ring-2 focus:ring-sky-500 invalid:ring-2 invalid:ring-red-500"
+                        className="w-full pl-8 pr-8 py-1.5 rounded-lg text-base md:text-sm bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200 placeholder-gray-400 outline-none focus:ring-2 focus:ring-sky-500 invalid:ring-2 invalid:ring-red-500"
                     />
                     {text && (
                         <button
