@@ -184,7 +184,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     const [playContext, setPlayContext] = useState<PlayContext | null>(null)
     const [showQueue, setShowQueue] = useState(false)
-    const [volume, setVolume] = useState(1)
+    const [volume, setVolume] = useState(() => {
+        if (typeof window === 'undefined') return 1
+        const saved = localStorage.getItem('playerVolume')
+        return saved !== null ? parseFloat(saved) : 1
+    })
     const pendingPosition = useRef<number>(0)
     const shouldPlayRef = useRef(false)
     const loadGenRef = useRef(0)
@@ -247,7 +251,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     function applyAudioSrc(audio: HTMLAudioElement, src: string) {
         audio.src = src
         setAudioSrc(src)
-        audio.load()
     }
 
     const savePosition = useCallback((song: PlayableSong, time: number) => {
@@ -413,19 +416,21 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             album: p.collectionName,
             artwork,
         })
-        navigator.mediaSession.setActionHandler('play', () => {
-            audioRef.current?.play().catch(() => {})
-            setIsPlaying(true)
-        })
-        navigator.mediaSession.setActionHandler('pause', () => {
-            const audio = audioRef.current
-            if (!audio) return
-            audio.pause()
-            savePosition(song, audio.currentTime)
-            setIsPlaying(false)
-        })
+        navigator.mediaSession.setActionHandler('play', () => resume())
+        navigator.mediaSession.setActionHandler('pause', () => pause())
         navigator.mediaSession.setActionHandler('previoustrack', skipPrev)
         navigator.mediaSession.setActionHandler('nexttrack', skipNext)
+    }
+
+    function updatePositionState() {
+        if (!('mediaSession' in navigator)) return
+        const audio = audioRef.current
+        if (!audio || !isFinite(audio.duration) || audio.duration <= 0) return
+        navigator.mediaSession.setPositionState({
+            duration: audio.duration,
+            playbackRate: audio.playbackRate,
+            position: Math.min(audio.currentTime, audio.duration),
+        })
     }
 
     function pause() {
@@ -434,12 +439,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         audio.pause()
         savePosition(current, audio.currentTime)
         setIsPlaying(false)
+        if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused'
     }
 
     function resume() {
         if (current) syncMediaSession(current)
         audioRef.current?.play().catch(() => {})
         setIsPlaying(true)
+        if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing'
     }
 
     function handleSeek(t: number) {
@@ -591,6 +598,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             setIsBuffering(false)
             if (pendingPosition.current > 0) {
                 audio!.currentTime = pendingPosition.current
+                setCurrentTime(pendingPosition.current)
                 pendingPosition.current = 0
             }
             if (shouldPlayRef.current) {
@@ -606,8 +614,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         function onTimeUpdate() {
             setCurrentTime(audio!.currentTime)
             if (audio!.buffered.length > 0) setBuffered(audio!.buffered.end(audio!.buffered.length - 1))
+            updatePositionState()
         }
-        function onDurationChange() { setDuration(audio!.duration) }
+        function onDurationChange() { setDuration(audio!.duration); updatePositionState() }
         audio.addEventListener('play', onPlay)
         audio.addEventListener('pause', onPause)
         audio.addEventListener('loadstart', onLoadStart)
@@ -808,6 +817,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     useEffect(() => {
         if (audioRef.current) audioRef.current.volume = volume
+        try { localStorage.setItem('playerVolume', String(volume)) } catch {}
     }, [volume])
 
     const QUEUE_ROW_H = 52
@@ -841,7 +851,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     return (
         <PlayerContext.Provider value={contextValue}>
-            <audio ref={audioRef} src={audioSrc || undefined}/>
+            <audio ref={audioRef} src={audioSrc || undefined} preload="metadata" playsInline/>
             {children}
             {toast && (
                 <div className={`fixed bottom-24 left-1/2 -translate-x-1/2 z-[60] px-4 py-2 rounded-full text-xs font-medium shadow-lg pointer-events-none whitespace-nowrap ${toast.error ? 'bg-red-900 text-red-200' : 'bg-gray-900 text-white'}`}>
