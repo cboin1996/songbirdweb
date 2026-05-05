@@ -28,12 +28,6 @@ function contextFromId(id: string | null): PlayContext | null {
 export type RepeatMode = 'off' | 'one' | 'all'
 export type PlayContext = { label: string; href: string; id: string }
 
-// iOS Safari releases the audio session ~10s after pausing in background, which
-// kills the lock-screen play action and forces the user to re-open Safari.
-// Looping a tiny silent track while "paused" keeps the session warm so lock-screen
-// controls stay responsive. Trade-off: a few % battery while paused.
-const SILENT_LOOP_SRC = '/silence.mp3'
-
 function seededShuffle(arr: number[], seed: number): number[] {
     // Mulberry32 PRNG — deterministic, fast, good distribution
     let s = seed >>> 0
@@ -156,19 +150,21 @@ function ProgressBar({ current, duration, buffered, onSeek }: {
                 onMouseDown={onMouseDown}
                 onTouchStart={onTouchStart}
                 onTouchMove={onTouchMove}
-                className="flex-1 h-0.5 bg-gray-200 dark:bg-gray-700 rounded-full cursor-pointer group relative"
+                className="flex-1 py-3 cursor-pointer group relative touch-manipulation select-none"
             >
-                {/* buffer track */}
-                <div
-                    className="absolute inset-y-0 left-0 bg-gray-400/40 dark:bg-gray-500/40 rounded-full"
-                    style={{ width: `${bufferedPct}%` }}
-                />
-                {/* played track */}
-                <div
-                    className="h-full bg-sky-500 rounded-full relative"
-                    style={{ width: `${pct}%` }}
-                >
-                    <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-sky-500 rounded-full opacity-0 group-hover:opacity-100 group-active:opacity-100 transition-opacity touch-manipulation" />
+                <div className="h-0.5 bg-gray-200 dark:bg-gray-700 rounded-full relative">
+                    {/* buffer track */}
+                    <div
+                        className="absolute inset-y-0 left-0 bg-gray-400/40 dark:bg-gray-500/40 rounded-full"
+                        style={{ width: `${bufferedPct}%` }}
+                    />
+                    {/* played track */}
+                    <div
+                        className="h-full bg-sky-500 rounded-full relative"
+                        style={{ width: `${pct}%` }}
+                    >
+                        <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-sky-500 rounded-full opacity-0 group-hover:opacity-100 group-active:opacity-100 transition-opacity" />
+                    </div>
                 </div>
             </div>
             <span className="text-xs text-gray-400 tabular-nums w-8 shrink-0">-{fmt((duration || 0) - current)}</span>
@@ -179,6 +175,7 @@ function ProgressBar({ current, duration, buffered, onSeek }: {
 export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const audioRef = useRef<HTMLAudioElement>(null)
     const [current, setCurrent] = useState<PlayableSong | null>(null)
+    const currentRef = useRef<PlayableSong | null>(null)
     const [isPlaying, setIsPlaying] = useState(false)
     const [isBuffering, setIsBuffering] = useState(false)
     const [currentTime, setCurrentTime] = useState(0)
@@ -190,7 +187,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     const [playContext, setPlayContext] = useState<PlayContext | null>(null)
     const [showQueue, setShowQueue] = useState(false)
-    const [volume, setVolume] = useState(1)
+    const [volume, setVolume] = useState(() => {
+        if (typeof window === 'undefined') return 1
+        const saved = localStorage.getItem('playerVolume')
+        return saved !== null ? parseFloat(saved) : 1
+    })
     const pendingPosition = useRef<number>(0)
     const shouldPlayRef = useRef(false)
     const loadGenRef = useRef(0)
@@ -208,6 +209,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const [shuffleOrder, setShuffleOrder] = useState<number[]>([])
     const shuffleOrderRef = useRef<number[]>([])
     const shufflePosRef = useRef(0)
+    const [audioSrc, setAudioSrc] = useState('')
     const [toast, setToast] = useState<{ msg: string; error?: boolean } | null>(null)
     const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const dragFromRef = useRef<number | null>(null)
@@ -217,16 +219,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const [manualNextIds, setManualNextIds] = useState<Set<string>>(new Set())
     const shuffleSeedRef = useRef<number | null>(null)
     const playContextRef = useRef<PlayContext | null>(null)
-    // True while the audio element is looping SILENT_LOOP_SRC to preserve the
-    // iOS audio session during a logical pause. Listeners use this ref to skip
-    // UI side-effects (timeupdate, isPlaying flips) caused by the silent track.
-    const sessionKeepAliveRef = useRef(false)
-    const savedSrcBeforeSilenceRef = useRef<string | null>(null)
-    // Captured at pause time, re-asserted to MediaSession on each silent-loop
-    // tick so iOS doesn't fall back to reading audio.currentTime (which is the
-    // silent file's ~0). Cleared on resume.
-    const pinnedPosRef = useRef(0)
-    const pinnedDurRef = useRef(0)
 
     const showToast = useCallback((msg: string, error?: boolean) => {
         if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
@@ -246,6 +238,24 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setShuffleOrder([...order])
     }
 
+    async function resolveAudioSrc(songUuid: string): Promise<string> {
+        if (blobUrlRef.current) {
+            URL.revokeObjectURL(blobUrlRef.current)
+            blobUrlRef.current = null
+        }
+        const cached = await getSongFile(songUuid)
+        if (cached) {
+            blobUrlRef.current = URL.createObjectURL(cached)
+            return blobUrlRef.current
+        }
+        return `${DOWNLOAD_URL}/${songUuid}`
+    }
+
+    function applyAudioSrc(audio: HTMLAudioElement, src: string) {
+        audio.src = src
+        setAudioSrc(src)
+    }
+
     const savePosition = useCallback((song: PlayableSong, time: number) => {
         updatePosition(song.uuid, time)
     }, [])
@@ -253,17 +263,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     async function loadSong(song: PlayableSong, fromStart = false) {
         const audio = audioRef.current
         if (!audio) return
-        if (sessionKeepAliveRef.current) {
-            sessionKeepAliveRef.current = false
-            audio.loop = false
-            savedSrcBeforeSilenceRef.current = null
-        }
         const gen = ++loadGenRef.current
         pendingPosition.current = fromStart ? 0 : (song.last_position ?? 0)
-        if (blobUrlRef.current) {
-            URL.revokeObjectURL(blobUrlRef.current)
-            blobUrlRef.current = null
-        }
 
         setCurrentTime(0)
         setDuration(0)
@@ -271,37 +272,23 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setIsPlaying(true)
 
         if (autoplayActivatedRef.current) {
-            // Page already activated — safe to await before touching audio element.
-            // Use offline blob directly if available, no streaming→blob swap needed.
-            const cachedFile = await getSongFile(song.uuid)
+            const src = await resolveAudioSrc(song.uuid)
             if (gen !== loadGenRef.current) return
-            if (cachedFile) {
-                blobUrlRef.current = URL.createObjectURL(cachedFile)
-                audio.src = blobUrlRef.current
-            } else {
-                audio.src = `${DOWNLOAD_URL}/${song.uuid}`
-            }
             shouldPlayRef.current = true
-            audio.load()
-            // Call play() directly as well as setting shouldPlayRef. canplay can be
-            // throttled / delayed in background tabs (Chrome on Android, iOS PWA),
-            // which would leave the next song loaded-but-paused. Once
-            // autoplayActivated, the browser allows non-gesture play() calls.
+            applyAudioSrc(audio, src)
             audio.play().catch(() => {})
         } else {
-            // First play — must call play() within the user-gesture window before any await.
-            audio.src = `${DOWNLOAD_URL}/${song.uuid}`
+            // First play — must set src + play() synchronously within user-gesture window.
+            const streamSrc = `${DOWNLOAD_URL}/${song.uuid}`
             shouldPlayRef.current = true
-            audio.load()
+            applyAudioSrc(audio, streamSrc)
             audio.play().catch(() => {})
             // Swap to offline blob if available after gesture window
-            const cachedFile = await getSongFile(song.uuid)
+            const src = await resolveAudioSrc(song.uuid)
             if (gen !== loadGenRef.current) return
-            if (cachedFile) {
-                blobUrlRef.current = URL.createObjectURL(cachedFile)
-                audio.src = blobUrlRef.current
+            if (src !== streamSrc) {
                 shouldPlayRef.current = true
-                audio.load()
+                applyAudioSrc(audio, src)
             }
         }
     }
@@ -320,10 +307,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setManualNextIds(new Set())
         setQueue(q)
         if (shuffleRef.current) generateShuffleOrder(idx)
-        if ('mediaSession' in navigator) {
-            navigator.mediaSession.setActionHandler('previoustrack', skipPrev)
-            navigator.mediaSession.setActionHandler('nexttrack', skipNext)
-        }
+        syncMediaSession(playingSong)
         loadSong(playingSong, true)
         if (context !== undefined) {
             setPlayContext(context)
@@ -417,117 +401,69 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         scheduleSave()
     }
 
-    // Tell the OS lock-screen / control center to display this static position +
-    // the song's real duration while the silent loop runs the actual <audio>
-    // element. Without this, iOS reads audio.currentTime / audio.duration off the
-    // 1s silent file and shows 0:00 / 0:01.
-    //
-    // Per the W3C MediaSession spec, setPositionState requires playbackRate != 0
-    // (a zero rate throws TypeError). When playbackState is 'paused', iOS treats
-    // the position as static rather than extrapolating, so playbackRate=1 is just
-    // a placeholder.
-    function pinLockScreenPosition(position: number, duration: number) {
-        if (!('mediaSession' in navigator)) return
-        navigator.mediaSession.playbackState = 'paused'
-        if (!isFinite(duration) || duration <= 0 || !isFinite(position) || position < 0) return
-        try {
-            navigator.mediaSession.setPositionState({
-                duration,
-                position: Math.min(position, duration),
-                playbackRate: 1,
-            })
-        } catch {}
+    function setMediaAction(action: MediaSessionAction, handler: MediaSessionActionHandler | null) {
+        try { navigator.mediaSession.setActionHandler(action, handler) } catch {}
     }
 
-    function unpinLockScreenPosition() {
-        if (!('mediaSession' in navigator)) return
-        navigator.mediaSession.playbackState = 'playing'
-        try { navigator.mediaSession.setPositionState() } catch {}
-    }
-
-    // Swap audio element to the silent loop (preserves iOS audio session). Same
-    // single-element approach main has always used — keeps iOS's gesture-priority
-    // widget commit intact (a separate <audio> element breaks it).
-    function kickSilentLoop() {
-        const audio = audioRef.current
-        if (!audio || sessionKeepAliveRef.current) return
-        savedSrcBeforeSilenceRef.current = audio.src
-        sessionKeepAliveRef.current = true
-        audio.src = SILENT_LOOP_SRC
-        audio.loop = true
-        audio.load()
-        audio.play().catch(() => {
-            sessionKeepAliveRef.current = false
-            savedSrcBeforeSilenceRef.current = null
-            audio.loop = false
+    function syncMediaSession(song: PlayableSong) {
+        if (!('mediaSession' in navigator) || !song.properties) return
+        const p = song.properties
+        const origin = typeof window !== 'undefined' ? window.location.origin : ''
+        const sizes = [128, 192, 256, 384, 512]
+        const artwork: { src: string; sizes: string; type: string }[] = []
+        for (const s of sizes) {
+            const url = songArtworkUrl(song.uuid, song.artwork_cached, p.artworkUrl100, s)
+            if (!url) continue
+            const absolute = url.startsWith('/') ? `${origin}${url}` : url
+            artwork.push({ src: absolute, sizes: `${s}x${s}`, type: 'image/jpeg' })
+        }
+        navigator.mediaSession.metadata = new MediaMetadata({
+            title: p.trackName,
+            artist: p.artistName,
+            album: p.collectionName,
+            artwork,
         })
-        pinLockScreenPosition(pinnedPosRef.current, pinnedDurRef.current)
+        setMediaAction('play', () => resume())
+        setMediaAction('pause', () => pause())
+        setMediaAction('previoustrack', skipPrev)
+        setMediaAction('nexttrack', skipNext)
+        setMediaAction('seekto', (details) => {
+            const audio = audioRef.current
+            if (!audio || details.seekTime == null) return
+            audio.currentTime = details.seekTime
+            setCurrentTime(details.seekTime)
+            updatePositionState()
+        })
     }
 
-    // Restore real song src from silent loop. autoplay=true for resume,
-    // false when transitioning back to visible (user is logically paused).
-    function stopSilentLoop(autoplay: boolean) {
-        if (!sessionKeepAliveRef.current) return
+    function updatePositionState() {
+        if (!('mediaSession' in navigator)) return
         const audio = audioRef.current
-        const realSrc = savedSrcBeforeSilenceRef.current
-        sessionKeepAliveRef.current = false
-        savedSrcBeforeSilenceRef.current = null
-        if (audio) {
-            audio.loop = false
-            if (realSrc) {
-                audio.src = realSrc
-                shouldPlayRef.current = autoplay
-                audio.load()
-            }
-        }
-        unpinLockScreenPosition()
+        if (!audio || !isFinite(audio.duration) || audio.duration <= 0) return
+        navigator.mediaSession.setPositionState({
+            duration: audio.duration,
+            playbackRate: audio.playbackRate,
+            position: Math.min(audio.currentTime, audio.duration),
+        })
     }
 
-    function pause() {
+    const pause = useCallback(() => {
         const audio = audioRef.current
-        if (!audio || !current) return
-        // Already in silent-loop pause — nothing to do.
-        if (sessionKeepAliveRef.current) {
-            setIsPlaying(false)
-            return
-        }
-        // No real source loaded yet — fall back to a hard pause.
-        if (!audio.src || audio.paused) {
-            audio.pause()
-            setIsPlaying(false)
-            return
-        }
-        const realPos = audio.currentTime
-        const realDur = audio.duration
-        savePosition(current, realPos)
-        pendingPosition.current = realPos
-        pinnedPosRef.current = realPos
-        pinnedDurRef.current = realDur
-        // Page visible (in-app pause): clean pause so widget syncs to "paused".
-        // Page hidden (lock-screen pause from another path): silent-loop swap so
-        // session stays warm. visibilitychange:hidden will kick silent loop later.
-        if (typeof document !== 'undefined' && document.hidden) {
-            kickSilentLoop()
-        } else {
-            audio.pause()
-            if ('mediaSession' in navigator) {
-                navigator.mediaSession.playbackState = 'paused'
-            }
-        }
+        const song = currentRef.current
+        if (!audio || !song) return
+        audio.pause()
+        savePosition(song, audio.currentTime)
         setIsPlaying(false)
-    }
+        if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused'
+    }, [savePosition])
 
-    function resume() {
-        const audio = audioRef.current
-        if (!audio) return
-        if (sessionKeepAliveRef.current) {
-            stopSilentLoop(true)
-            setIsPlaying(true)
-            return
-        }
+    const resume = useCallback(() => {
+        audioRef.current?.play().catch(() => {})
         setIsPlaying(true)
-        audio.play().catch(() => {})
-    }
+        if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing'
+        const song = currentRef.current
+        if (song) syncMediaSession(song)
+    }, [])
 
     function handleSeek(t: number) {
         const audio = audioRef.current
@@ -675,18 +611,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         const audio = audioRef.current
         if (!audio) return
         function onCanPlay() {
-            // Silent loop is just keeping the audio session alive — start it without
-            // applying pendingPosition (which holds the *real* song position for resume).
-            if (sessionKeepAliveRef.current) {
-                if (shouldPlayRef.current) {
-                    shouldPlayRef.current = false
-                    audio!.play().catch(() => {})
-                }
-                return
-            }
             setIsBuffering(false)
             if (pendingPosition.current > 0) {
                 audio!.currentTime = pendingPosition.current
+                setCurrentTime(pendingPosition.current)
                 pendingPosition.current = 0
             }
             if (shouldPlayRef.current) {
@@ -695,54 +623,22 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             }
         }
         function onPlay() {
-            if (sessionKeepAliveRef.current) return
             setIsPlaying(true); setIsBuffering(false); autoplayActivatedRef.current = true
+            if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing'
         }
         function onPause() {
-            if (sessionKeepAliveRef.current) return
-            setIsPlaying(false); setIsBuffering(false)
-        }
-        function onLoadStart() {
-            if (sessionKeepAliveRef.current) return
-            setIsBuffering(true); setBuffered(0)
-        }
-        function onWaiting() {
-            if (sessionKeepAliveRef.current) return
-            setIsBuffering(true)
-        }
-        function onPlaying() {
-            if (sessionKeepAliveRef.current) return
+            if (!shouldPlayRef.current) setIsPlaying(false)
             setIsBuffering(false)
         }
+        function onLoadStart() { setIsBuffering(true); setBuffered(0) }
+        function onWaiting() { setIsBuffering(true) }
+        function onPlaying() { setIsBuffering(false) }
         function onTimeUpdate() {
-            if (sessionKeepAliveRef.current) {
-                // Re-assert the pinned position on every silent-loop tick so iOS
-                // can't fall back to reading audio.currentTime (=0 on the silent
-                // file). Without this the lock-screen playhead drifts to 0:00.
-                pinLockScreenPosition(pinnedPosRef.current, pinnedDurRef.current)
-                return
-            }
             setCurrentTime(audio!.currentTime)
             if (audio!.buffered.length > 0) setBuffered(audio!.buffered.end(audio!.buffered.length - 1))
+            updatePositionState()
         }
-        function onDurationChange() {
-            if (sessionKeepAliveRef.current) return
-            setDuration(audio!.duration)
-        }
-        function onError() {
-            if (!audio!.src) return
-            // Silent loop failed — drop keep-alive instead of looping the error.
-            if (sessionKeepAliveRef.current) {
-                sessionKeepAliveRef.current = false
-                savedSrcBeforeSilenceRef.current = null
-                audio!.loop = false
-                audio!.pause()
-                return
-            }
-            pendingPosition.current = audio!.currentTime || 0
-            shouldPlayRef.current = true
-            audio!.load()
-        }
+        function onDurationChange() { setDuration(audio!.duration); updatePositionState() }
         audio.addEventListener('play', onPlay)
         audio.addEventListener('pause', onPause)
         audio.addEventListener('loadstart', onLoadStart)
@@ -751,7 +647,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         audio.addEventListener('canplay', onCanPlay)
         audio.addEventListener('timeupdate', onTimeUpdate)
         audio.addEventListener('durationchange', onDurationChange)
-        audio.addEventListener('error', onError)
         return () => {
             audio.removeEventListener('play', onPlay)
             audio.removeEventListener('pause', onPause)
@@ -761,10 +656,25 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             audio.removeEventListener('canplay', onCanPlay)
             audio.removeEventListener('timeupdate', onTimeUpdate)
             audio.removeEventListener('durationchange', onDurationChange)
-            audio.removeEventListener('error', onError)
         }
 
     }, [])
+
+    // Sync React state with actual audio state when app returns to foreground
+    useEffect(() => {
+        function onVisibilityChange() {
+            if (document.visibilityState !== 'visible') return
+            const audio = audioRef.current
+            if (!audio) return
+            setIsPlaying(!audio.paused)
+            setCurrentTime(audio.currentTime)
+            if (isFinite(audio.duration)) setDuration(audio.duration)
+        }
+        document.addEventListener('visibilitychange', onVisibilityChange)
+        return () => document.removeEventListener('visibilitychange', onVisibilityChange)
+    }, [])
+
+    useEffect(() => { currentRef.current = current }, [current])
 
     // current-dependent: onEnded needs current to save position
     useEffect(() => {
@@ -800,87 +710,18 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     }, [isPlaying, current, savePosition])
 
     useEffect(() => {
-        if (!current?.properties || !('mediaSession' in navigator)) return
-        const p = current.properties
-        // iOS lock screen prefers several sizes; provide both small and large so the OS picks what fits.
-        // Use the absolute origin for cached artwork URLs since Media Session needs fully-qualified URLs.
-        const origin = typeof window !== 'undefined' ? window.location.origin : ''
-        const buildArtwork = (): { src: string; sizes: string; type: string }[] => {
-            const sizes = [128, 192, 256, 384, 512]
-            const out: { src: string; sizes: string; type: string }[] = []
-            for (const s of sizes) {
-                const url = songArtworkUrl(current.uuid, current.artwork_cached, p.artworkUrl100, s)
-                if (!url) continue
-                const absolute = url.startsWith('/') ? `${origin}${url}` : url
-                out.push({ src: absolute, sizes: `${s}x${s}`, type: 'image/jpeg' })
-            }
-            return out
-        }
-        navigator.mediaSession.metadata = new MediaMetadata({
-            title: p.trackName,
-            artist: p.artistName,
-            album: p.collectionName,
-            artwork: buildArtwork(),
-        })
-        navigator.mediaSession.setActionHandler('play', () => {
-            const audio = audioRef.current
-            if (!audio) return
-            if (sessionKeepAliveRef.current) {
-                stopSilentLoop(true)
-                setIsPlaying(true)
-                return
-            }
-            setIsPlaying(true)
-            audio.play().catch(() => {})
-        })
-        navigator.mediaSession.setActionHandler('pause', () => {
-            const audio = audioRef.current
-            if (!audio) return
-            if (sessionKeepAliveRef.current) {
-                setIsPlaying(false)
-                return
-            }
-            if (!audio.src || audio.paused) {
-                audio.pause()
-                setIsPlaying(false)
-                return
-            }
-            const realPos = audio.currentTime
-            const realDur = audio.duration
-            savePosition(current, realPos)
-            pendingPosition.current = realPos
-            pinnedPosRef.current = realPos
-            pinnedDurRef.current = realDur
-            // Lock-screen pause is the iOS gesture path — page is hidden, so
-            // silent-loop swap (main's behavior). iOS gesture priority should
-            // keep the widget on "paused" through the src transition.
-            if (typeof document !== 'undefined' && document.hidden) {
-                kickSilentLoop()
-            } else {
-                // Hardware/media-key pause from foreground (rare). Clean pause.
-                audio.pause()
-                navigator.mediaSession.playbackState = 'paused'
-            }
-            setIsPlaying(false)
-        })
-        navigator.mediaSession.setActionHandler('previoustrack', skipPrev)
-        navigator.mediaSession.setActionHandler('nexttrack', skipNext)
-    // kickSilentLoop / stopSilentLoop only touch refs — stale closures are fine.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [current, skipNext, skipPrev, savePosition])
+        if (current) syncMediaSession(current)
+    }, [current, skipNext, skipPrev, pause, resume])
 
     useEffect(() => {
         function onKeyDown(e: KeyboardEvent) {
             const tag = (e.target as HTMLElement).tagName
             if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement).isContentEditable) return
             const audio = audioRef.current
-            if (!audio || !current) return
+            if (!audio || !currentRef.current) return
             if (e.code === 'Space') {
                 e.preventDefault()
-                // Route through pause/resume so the silent-loop keep-alive stays
-                // consistent. audio.paused lies during silent-loop pause (the loop
-                // is playing) — sessionKeepAliveRef is the source of truth.
-                if (sessionKeepAliveRef.current || audio.paused) resume()
+                if (audio.paused) resume()
                 else pause()
             } else if (e.code === 'ArrowLeft') {
                 e.preventDefault()
@@ -892,50 +733,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         }
         window.addEventListener('keydown', onKeyDown)
         return () => window.removeEventListener('keydown', onKeyDown)
-    // pause/resume are intentionally omitted: they close over `current` which is
-    // already a dep, so they're functionally consistent across re-renders.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [current, skipPrev, skipNext])
-
-    // Visibility-gated silent loop:
-    // - hidden + audio cleanly paused → kick silent loop to keep session warm
-    // - visible → stop silent loop so widget can sync to "paused"
-    //
-    // Also handles the iOS-suspension case: if silent loop died during
-    // backgrounding, real-src restore + clearing state when foregrounded.
-    useEffect(() => {
-        function onVisible() {
-            const audio = audioRef.current
-            if (!audio) return
-
-            if (document.hidden) {
-                // Going hidden while logically paused: silent loop kicks in to
-                // preserve lock-screen play. iOS may flip the widget to
-                // "playing" since this isn't a user gesture, but the session
-                // stays warm and lock-screen controls work.
-                if (sessionKeepAliveRef.current) return
-                if (!audio.src || !audio.paused) return
-                kickSilentLoop()
-                return
-            }
-
-            // Becoming visible. Re-bind track handlers (iOS forgets them after
-            // backgrounded suspension) and stop silent loop so widget re-syncs.
-            if ('mediaSession' in navigator) {
-                navigator.mediaSession.setActionHandler('previoustrack', skipPrev)
-                navigator.mediaSession.setActionHandler('nexttrack', skipNext)
-            }
-            if (sessionKeepAliveRef.current) {
-                stopSilentLoop(false)
-                setIsPlaying(false)
-                setIsBuffering(false)
-            }
-        }
-        document.addEventListener('visibilitychange', onVisible)
-        return () => document.removeEventListener('visibilitychange', onVisible)
-    // kickSilentLoop / stopSilentLoop only touch refs — stale closures are fine.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [skipPrev, skipNext])
+    }, [pause, resume, skipPrev, skipNext])
 
     useEffect(() => {
         Promise.all([fetchPlayerState(), fetchLibrarySongs()]).then(async ([serverState, libSongs]) => {
@@ -1026,17 +824,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                     setManualNextIds(new Set(savedManualNext))
                 }
                 setCurrent(song)
+                setCurrentTime(song.last_position ?? 0)
                 const audio = audioRef.current
                 if (audio) {
                     pendingPosition.current = song.last_position ?? 0
-                    const cached = await getSongFile(song.uuid)
-                    if (cached) {
-                        blobUrlRef.current = URL.createObjectURL(cached)
-                        audio.src = blobUrlRef.current
-                    } else {
-                        audio.src = `${DOWNLOAD_URL}/${song.uuid}`
-                    }
-                    audio.load()
+                    const src = await resolveAudioSrc(song.uuid)
+                    applyAudioSrc(audio, src)
                 }
             } else {
                 // fallback: restore last played song
@@ -1046,6 +839,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 if (last?.properties) {
                     const song = { uuid: last.uuid, properties: last.properties, last_position: last.last_position, last_played_at: last.last_played_at, artwork_cached: last.artwork_cached, source: sourceMap[last.uuid] ?? fallbackCtx }
                     setCurrent(song)
+                    setCurrentTime(last.last_position ?? 0)
                     queueRef.current = [song]
                     queueIndexRef.current = 0
                     setQueue([song])
@@ -1053,14 +847,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                     const audio = audioRef.current
                     if (audio) {
                         pendingPosition.current = last.last_position ?? 0
-                        const cached = await getSongFile(last.uuid)
-                        if (cached) {
-                            blobUrlRef.current = URL.createObjectURL(cached)
-                            audio.src = blobUrlRef.current
-                        } else {
-                            audio.src = `${DOWNLOAD_URL}/${last.uuid}`
-                        }
-                        audio.load()
+                        const src = await resolveAudioSrc(last.uuid)
+                        applyAudioSrc(audio, src)
                     }
                 }
             }
@@ -1069,6 +857,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     useEffect(() => {
         if (audioRef.current) audioRef.current.volume = volume
+        try { localStorage.setItem('playerVolume', String(volume)) } catch {}
     }, [volume])
 
     const QUEUE_ROW_H = 52
@@ -1102,7 +891,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     return (
         <PlayerContext.Provider value={contextValue}>
-            <audio ref={audioRef} />
+            <audio ref={audioRef} src={audioSrc || undefined} preload="metadata" playsInline/>
             {children}
             {toast && (
                 <div className={`fixed bottom-24 left-1/2 -translate-x-1/2 z-[60] px-4 py-2 rounded-full text-xs font-medium shadow-lg pointer-events-none whitespace-nowrap ${toast.error ? 'bg-red-900 text-red-200' : 'bg-gray-900 text-white'}`}>
@@ -1252,7 +1041,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                         <FaStepBackward size={13} />
                                     </button>
                                     <button data-testid="player-play-pause" onClick={isPlaying ? pause : resume} className={`shrink-0 ${idleClass}`}>
-                                        {isBuffering ? <Spinner /> : isPlaying ? <FaPause size={18} /> : <FaPlay size={18} />}
+                                        {isBuffering && isPlaying ? <Spinner /> : isPlaying ? <FaPause size={18} /> : <FaPlay size={18} />}
                                     </button>
                                     <button data-testid="player-next" onClick={skipNext} disabled={!hasQueue} className={`shrink-0 disabled:opacity-30 ${idleClass}`}>
                                         <FaStepForward size={13} />
@@ -1276,7 +1065,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                             <FaStepBackward size={16} />
                                         </button>
                                         <button onClick={isPlaying ? pause : resume} className={`shrink-0 p-2 -m-1 touch-manipulation ${idleClass}`}>
-                                            {isBuffering ? <Spinner size={20} /> : isPlaying ? <FaPause size={20} /> : <FaPlay size={20} />}
+                                            {isBuffering && isPlaying ? <Spinner size={20} /> : isPlaying ? <FaPause size={20} /> : <FaPlay size={20} />}
                                         </button>
                                         <button data-testid="player-next" onClick={skipNext} disabled={!hasQueue} className={`shrink-0 p-2 -m-1 touch-manipulation disabled:opacity-30 ${idleClass}`}>
                                             <FaStepForward size={16} />

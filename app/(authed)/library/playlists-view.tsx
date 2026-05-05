@@ -193,7 +193,7 @@ export default function PlaylistsView({
                         autoFocus
                         value={renameValue}
                         onChange={e => setRenameValue(e.target.value)}
-                        className="w-32 rounded bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 focus:border-sky-500 px-2 py-0.5 text-xs outline-none"
+                        className="w-32 rounded bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 focus:border-sky-500 px-2 py-0.5 text-base md:text-xs outline-none"
                     />
                     <div className="flex gap-0.5">
                         {ICON_KEYS.map(k => {
@@ -244,7 +244,7 @@ export default function PlaylistsView({
                                 value={newName}
                                 onChange={e => setNewName(e.target.value)}
                                 placeholder="playlist name"
-                                className="rounded-lg bg-gray-100 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 focus:border-sky-500 px-3 py-1.5 text-sm outline-none transition-colors"
+                                className="rounded-lg bg-gray-100 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 focus:border-sky-500 px-3 py-1.5 text-base md:text-sm outline-none transition-colors"
                             />
                             <button type="submit" className="px-3 py-1.5 bg-sky-500 hover:bg-sky-400 text-white rounded-full text-sm">create</button>
                             <button type="button" onClick={() => { setCreating(false); setNewName(''); setNewIcon('music') }} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">

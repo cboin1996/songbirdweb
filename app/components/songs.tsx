@@ -196,7 +196,7 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
                                 value={text}
                                 disabled={isDownloading}
                                 onChange={e => { setText(e.target.value); if (status === 'error') { setStatus('idle'); setErrorMsg('') } }}
-                                className="flex-1 text-sm border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-1.5 bg-transparent focus:outline-none focus:ring-1 focus:ring-sky-500 min-w-0 disabled:opacity-50"
+                                className="flex-1 text-base md:text-sm border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-1.5 bg-transparent focus:outline-none focus:ring-1 focus:ring-sky-500 min-w-0 disabled:opacity-50"
                             />
                             {isDownloading ? (
                                 <div className="flex items-center gap-2 shrink-0">

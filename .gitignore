@@ -45,3 +45,6 @@ e2e/.auth/
 *.tsbuildinfo
 next-env.d.ts
 /.auth/
+
+# app state
+data
