@@ -583,6 +583,7 @@ export interface PlayerState {
   manual_next?: string[]
   current_song_uuid?: string | null
   queue_sources?: Record<string, { id: string; label: string; href: string }>
+  updated_at?: string | null
 }
 
 export async function fetchPlayerState(): Promise<PlayerState | undefined> {

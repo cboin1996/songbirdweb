@@ -6,7 +6,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { FaPause, FaPlay, FaStepBackward, FaStepForward, FaRandom, FaRedo, FaList, FaTimes, FaVolumeUp, FaVolumeMute, FaBars, FaMusic } from "react-icons/fa"
 import Spinner from "./spinner"
-import { DOWNLOAD_URL, PlayableSong, artworkUrl, songArtworkUrl, fetchLibrarySongs, fetchPlayerState, fetchSongById, recordPlay, savePlayerState, updatePosition } from "../lib/data"
+import { DOWNLOAD_URL, LibrarySong, PlayableSong, PlayerState, artworkUrl, songArtworkUrl, fetchLibrarySongs, fetchPlayerState, fetchSongById, recordPlay, savePlayerState, updatePosition } from "../lib/data"
 import { getSongFile, cacheArtworkUrls } from "../lib/offline"
 import Slider from "./slider"
 import { routes } from "../lib/routes"
@@ -217,6 +217,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const [queueDropTarget, setQueueDropTarget] = useState<number | null>(null)
     const [draggedQi, setDraggedQi] = useState<number | null>(null)
     const [manualNextIds, setManualNextIds] = useState<Set<string>>(new Set())
+    const [syncPrompt, setSyncPrompt] = useState<{ serverState: PlayerState; localState: PlayerState } | null>(null)
+    const libMapRef = useRef<Map<string, LibrarySong>>(new Map())
     const shuffleSeedRef = useRef<number | null>(null)
     const playContextRef = useRef<PlayContext | null>(null)
 
@@ -254,6 +256,102 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     function applyAudioSrc(audio: HTMLAudioElement, src: string) {
         audio.src = src
         setAudioSrc(src)
+    }
+
+    async function applyPlayerState(state: PlayerState) {
+        const libMap = libMapRef.current
+        let sourceMap: Record<string, PlayContext> = state.queue_sources ?? {}
+        if (Object.keys(sourceMap).length === 0) {
+            try {
+                const raw = localStorage.getItem('playerSources')
+                if (raw) sourceMap = JSON.parse(raw)
+            } catch {}
+        }
+        const fallbackCtx = contextFromId(state.play_context ?? null)
+        const resolveUuids = async (uuids: string[]): Promise<PlayableSong[]> => {
+            const results: PlayableSong[] = []
+            for (const id of uuids) {
+                const lib = libMap.get(id)
+                if (lib?.properties) {
+                    results.push({ uuid: lib.uuid, properties: lib.properties!, last_position: lib.last_position, last_played_at: lib.last_played_at, artwork_cached: lib.artwork_cached, source: sourceMap[id] ?? fallbackCtx })
+                } else {
+                    const fetched = await fetchSongById(id)
+                    if (fetched) results.push({ ...fetched, source: sourceMap[id] ?? fallbackCtx })
+                }
+            }
+            return results
+        }
+
+        setShuffle(state.shuffle)
+        shuffleRef.current = state.shuffle
+        setRepeat(state.repeat)
+        repeatRef.current = state.repeat
+        if (state.play_context) setPlayContext(contextFromId(state.play_context))
+
+        const restoredQueue = await resolveUuids(state.queue ?? [])
+
+        if (restoredQueue.length === 0) {
+            const entries = [...libMap.values()]
+            const last = entries
+                .filter(s => s.last_played_at && s.properties)
+                .sort((a, b) => new Date(b.last_played_at!).getTime() - new Date(a.last_played_at!).getTime())[0]
+            if (last?.properties) {
+                const song: PlayableSong = { uuid: last.uuid, properties: last.properties!, last_position: last.last_position, last_played_at: last.last_played_at, artwork_cached: last.artwork_cached, source: fallbackCtx }
+                setCurrent(song)
+                setCurrentTime(last.last_position ?? 0)
+                queueRef.current = [song]
+                queueIndexRef.current = 0
+                setQueue([song])
+                const audio = audioRef.current
+                if (audio) {
+                    pendingPosition.current = last.last_position ?? 0
+                    const src = await resolveAudioSrc(last.uuid)
+                    applyAudioSrc(audio, src)
+                }
+            }
+            return
+        }
+
+        const safeIndex = Math.max(0, Math.min(state.queue_index, restoredQueue.length - 1))
+        const song = restoredQueue[safeIndex]
+        queueRef.current = restoredQueue
+        queueIndexRef.current = safeIndex
+        setQueue(restoredQueue)
+
+        const seed = state.shuffle_seed
+        const savedPos = state.shuffle_position ?? 0
+        if (seed != null) {
+            shuffleSeedRef.current = seed
+            const rest = seededShuffle(restoredQueue.map((_, i) => i).filter(i => i !== safeIndex), seed)
+            const order = [safeIndex, ...rest]
+            shuffleOrderRef.current = order
+            shufflePosRef.current = Math.max(0, Math.min(savedPos, order.length - 1))
+            setShuffleOrder([...order])
+        } else if (state.shuffle && state.shuffle_order && state.shuffle_order.length === restoredQueue.length) {
+            shuffleOrderRef.current = state.shuffle_order
+            shufflePosRef.current = Math.max(0, state.shuffle_order.indexOf(safeIndex))
+            setShuffleOrder([...state.shuffle_order])
+        } else if (state.shuffle) {
+            generateShuffleOrder(safeIndex)
+        }
+
+        const savedManualNext = state.manual_next ?? []
+        if (savedManualNext.length > 0) {
+            manualNextRef.current = await resolveUuids(savedManualNext)
+            setManualNextIds(new Set(savedManualNext))
+        } else {
+            manualNextRef.current = []
+            setManualNextIds(new Set())
+        }
+
+        setCurrent(song)
+        setCurrentTime(song.last_position ?? 0)
+        const audio = audioRef.current
+        if (audio) {
+            pendingPosition.current = song.last_position ?? 0
+            const src = await resolveAudioSrc(song.uuid)
+            applyAudioSrc(audio, src)
+        }
     }
 
     const savePosition = useCallback((song: PlayableSong, time: number) => {
@@ -552,7 +650,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 current_song_uuid: queueRef.current[queueIndexRef.current]?.uuid ?? null,
                 queue_sources: sources,
             }
-            try { localStorage.setItem('playerState', JSON.stringify(state)) } catch {}
+            try { localStorage.setItem('playerState', JSON.stringify({ ...state, saved_at: new Date().toISOString() })) } catch {}
             savePlayerState(state)
         }, 2000)
     }
@@ -738,120 +836,35 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     useEffect(() => {
         Promise.all([fetchPlayerState(), fetchLibrarySongs()]).then(async ([serverState, libSongs]) => {
             const libMap = new Map((libSongs ?? []).map(s => [s.uuid, s]))
+            libMapRef.current = libMap
 
-            let localState: typeof serverState | undefined
+            let localState: (PlayerState & { saved_at?: string }) | undefined
             try {
                 const raw = localStorage.getItem('playerState')
                 if (raw) localState = JSON.parse(raw)
             } catch {}
-            const state = serverState ?? localState
 
-            let sourceMap: Record<string, PlayContext> = state?.queue_sources ?? {}
-            if (Object.keys(sourceMap).length === 0) {
-                // Legacy fallback — pre queue_sources rollout
-                try {
-                    const raw = localStorage.getItem('playerSources')
-                    if (raw) sourceMap = JSON.parse(raw)
-                } catch {}
-            }
+            const queuesMatch = serverState && localState
+                && serverState.current_song_uuid === localState.current_song_uuid
+                && JSON.stringify(serverState.queue) === JSON.stringify(localState.queue)
 
-            if (state) {
-                setShuffle(state.shuffle)
-                shuffleRef.current = state.shuffle
-                setRepeat(state.repeat)
-                repeatRef.current = state.repeat
-            }
-
-            if (hasUserPlayedRef.current) return
-
-            const queueUuids = state?.queue ?? []
-            const resolveUuids = async (uuids: string[]): Promise<PlayableSong[]> => {
-                const results: PlayableSong[] = []
-                for (const id of uuids) {
-                    const lib = libMap.get(id)
-                    if (lib?.properties) {
-                        results.push({ uuid: lib.uuid, properties: lib.properties!, last_position: lib.last_position, last_played_at: lib.last_played_at, artwork_cached: lib.artwork_cached, source: sourceMap[id] ?? fallbackCtx })
-                    } else {
-                        const fetched = await fetchSongById(id)
-                        if (fetched) results.push({ ...fetched, source: sourceMap[id] ?? fallbackCtx })
-                    }
-                }
-                return results
-            }
-            const fallbackCtx = contextFromId(state?.play_context ?? null)
-            const restoredQueue = await resolveUuids(queueUuids)
-            if (hasUserPlayedRef.current) return
-
-            const warmArtworkCache = (songs: PlayableSong[]) => {
-                const urls = songs.flatMap(s => [
-                    s.properties?.artworkUrl100 ? artworkUrl(s.properties.artworkUrl100, 400) : null,
-                    s.artwork_cached ? songArtworkUrl(s.uuid, true, undefined, 200) : null,
-                    s.artwork_cached ? songArtworkUrl(s.uuid, true, undefined, 400) : null,
-                ].filter((u): u is string => !!u))
-                if (urls.length) cacheArtworkUrls(urls)
-            }
-
-            if (restoredQueue.length > 0) {
-                const safeIndex = Math.max(0, Math.min(state!.queue_index, restoredQueue.length - 1))
-                const song = restoredQueue[safeIndex]
-                queueRef.current = restoredQueue
-                queueIndexRef.current = safeIndex
-                setQueue(restoredQueue)
-                warmArtworkCache(restoredQueue)
-                // Restore shuffle order whenever a seed exists, regardless of whether
-                // shuffle is currently on — so toggling on after reload doesn't reshuffle.
-                const seed = (state as { shuffle_seed?: number | null }).shuffle_seed
-                const savedPos = (state as { shuffle_position?: number }).shuffle_position ?? 0
-                if (seed != null) {
-                    shuffleSeedRef.current = seed
-                    const rest = seededShuffle(restoredQueue.map((_, i) => i).filter(i => i !== safeIndex), seed)
-                    const order = [safeIndex, ...rest]
-                    shuffleOrderRef.current = order
-                    shufflePosRef.current = Math.max(0, Math.min(savedPos, order.length - 1))
-                    setShuffleOrder([...order])
-                } else if (state?.shuffle && state.shuffle_order && state.shuffle_order.length === restoredQueue.length) {
-                    // Legacy: index array saved before seed migration
-                    shuffleOrderRef.current = state.shuffle_order
-                    shufflePosRef.current = Math.max(0, state.shuffle_order.indexOf(safeIndex))
-                    setShuffleOrder([...state.shuffle_order])
-                } else if (state?.shuffle) {
-                    generateShuffleOrder(safeIndex)
-                }
-                // Restore manual_next queue
-                const savedManualNext = (state as { manual_next?: string[] }).manual_next ?? []
-                if (savedManualNext.length > 0) {
-                    manualNextRef.current = await resolveUuids(savedManualNext)
-                    setManualNextIds(new Set(savedManualNext))
-                }
-                setCurrent(song)
-                setCurrentTime(song.last_position ?? 0)
-                const audio = audioRef.current
-                if (audio) {
-                    pendingPosition.current = song.last_position ?? 0
-                    const src = await resolveAudioSrc(song.uuid)
-                    applyAudioSrc(audio, src)
+            let state: PlayerState | undefined
+            if (serverState && localState && !queuesMatch) {
+                const serverTime = serverState.updated_at ? new Date(serverState.updated_at).getTime() : Infinity
+                const localTime = localState.saved_at ? new Date(localState.saved_at).getTime() : 0
+                if (localTime > serverTime) {
+                    setSyncPrompt({ serverState, localState })
+                    state = localState
+                } else {
+                    showToast('Player synced from another device')
+                    state = serverState
                 }
             } else {
-                // fallback: restore last played song
-                const last = (libSongs ?? [])
-                    .filter(s => s.last_played_at && s.properties)
-                    .sort((a, b) => new Date(b.last_played_at!).getTime() - new Date(a.last_played_at!).getTime())[0]
-                if (last?.properties) {
-                    const song = { uuid: last.uuid, properties: last.properties, last_position: last.last_position, last_played_at: last.last_played_at, artwork_cached: last.artwork_cached, source: sourceMap[last.uuid] ?? fallbackCtx }
-                    setCurrent(song)
-                    setCurrentTime(last.last_position ?? 0)
-                    queueRef.current = [song]
-                    queueIndexRef.current = 0
-                    setQueue([song])
-                    warmArtworkCache([song])
-                    const audio = audioRef.current
-                    if (audio) {
-                        pendingPosition.current = last.last_position ?? 0
-                        const src = await resolveAudioSrc(last.uuid)
-                        applyAudioSrc(audio, src)
-                    }
-                }
+                state = serverState ?? localState
             }
+
+            if (!state || hasUserPlayedRef.current) return
+            await applyPlayerState(state)
         }).catch(() => {})
     }, [])
 
@@ -883,6 +896,19 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const pathname = usePathname()
     const isEditorPage = /^\/songs\/[^/]+\/edit/.test(pathname)
 
+    async function handleSyncLoad() {
+        if (!syncPrompt) return
+        await applyPlayerState(syncPrompt.serverState)
+        setSyncPrompt(null)
+        showToast('Loaded player state from other device')
+    }
+
+    function handleSyncKeep() {
+        setSyncPrompt(null)
+        scheduleSave()
+        showToast('Kept local player state')
+    }
+
     const contextValue = useMemo(() => ({
         current, isPlaying, queue, shuffle, repeat, playContext,
         play, pause, resume, skipNext, skipPrev, toggleShuffle, toggleRepeat, insertNext, removeFromQueue, reorderQueue, showToast,
@@ -896,6 +922,30 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             {toast && (
                 <div className={`fixed bottom-24 left-1/2 -translate-x-1/2 z-[60] px-4 py-2 rounded-full text-xs font-medium shadow-lg pointer-events-none whitespace-nowrap ${toast.error ? 'bg-red-900 text-red-200' : 'bg-gray-900 text-white'}`}>
                     {toast.msg}
+                </div>
+            )}
+            {syncPrompt && (
+                <div data-testid="sync-prompt" className="fixed inset-0 z-[70] flex items-end justify-center bg-black/40">
+                    <div className="w-full max-w-md bg-white dark:bg-gray-900 rounded-t-2xl p-6 shadow-2xl">
+                        <p className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-1">Player out of sync</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">Your local player state differs from another device. Which would you like to keep?</p>
+                        <div className="flex gap-3">
+                            <button
+                                data-testid="sync-load-remote"
+                                onClick={handleSyncLoad}
+                                className="flex-1 px-4 py-2.5 rounded-lg bg-sky-500 text-white text-sm font-medium hover:bg-sky-600 transition-colors"
+                            >
+                                Load from other device
+                            </button>
+                            <button
+                                data-testid="sync-keep-local"
+                                onClick={handleSyncKeep}
+                                className="flex-1 px-4 py-2.5 rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm font-medium hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                            >
+                                Keep mine
+                            </button>
+                        </div>
+                    </div>
                 </div>
             )}
             {current && p && !isEditorPage && (
