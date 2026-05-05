@@ -199,7 +199,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const blobUrlRef = useRef<string | null>(null)
     const autoplayActivatedRef = useRef(false)
-    const wantsPlayingRef = useRef(false)
     // refs mirror state so stable callbacks always see latest values
     const queueRef = useRef<PlayableSong[]>([])
     const queueIndexRef = useRef(-1)
@@ -271,7 +270,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setDuration(0)
         setCurrent(song)
         setIsPlaying(true)
-        wantsPlayingRef.current = true
 
         if (autoplayActivatedRef.current) {
             const src = await resolveAudioSrc(song.uuid)
@@ -453,15 +451,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         const audio = audioRef.current
         const song = currentRef.current
         if (!audio || !song) return
-        wantsPlayingRef.current = false
         audio.pause()
         savePosition(song, audio.currentTime)
         setIsPlaying(false)
-        if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused'
     }, [savePosition])
 
     const resume = useCallback(() => {
-        wantsPlayingRef.current = true
         audioRef.current?.play().catch(() => {})
         setIsPlaying(true)
         if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing'
@@ -631,8 +626,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing'
         }
         function onPause() {
-            setIsPlaying(false); setIsBuffering(false)
-            if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused'
+            if (!shouldPlayRef.current) setIsPlaying(false)
+            setIsBuffering(false)
         }
         function onLoadStart() { setIsBuffering(true); setBuffered(0) }
         function onWaiting() { setIsBuffering(true) }
@@ -670,15 +665,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             if (document.visibilityState !== 'visible') return
             const audio = audioRef.current
             if (!audio) return
-            if (wantsPlayingRef.current && audio.paused) {
-                setIsPlaying(true)
-                audio.play().catch(() => {
-                    wantsPlayingRef.current = false
-                    setIsPlaying(false)
-                })
-            } else {
-                setIsPlaying(!audio.paused)
-            }
+            setIsPlaying(!audio.paused)
             setCurrentTime(audio.currentTime)
             if (isFinite(audio.duration)) setDuration(audio.duration)
         }
