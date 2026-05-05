@@ -31,6 +31,8 @@ interface SongPickerModalProps {
     emptyState?: string
     // ineligible rows (uuid → list of missing field labels)
     disabledItems?: Record<string, string[]>
+    showTrackNumber?: boolean
+    testId?: string
 }
 
 const ROW_H = 52
@@ -41,6 +43,8 @@ export default function SongPickerModal({
     reorderable = false, onReorder,
     emptyState = 'no songs',
     disabledItems,
+    showTrackNumber = false,
+    testId,
 }: SongPickerModalProps) {
     const allIds = useMemo(() => songs.map(s => s.uuid), [songs])
     const { selected, toggle, selectAll, clearAll, setAll, startDrag, continueDrag, endDrag } = useMultiSelect(allIds)
@@ -127,7 +131,7 @@ export default function SongPickerModal({
     if (!open) return null
 
     const body = (
-        <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center">
+        <div data-testid={testId} className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center">
             {/* backdrop */}
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
             <div className="relative z-10 w-full sm:w-[480px] max-h-[85vh] flex flex-col bg-white dark:bg-gray-900 rounded-t-2xl sm:rounded-2xl shadow-2xl overflow-hidden">
@@ -222,6 +226,10 @@ export default function SongPickerModal({
                                                     >
                                                         {isSelected && !isDisabled && <FaCheck size={9} className="text-white" />}
                                                     </div>
+                                                )}
+
+                                                {showTrackNumber && (
+                                                    <span className="text-xs text-gray-400 w-5 text-right shrink-0">{sp?.trackNumber ?? ''}</span>
                                                 )}
 
                                                 {/* artwork */}

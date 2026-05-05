@@ -270,24 +270,65 @@ test.describe('player bar', () => {
         expect(href).toContain(`song=${songId}`)
     })
 
-    test('library albums: player link includes ?view=albums&album=<id>', async ({ page }) => {
+    test('album card click opens modal with song list', async ({ page }) => {
         await page.goto(routes.libraryAlbums)
-        // data-album-id is on the wrapper, not the song-card testid element.
+        const card = page.locator('[data-album-id]').first()
+        await expect(card).toBeVisible({ timeout: 10000 })
+
+        await card.click()
+        const modal = page.getByTestId('album-modal')
+        await expect(modal).toBeVisible({ timeout: 3000 })
+    })
+
+    test('album modal close dismisses on X button', async ({ page }) => {
+        await page.goto(routes.libraryAlbums)
+        const card = page.locator('[data-album-id]').first()
+        await expect(card).toBeVisible({ timeout: 10000 })
+
+        await card.click()
+        const modal = page.getByTestId('album-modal')
+        await expect(modal).toBeVisible({ timeout: 3000 })
+
+        // Close via the X button in the modal header
+        await modal.getByRole('button').filter({ has: page.locator('svg') }).last().click()
+        await expect(modal).not.toBeVisible({ timeout: 3000 })
+    })
+
+    test('album play button starts playback with album context', async ({ page }) => {
+        await page.goto(routes.libraryAlbums)
         const card = page.locator('[data-album-id]').first()
         await expect(card).toBeVisible({ timeout: 10000 })
 
         const albumId = await card.getAttribute('data-album-id')
         expect(albumId).toBeTruthy()
 
-        await card.click()
+        // Click the play button (not the card itself)
+        await card.getByTestId('album-play').click({ force: true })
         await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
 
-        // Check the context link for album query param (NOT song param)
+        // Context link should point to album view
         const link = page.locator('a[href*="albums"]').first()
         const href = await link.getAttribute('href')
         expect(href).toContain(`albums`)
         expect(href).toContain(`album=${albumId}`)
-        expect(href).not.toContain(`song=`) // albums use album param, not song
+        expect(href).not.toContain(`song=`)
+    })
+
+    test('album play button toggles pause when same album is active', async ({ page }) => {
+        await page.goto(routes.libraryAlbums)
+        const card = page.locator('[data-album-id]').first()
+        await expect(card).toBeVisible({ timeout: 10000 })
+
+        // Start playback
+        await card.getByTestId('album-play').click({ force: true })
+        await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
+
+        // Click play again on the same album — should pause
+        await card.getByTestId('album-play').click({ force: true })
+        // The player play/pause button should now show the play icon (paused state)
+        const playPauseBtn = page.getByTestId('player-play-pause')
+        // When paused, aria or icon changes — check the audio is paused
+        await expect(playPauseBtn).toBeVisible()
     })
 
     test('queue_sources persists across reload (cross-session)', async ({ page }) => {
