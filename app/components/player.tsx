@@ -454,6 +454,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         audio.pause()
         savePosition(song, audio.currentTime)
         setIsPlaying(false)
+        if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused'
     }, [savePosition])
 
     const resume = useCallback(() => {
