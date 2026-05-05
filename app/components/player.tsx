@@ -920,7 +920,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             <audio ref={audioRef} src={audioSrc || undefined} preload="metadata" playsInline/>
             {children}
             {toast && (
-                <div className={`fixed bottom-24 left-1/2 -translate-x-1/2 z-[60] px-4 py-2 rounded-full text-xs font-medium shadow-lg pointer-events-none whitespace-nowrap ${toast.error ? 'bg-red-900 text-red-200' : 'bg-gray-900 text-white'}`}>
+                <div className={`fixed bottom-24 left-1/2 -translate-x-1/2 z-[60] px-4 py-2 rounded-full text-xs font-medium shadow-lg pointer-events-none whitespace-nowrap ${toast.error ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' : 'bg-gray-100 text-gray-900 dark:bg-gray-900 dark:text-white'}`}>
                     {toast.msg}
                 </div>
             )}
