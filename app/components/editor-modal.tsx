@@ -2390,6 +2390,7 @@ export default function EditorModal({
               </div>
               <div className="flex items-center gap-2 px-2 pb-2 border-t border-gray-100 dark:border-gray-800 pt-1.5">
                 <button
+                  data-testid="orig-play"
                   onClick={e => { e.stopPropagation(); switchToWaveform('orig'); if (origPlaying) wsOrigRef.current?.pause(); else { pausePlayer(); wsRef.current?.pause(); stopPreview(); wsOrigRef.current?.play() } }}
                   disabled={!origReady}
                   className={`shrink-0 ${origReady ? 'text-sky-500 hover:text-sky-400' : 'text-gray-300 dark:text-gray-700'}`}
@@ -2410,7 +2411,7 @@ export default function EditorModal({
               onClick={() => switchToWaveform('edit')}
             >
               <div className="flex items-center gap-2 px-2 pt-2">
-                <span className={`text-xs font-medium ${previewing ? 'text-orange-400' : jobStatus === 'submitting' || jobStatus === 'polling' ? 'text-sky-400' : activeRootSongId ? 'text-amber-400' : 'text-gray-400'}`}>
+                <span data-testid="version-badge" className={`text-xs font-medium ${previewing ? 'text-orange-400' : jobStatus === 'submitting' || jobStatus === 'polling' ? 'text-sky-400' : activeRootSongId ? 'text-amber-400' : 'text-gray-400'}`}>
                   {previewing ? 'preview' : jobStatus === 'submitting' ? 'submitting…' : jobStatus === 'polling' ? 'processing…' : activeRootSongId ? 'edited' : 'edit'}
                 </span>
               </div>

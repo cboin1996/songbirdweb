@@ -48,18 +48,17 @@ test.describe('offline mode', () => {
         await expect(page.getByText(/needs internet/i)).toBeVisible()
     })
 
-    // FIXME: library-list returns the empty-state message instead of the toolbar
-    // when offline AND no songs cached locally — so the save-all button doesn't
-    // exist for the e2e seed user (no offline cache). Test would need to first
-    // cache a song while online, then flip offline. data-testid is wired
-    // (`save-all-offline`) and waits to be exercised.
+    // FIXME(0.1.0): going offline replaces the toolbar with OfflineGuard
+    // empty state, removing the button from the DOM entirely. Can't assert
+    // toBeDisabled() on a detached element. Needs a different assertion
+    // strategy (e.g. check button hidden + guard message visible).
     test.fixme('save all offline button is disabled when offline', async ({ page }) => {
         await page.goto(routes.library)
-        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
+        const saveAllBtn = page.getByTestId('save-all-offline')
+        await expect(saveAllBtn).toBeVisible({ timeout: 10000 })
+        await expect(saveAllBtn).not.toBeDisabled()
         await page.context().setOffline(true)
         await page.evaluate(() => window.dispatchEvent(new Event('offline')))
-        const saveAllBtn = page.getByTestId('save-all-offline')
-        await expect(saveAllBtn).toBeVisible({ timeout: 5000 })
         await expect(saveAllBtn).toBeDisabled()
     })
 
