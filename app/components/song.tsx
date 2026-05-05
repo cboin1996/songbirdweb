@@ -79,7 +79,15 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
             : await addToLibrary(song.songId)
         if (ok) {
             setInLibrary(prev => !prev)
-            if (inLibrary) onRemove?.()
+            if (inLibrary) {
+                onRemove?.()
+                if (offlineCached) {
+                    uncacheSong(song.songId).catch(() => {})
+                    removeServerOfflineSong(song.songId)
+                    setOfflineCached(false)
+                    onCacheChange?.(song.songId, false)
+                }
+            }
         } else {
             setLibraryError(true)
         }

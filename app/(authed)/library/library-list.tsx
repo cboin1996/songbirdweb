@@ -194,7 +194,8 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
             // Sync local cache state with server; surface songs on server not yet local
             if (navigator.onLine) {
                 const serverOnly = await syncOfflineSongs([...ids])
-                if (serverOnly.length > 0) setSyncPromptIds(serverOnly)
+                const resolvable = serverOnly.filter(id => songs.some(s => s.uuid === id))
+                if (resolvable.length > 0) setSyncPromptIds(resolvable)
             }
         })
         fetchPlaylists().then(setPlaylists)
@@ -720,6 +721,14 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         setBulkLoading(true)
         const ids = [...selectedIds]
         await bulkRemoveFromLibrary(ids)
+        for (const id of ids) {
+            if (cachedIds.has(id)) {
+                try { await uncacheSong(id) } catch {}
+                removeServerOfflineSong(id)
+            }
+        }
+        setCachedIds(prev => { const next = new Set(prev); ids.forEach(id => next.delete(id)); return next })
+        setSyncPromptIds(prev => prev.filter(x => !selectedIds.has(x)))
         setSongs(prev => prev.filter(s => !selectedIds.has(s.uuid)))
         exitSelectMode()
         setBulkLoading(false)
@@ -938,13 +947,19 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                         )
                                     }}
                                     inLibrary={true}
-                                    onRemove={() => setSongs(prev => prev.filter(s => s.uuid !== song.uuid))}
+                                    onRemove={() => {
+                                        setSongs(prev => prev.filter(s => s.uuid !== song.uuid))
+                                        setSyncPromptIds(prev => prev.filter(x => x !== song.uuid))
+                                    }}
                                     cachedOffline={cachedIds.has(song.uuid)}
-                                    onCacheChange={(id, cached) => setCachedIds(prev => {
-                                        const next = new Set(prev)
-                                        cached ? next.add(id) : next.delete(id)
-                                        return next
-                                    })}
+                                    onCacheChange={(id, cached) => {
+                                        setCachedIds(prev => {
+                                            const next = new Set(prev)
+                                            cached ? next.add(id) : next.delete(id)
+                                            return next
+                                        })
+                                        if (cached) setSyncPromptIds(prev => prev.filter(x => x !== id))
+                                    }}
                                     compact={!isDesktop}
 
                                     isPrivate={!!song.owner_id || !!song.parent_song_id}
@@ -990,13 +1005,19 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                         )
                                     }}
                                     inLibrary={true}
-                                    onRemove={() => setSongs(prev => prev.filter(s => s.uuid !== song.uuid))}
+                                    onRemove={() => {
+                                        setSongs(prev => prev.filter(s => s.uuid !== song.uuid))
+                                        setSyncPromptIds(prev => prev.filter(x => x !== song.uuid))
+                                    }}
                                     cachedOffline={cachedIds.has(song.uuid)}
-                                    onCacheChange={(id, cached) => setCachedIds(prev => {
-                                        const next = new Set(prev)
-                                        cached ? next.add(id) : next.delete(id)
-                                        return next
-                                    })}
+                                    onCacheChange={(id, cached) => {
+                                        setCachedIds(prev => {
+                                            const next = new Set(prev)
+                                            cached ? next.add(id) : next.delete(id)
+                                            return next
+                                        })
+                                        if (cached) setSyncPromptIds(prev => prev.filter(x => x !== id))
+                                    }}
                                     compact={!isDesktop}
 
                                     isPrivate={!!song.owner_id || !!song.parent_song_id}

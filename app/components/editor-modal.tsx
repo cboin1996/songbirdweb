@@ -5,9 +5,10 @@ import RegionsPlugin from 'wavesurfer.js/plugins/regions'
 import {
   DOWNLOAD_URL, createEditJob, deleteEditDraft, Cut, EditParams, FadeEdit, fetchEditDraft,
   pollEditJob, Properties, saveEditDraft, songArtworkUrl, artworkUrl,
-  addToLibrary, removeFromLibrary, uploadSongArtwork, API_V1,
+  addToLibrary, removeFromLibrary, removeServerOfflineSong, uploadSongArtwork, API_V1,
   fetchSongEligibility, SongEligibility,
 } from '../lib/data'
+import { uncacheSong } from '../lib/offline'
 import { FaPlay, FaPause, FaTimes, FaUndo, FaRedo, FaTrash, FaCut, FaChevronDown } from 'react-icons/fa'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
@@ -1893,6 +1894,8 @@ export default function EditorModal({
     const restoredId = rootSongId ?? songId
     setRestoring(true)
     await Promise.all([removeFromLibrary(activeSongId), deleteEditDraft(activeSongIdRef.current)])
+    uncacheSong(activeSongId).catch(() => {})
+    removeServerOfflineSong(activeSongId)
     await addToLibrary(restoredId)
     setRestoring(false)
     router.refresh()
@@ -1905,6 +1908,8 @@ export default function EditorModal({
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
     setRestoring(true)
     await removeFromLibrary(activeSongId)
+    uncacheSong(activeSongId).catch(() => {})
+    removeServerOfflineSong(activeSongId)
     await addToLibrary(parentSongId)
     setRestoring(false)
     router.refresh()
