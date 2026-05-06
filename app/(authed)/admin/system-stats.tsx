@@ -4,6 +4,7 @@ import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { AdminStats, fetchAdminEditJobs, fetchAdminErrors } from "../../lib/data"
 import SearchInput from "../../components/search-input"
+import QueryError from "../../components/query-error"
 
 function formatBytes(bytes: number): string {
     if (bytes < 1024) return `${bytes} B`
@@ -29,14 +30,14 @@ export default function SystemStats({ stats }: { stats: AdminStats | undefined }
     const [topSongsFilter, setTopSongsFilter] = useState('')
     const [topSongsPage, setTopSongsPage] = useState(0)
 
-    const { data: errorData } = useQuery({
+    const { data: errorData, error: errorsQueryError, refetch: refetchErrors } = useQuery({
         queryKey: ['admin-errors', errorPage],
         queryFn: () => fetchAdminErrors(ERROR_PAGE_SIZE, errorPage * ERROR_PAGE_SIZE),
     })
     const errors = errorData?.errors ?? []
     const errorTotal = errorData?.total ?? 0
 
-    const { data: jobData } = useQuery({
+    const { data: jobData, error: jobsQueryError, refetch: refetchJobs } = useQuery({
         queryKey: ['admin-edit-jobs', jobPage],
         queryFn: () => fetchAdminEditJobs(JOB_PAGE_SIZE, jobPage * JOB_PAGE_SIZE),
     })
@@ -225,6 +226,7 @@ export default function SystemStats({ stats }: { stats: AdminStats | undefined }
                     <Stat value={stats.failed_job_count} label="all-time failed" color={stats.failed_job_count > 0 ? 'text-red-500' : undefined} />
                 </div>
 
+                {jobsQueryError && <QueryError error={jobsQueryError} retry={refetchJobs} />}
                 {jobTotal > 0 && (
                     <div className="flex flex-col gap-2">
                         <SearchInput
@@ -291,6 +293,7 @@ export default function SystemStats({ stats }: { stats: AdminStats | undefined }
             </section>
 
             {/* ── Errors ── */}
+            {errorsQueryError && <QueryError error={errorsQueryError} retry={refetchErrors} />}
             {errorTotal > 0 && (
                 <section className="flex flex-col gap-4">
                     <p className="text-gray-400 text-sm font-medium uppercase tracking-wide">errors</p>

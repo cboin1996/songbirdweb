@@ -7,6 +7,7 @@ import { ImportJobResult, ImportJobsPage, listImportJobs, pollImportJob } from '
 import { routes } from '../lib/routes'
 import SearchInput from './search-input'
 import Spinner from './spinner'
+import QueryError from './query-error'
 
 const PAGE_SIZE = 20
 const POLL_INTERVAL_MS = 3000
@@ -29,7 +30,7 @@ export default function ImportJobsTable({
   const inFlight = activeIds.size
   const hasInFlight = inFlight > 0
 
-  const { data: pageData, isFetching } = useQuery({
+  const { data: pageData, isFetching, error: jobsError, refetch: refetchJobs } = useQuery({
     queryKey: ['import-jobs', page],
     queryFn: () => listImportJobs(PAGE_SIZE, page * PAGE_SIZE),
   })
@@ -200,6 +201,8 @@ export default function ImportJobsTable({
           className="w-48"
         />
       </div>
+
+      {jobsError && <QueryError error={jobsError} retry={refetchJobs} />}
 
       {hasInFlight && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-sky-50 dark:bg-sky-950/30 border border-sky-200 dark:border-sky-900 text-sm">

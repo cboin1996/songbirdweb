@@ -15,6 +15,7 @@ import { EVENTS } from "../../lib/events"
 import { FaPlay, FaPause, FaCloudDownloadAlt, FaMusic } from "react-icons/fa"
 import PlaylistsView from "./playlists-view"
 import EditsBanner from "./edits-banner"
+import QueryError from "../../components/query-error"
 
 type ViewMode = 'songs' | 'artists' | 'albums' | 'genres' | 'playlists'
 
@@ -119,7 +120,7 @@ const AlbumCard = memo(function AlbumCard({ album, isCompact, isActive, isPlayin
 export default function LibraryList({ initialSongs }: { initialSongs: LibrarySong[] }) {
     const online = useOnline()
     const queryClient = useQueryClient()
-    const { data: songs = [] } = useQuery({
+    const { data: songs = [], error: songsError, refetch: refetchSongs } = useQuery({
         queryKey: queryKeys.librarySongs,
         queryFn: fetchLibrarySongs,
         initialData: initialSongs,
@@ -907,6 +908,12 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                 </div>
             </div>
             </div>{/* end sticky header */}
+
+            {songsError && songs.length === 0 && (
+                <div className="my-4">
+                    <QueryError error={songsError} retry={refetchSongs} />
+                </div>
+            )}
 
             {/* Playlists view */}
             {viewMode === 'playlists' && (
