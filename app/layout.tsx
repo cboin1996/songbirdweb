@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import ServiceWorkerRegistrar from "./components/sw-register";
 import OfflineBanner from "./components/offline-banner";
+import QueryProvider from "./components/query-provider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -30,9 +31,11 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased p-2 pb-24`}
       >
-        <OfflineBanner />
-        <ServiceWorkerRegistrar />
-        {children}
+        <QueryProvider>
+          <OfflineBanner />
+          <ServiceWorkerRegistrar />
+          {children}
+        </QueryProvider>
       </body>
     </html>
   );

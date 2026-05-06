@@ -2,7 +2,9 @@
 import { memo, useRef, useState, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { createPortal } from "react-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { addToLibrary, removeFromLibrary, downloadSongToFile, createShareToken, DownloadedSong, songArtworkUrl, artworkUrl, addSongToPlaylist, addServerOfflineSong, removeServerOfflineSong } from "../lib/data";
+import { queryKeys } from "../lib/query-keys";
 import { cacheSong, uncacheSong } from "../lib/offline";
 import { FaBookmark, FaRegBookmark, FaEllipsisV, FaLock, FaCloudDownloadAlt } from "react-icons/fa";
 import Image from "next/image";
@@ -53,6 +55,7 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
     const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
     const kebabJustClosed = useRef(false)
     const { play, pause, resume, current, isPlaying, insertNext, onLibraryAdd, onLibraryRemove, showToast } = usePlayer()
+    const queryClient = useQueryClient()
     const pathname = usePathname()
     function pageSource() {
         const href = typeof window !== 'undefined' ? window.location.pathname + window.location.search : pathname
@@ -79,6 +82,8 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
             : await addToLibrary(song.songId)
         if (ok) {
             setInLibrary(prev => !prev)
+            queryClient.invalidateQueries({ queryKey: queryKeys.library })
+            queryClient.invalidateQueries({ queryKey: queryKeys.librarySongs })
             if (inLibrary) {
                 onRemove?.()
                 onLibraryRemove(song.songId!)

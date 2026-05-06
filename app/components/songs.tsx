@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 function useIsDesktop() {
     const [isDesktop, setIsDesktop] = useState(false)
@@ -12,7 +12,9 @@ function useIsDesktop() {
     }, [])
     return isDesktop
 }
-import { DownloadedSong, downloadSongViaUrl, downloadSongToFile, addToLibrary, fetchLibrary, tagSong, toPlayableSong } from "../lib/data";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { DownloadedSong, LibraryEntry, downloadSongViaUrl, downloadSongToFile, addToLibrary, fetchLibrary, tagSong, toPlayableSong } from "../lib/data";
+import { queryKeys } from "../lib/query-keys";
 import { usePlayer } from "./player";
 import { routes } from "../lib/routes";
 import Song from "./song";
@@ -23,7 +25,6 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
     const isDesktop = useIsDesktop()
     const noActiveIndex = -1
     const [songs, setSongs] = useState<DownloadedSong[]>(initialSongs)
-    const [libraryIds, setLibraryIds] = useState<Set<string>>(new Set())
     const [activeIndex, setActiveIndex] = useState(noActiveIndex)
     const [text, setText] = useState('')
     const [status, setStatus] = useState<'idle' | 'downloading' | 'tagging' | 'ready' | 'saving' | 'error'>('idle')
@@ -31,9 +32,12 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
     const [readySong, setReadySong] = useState<DownloadedSong | null>(null)
     const inputRef = useRef<HTMLInputElement>(null)
     const { play, current, onLibraryAdd } = usePlayer()
-    useEffect(() => {
-        fetchLibrary().then(entries => setLibraryIds(new Set(entries.map(e => e.song_id))))
-    }, [])
+    const queryClient = useQueryClient()
+    const { data: libraryEntries = [] } = useQuery({
+        queryKey: queryKeys.library,
+        queryFn: fetchLibrary,
+    })
+    const libraryIds = useMemo(() => new Set(libraryEntries.map(e => e.song_id)), [libraryEntries])
 
     useEffect(() => {
         if (activeIndex !== noActiveIndex && status === 'idle') {
@@ -59,7 +63,9 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
         setStatus('saving')
         const ok = await addToLibrary(readySong.songId)
         if (ok) {
-            setLibraryIds(prev => new Set([...prev, readySong.songId!]))
+            queryClient.setQueryData<LibraryEntry[]>(queryKeys.library, prev =>
+                [...(prev ?? []), { song_id: readySong.songId!, added_at: new Date().toISOString(), last_position: 0, last_played_at: null }]
+            )
             onLibraryAdd({ uuid: readySong.songId!, properties: readySong.properties })
             dismiss()
         } else {

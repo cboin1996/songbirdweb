@@ -1,6 +1,6 @@
 'use client'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { startImport, listImportJobs, ImportJobResult } from '../../lib/data'
+import { startImport, ImportJobResult } from '../../lib/data'
 import { FaUpload } from 'react-icons/fa'
 import ImportJobsTable, { ImportJobsTableHandle } from '../../components/import-jobs-table'
 import { useOnline } from '../../lib/use-online'
@@ -11,20 +11,9 @@ export default function ImportPage() {
   const { isAdmin } = useUser()
   const [dragging, setDragging] = useState(false)
   const [asOriginal, setAsOriginal] = useState(false)
-  const [initialJobs, setInitialJobs] = useState<ImportJobResult[]>([])
-  const [initialTotal, setInitialTotal] = useState(0)
-  const [initialCounts, setInitialCounts] = useState<Record<string, number>>({})
   const [pendingUploads, setPendingUploads] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const tableRef = useRef<ImportJobsTableHandle | null>(null)
-
-  useEffect(() => {
-    listImportJobs().then(data => {
-      setInitialJobs(data.jobs)
-      setInitialTotal(data.total)
-      setInitialCounts(data.status_counts ?? {})
-    })
-  }, [])
 
   // Warn on tab close / hard refresh while uploads are in flight (server-side jobs are safe).
   useEffect(() => {
@@ -119,7 +108,7 @@ export default function ImportPage() {
         </label>
       )}
 
-      <ImportJobsTable initialJobs={initialJobs} total={initialTotal} initialCounts={initialCounts} tableRef={tableRef} />
+      <ImportJobsTable tableRef={tableRef} />
     </main>
   )
 }

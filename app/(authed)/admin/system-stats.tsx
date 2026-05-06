@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useState } from "react"
-import { AdminStats, EditJobSummary, ErrorLogEntry, fetchAdminEditJobs, fetchAdminErrors } from "../../lib/data"
+import { useState } from "react"
+import { useQuery } from "@tanstack/react-query"
+import { AdminStats, fetchAdminEditJobs, fetchAdminErrors } from "../../lib/data"
 import SearchInput from "../../components/search-input"
 
 function formatBytes(bytes: number): string {
@@ -23,19 +24,24 @@ export default function SystemStats({ stats }: { stats: AdminStats | undefined }
     const [expandedError, setExpandedError] = useState<string | null>(null)
     const [errorFilter, setErrorFilter] = useState('')
     const [errorPage, setErrorPage] = useState(0)
-    const [errorTotal, setErrorTotal] = useState(0)
-    const [errors, setErrors] = useState<ErrorLogEntry[]>([])
     const [jobFilter, setJobFilter] = useState('')
     const [jobPage, setJobPage] = useState(0)
-    const [jobTotal, setJobTotal] = useState(0)
-    const [editJobs, setEditJobs] = useState<EditJobSummary[]>([])
     const [topSongsFilter, setTopSongsFilter] = useState('')
     const [topSongsPage, setTopSongsPage] = useState(0)
 
-    useEffect(() => {
-        fetchAdminErrors(ERROR_PAGE_SIZE, 0).then(data => { setErrors(data.errors); setErrorTotal(data.total) })
-        fetchAdminEditJobs(JOB_PAGE_SIZE, 0).then(data => { setEditJobs(data.jobs); setJobTotal(data.total) })
-    }, [])
+    const { data: errorData } = useQuery({
+        queryKey: ['admin-errors', errorPage],
+        queryFn: () => fetchAdminErrors(ERROR_PAGE_SIZE, errorPage * ERROR_PAGE_SIZE),
+    })
+    const errors = errorData?.errors ?? []
+    const errorTotal = errorData?.total ?? 0
+
+    const { data: jobData } = useQuery({
+        queryKey: ['admin-edit-jobs', jobPage],
+        queryFn: () => fetchAdminEditJobs(JOB_PAGE_SIZE, jobPage * JOB_PAGE_SIZE),
+    })
+    const editJobs = jobData?.jobs ?? []
+    const jobTotal = jobData?.total ?? 0
 
     if (!stats) return <p className="text-gray-400 text-sm">failed to load system stats</p>
 
@@ -52,10 +58,7 @@ export default function SystemStats({ stats }: { stats: AdminStats | undefined }
     })
     const jobTotalPages = Math.max(1, Math.ceil(jobTotal / JOB_PAGE_SIZE))
 
-    async function handleJobPageChange(p: number) {
-        const data = await fetchAdminEditJobs(JOB_PAGE_SIZE, p * JOB_PAGE_SIZE)
-        setEditJobs(data.jobs)
-        setJobTotal(data.total)
+    function handleJobPageChange(p: number) {
         setJobPage(p)
     }
 
@@ -69,10 +72,7 @@ export default function SystemStats({ stats }: { stats: AdminStats | undefined }
     })
     const totalPages = Math.max(1, Math.ceil(errorTotal / ERROR_PAGE_SIZE))
 
-    async function handleErrorPageChange(p: number) {
-        const data = await fetchAdminErrors(ERROR_PAGE_SIZE, p * ERROR_PAGE_SIZE)
-        setErrors(data.errors)
-        setErrorTotal(data.total)
+    function handleErrorPageChange(p: number) {
         setErrorPage(p)
     }
 

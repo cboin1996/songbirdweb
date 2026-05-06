@@ -1,8 +1,10 @@
 'use client'
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
+import { useQuery } from "@tanstack/react-query"
 import SearchInput from "../../components/search-input"
 import { ExploreData, ExploreWindow, SongWithCount, RecentlyPlayedSong, RecentlySavedSong, fetchLibrary, toSongCard, toPlayableSong } from "../../lib/data"
+import { queryKeys } from "../../lib/query-keys"
 import { routes } from "../../lib/routes"
 import { usePlayer } from "../../components/player"
 import Song from "../../components/song"
@@ -123,12 +125,13 @@ export default function ExploreClient({ data, window: timeWindow }: { data: Expl
     const initialView = (searchParams.get('view') as ViewFilter | null) ?? 'everyone'
     const [sortBy, setSortBy] = useState<SortBy>(initialSort)
     const [viewFilter, setViewFilter] = useState<ViewFilter>(initialView)
-    const [libraryIds, setLibraryIds] = useState<Set<string>>(new Set())
     const [search, setSearch] = useState(searchParams.get('q') ?? '')
 
-    useEffect(() => {
-        fetchLibrary().then(entries => setLibraryIds(new Set(entries.map(e => e.song_id))))
-    }, [])
+    const { data: libraryEntries = [] } = useQuery({
+        queryKey: queryKeys.library,
+        queryFn: fetchLibrary,
+    })
+    const libraryIds = useMemo(() => new Set(libraryEntries.map(e => e.song_id)), [libraryEntries])
 
     function changeViewFilter(v: ViewFilter) {
         setViewFilter(v)
