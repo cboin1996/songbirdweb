@@ -100,6 +100,8 @@ jobs:
           E2E_BULK_PASSWORD: e2e-BulkPass-1
           E2E_IMPORT_USERNAME: e2e-import
           E2E_IMPORT_PASSWORD: e2e-ImportPass-1
+          E2E_QUEUE_USERNAME: e2e-queue
+          E2E_QUEUE_PASSWORD: e2e-QueuePass-1
         run: make ${{ matrix.make_target }}
 
       - name: Upload Playwright report
