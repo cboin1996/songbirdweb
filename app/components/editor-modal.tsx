@@ -467,13 +467,13 @@ export default function EditorModal({
           setProps(merged)
         }
       }
-    })
+    }).catch(() => {})
    
   }, [songId])
 
   // fetch eligibility on mount and when active song changes
   useEffect(() => {
-    fetchSongEligibility(activeSongId).then(e => setEligibility(e ?? null))
+    fetchSongEligibility(activeSongId).then(e => setEligibility(e ?? null)).catch(() => {})
   }, [activeSongId])
 
   // keep refs in sync for stale-closure-safe event handlers
@@ -610,6 +610,7 @@ export default function EditorModal({
       if (isDefault && !overrides) return
       saveEditDraft(activeSongIdRef.current, { ...stripClientIds(p), properties_overrides: overrides })
         .then(() => fetchSongEligibility(activeSongIdRef.current).then(e => setEligibility(e ?? null)))
+        .catch(() => {})
     }, 1000)
   }, [propsOverridesIfChanged])
 
@@ -1853,7 +1854,7 @@ export default function EditorModal({
     await saveEditDraft(activeSongIdRef.current, { ...stripClientIds(p), properties_overrides: overrides })
     setDraftSaveStatus('saved')
     setTimeout(() => setDraftSaveStatus('idle'), 2000)
-    fetchSongEligibility(activeSongIdRef.current).then(e => setEligibility(e ?? null))
+    fetchSongEligibility(activeSongIdRef.current).then(e => setEligibility(e ?? null)).catch(() => {})
   }
 
   async function handleDiscard() {

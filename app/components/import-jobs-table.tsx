@@ -81,39 +81,41 @@ export default function ImportJobsTable({
   useEffect(() => {
     if (!hasInFlight) return
     const tick = async () => {
-      const data = await listImportJobs(PAGE_SIZE, 0)
-      if (!data) return
-      const byId = new Map((data.jobs ?? []).map(j => [j.job_id, j]))
-      const missing = [...activeIdsRef.current].filter(id => !byId.has(id))
-      if (missing.length > 0) {
-        await Promise.all(missing.map(async id => {
-          const job = await pollImportJob(id)
-          if (job) byId.set(id, job)
-        }))
-      }
-      setActiveIds(prev => {
-        let finishedDelta = 0
-        const next = new Set(prev)
-        for (const id of prev) {
-          const updated = byId.get(id)
-          if (updated && !isPending(updated.status)) {
-            next.delete(id)
-            finishedDelta++
+      try {
+        const data = await listImportJobs(PAGE_SIZE, 0)
+        if (!data) return
+        const byId = new Map((data.jobs ?? []).map(j => [j.job_id, j]))
+        const missing = [...activeIdsRef.current].filter(id => !byId.has(id))
+        if (missing.length > 0) {
+          await Promise.all(missing.map(async id => {
+            const job = await pollImportJob(id)
+            if (job) byId.set(id, job)
+          }))
+        }
+        setActiveIds(prev => {
+          let finishedDelta = 0
+          const next = new Set(prev)
+          for (const id of prev) {
+            const updated = byId.get(id)
+            if (updated && !isPending(updated.status)) {
+              next.delete(id)
+              finishedDelta++
+            }
           }
-        }
-        if (finishedDelta) setSessionFinished(d => d + finishedDelta)
-        activeIdsRef.current = next
-        return next
-      })
-      queryClient.setQueryData<ImportJobsPage>(['import-jobs', page], prev => {
-        if (!prev) return prev
-        return {
-          ...prev,
-          jobs: prev.jobs.map(j => byId.get(j.job_id) ?? j),
-          total: data.total ?? prev.total,
-          status_counts: data.status_counts ?? prev.status_counts,
-        }
-      })
+          if (finishedDelta) setSessionFinished(d => d + finishedDelta)
+          activeIdsRef.current = next
+          return next
+        })
+        queryClient.setQueryData<ImportJobsPage>(['import-jobs', page], prev => {
+          if (!prev) return prev
+          return {
+            ...prev,
+            jobs: prev.jobs.map(j => byId.get(j.job_id) ?? j),
+            total: data.total ?? prev.total,
+            status_counts: data.status_counts ?? prev.status_counts,
+          }
+        })
+      } catch {}
     }
     const interval = setInterval(tick, POLL_INTERVAL_MS)
     return () => clearInterval(interval)

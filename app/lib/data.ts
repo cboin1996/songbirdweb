@@ -47,6 +47,15 @@ async function tryRefresh(): Promise<boolean> {
   return refreshPromise
 }
 
+export class FetchError extends Error {
+  status?: number
+  constructor(message: string, status?: number) {
+    super(message)
+    this.name = 'FetchError'
+    this.status = status
+  }
+}
+
 async function buildFetchOptions(method: string, body?: any): Promise<RequestInit> {
   const isServer = typeof window === 'undefined';
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -71,39 +80,32 @@ async function fetchData<T>(args: {
   responseType?: ResponseTypes;
   silentStatuses?: number[];
 }): Promise<T | undefined> {
-  try {
-    const responseType = args.responseType ?? ResponseTypes.json;
-    const options = await buildFetchOptions(args.method, args.body);
-    const response = await fetch(args.url, options);
-    if (!response.ok) {
-      const silent = args.silentStatuses ?? []
-      if (response.status === 401 && typeof window !== 'undefined' && !SKIP_REFRESH_URLS.has(args.url)) {
-        const refreshed = await tryRefresh()
-        if (refreshed) {
-          const retryOptions = await buildFetchOptions(args.method, args.body)
-          const retryResponse = await fetch(args.url, retryOptions)
-          if (retryResponse.ok) {
-            if (responseType === ResponseTypes.json) return await retryResponse.json() as T;
-            if (responseType === ResponseTypes.bytes) return await retryResponse.bytes() as T;
-            if (responseType === ResponseTypes.blob) return await retryResponse.blob() as T;
-          }
+  const responseType = args.responseType ?? ResponseTypes.json;
+  const options = await buildFetchOptions(args.method, args.body);
+  const response = await fetch(args.url, options);
+  if (!response.ok) {
+    const silent = args.silentStatuses ?? []
+    if (response.status === 401 && typeof window !== 'undefined' && !SKIP_REFRESH_URLS.has(args.url)) {
+      const refreshed = await tryRefresh()
+      if (refreshed) {
+        const retryOptions = await buildFetchOptions(args.method, args.body)
+        const retryResponse = await fetch(args.url, retryOptions)
+        if (retryResponse.ok) {
+          if (responseType === ResponseTypes.json) return await retryResponse.json() as T;
+          if (responseType === ResponseTypes.bytes) return await retryResponse.bytes() as T;
+          if (responseType === ResponseTypes.blob) return await retryResponse.blob() as T;
         }
-        redirectToLogin()
-        return undefined;
       }
-      if (response.status !== 401 && !silent.includes(response.status))
-        console.error(`Fetch error: ${response.status} ${args.method} ${args.url}`)
+      redirectToLogin()
       return undefined;
     }
-    if (responseType === ResponseTypes.json) return response.json() as T;
-    if (responseType === ResponseTypes.bytes) return response.bytes() as T;
-    if (responseType === ResponseTypes.blob) return response.blob() as T;
-  } catch (error) {
-    if (!(error instanceof TypeError && error.message.includes('NetworkError'))) {
-      console.error("Fetch error:", error)
-    }
-    return undefined;
+    if (response.status === 401) return undefined;
+    if (silent.includes(response.status)) return undefined;
+    throw new FetchError(`${response.status} ${args.method} ${args.url}`, response.status);
   }
+  if (responseType === ResponseTypes.json) return response.json() as T;
+  if (responseType === ResponseTypes.bytes) return response.bytes() as T;
+  if (responseType === ResponseTypes.blob) return response.blob() as T;
 }
 
 export interface CurrentUser {
@@ -194,15 +196,19 @@ export async function fetchDrafts(): Promise<DraftSummary[]> {
 
 
 export async function fetchLibrarySongs(): Promise<LibrarySong[]> {
-  const result = await fetchData<LibrarySong[]>({ url: `${API_V1}/songs/library`, method: 'GET' })
-  if (result !== undefined) {
-    if (typeof window !== 'undefined') cacheLibraryData('library-songs', result)
-    return result
+  try {
+    const result = await fetchData<LibrarySong[]>({ url: `${API_V1}/songs/library`, method: 'GET' })
+    if (result !== undefined) {
+      if (typeof window !== 'undefined') cacheLibraryData('library-songs', result)
+      return result
+    }
+    return []
+  } catch (error) {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return await getCachedData<LibrarySong[]>('library-songs') ?? []
+    }
+    throw error
   }
-  if (typeof navigator !== 'undefined' && !navigator.onLine) {
-    return await getCachedData<LibrarySong[]>('library-songs') ?? []
-  }
-  return []
 }
 
 export async function fetchSongById(id: string): Promise<PlayableSong | undefined> {
@@ -821,15 +827,19 @@ export interface PlaylistSong {
 }
 
 export async function fetchPlaylists(): Promise<Playlist[]> {
-  const result = await fetchData<Playlist[]>({ url: `${API_V1}/playlists`, method: 'GET' })
-  if (result !== undefined) {
-    if (typeof window !== 'undefined') cacheLibraryData('playlists', result)
-    return result
+  try {
+    const result = await fetchData<Playlist[]>({ url: `${API_V1}/playlists`, method: 'GET' })
+    if (result !== undefined) {
+      if (typeof window !== 'undefined') cacheLibraryData('playlists', result)
+      return result
+    }
+    return []
+  } catch (error) {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return await getCachedData<Playlist[]>('playlists') ?? []
+    }
+    throw error
   }
-  if (typeof navigator !== 'undefined' && !navigator.onLine) {
-    return await getCachedData<Playlist[]>('playlists') ?? []
-  }
-  return []
 }
 
 export async function createPlaylist(name: string, icon?: string | null): Promise<Playlist | undefined> {
@@ -849,12 +859,19 @@ export async function deletePlaylist(id: string): Promise<boolean> {
 }
 
 export async function fetchPlaylistSongs(id: string): Promise<PlaylistSong[]> {
-  const result = await fetchData<PlaylistSong[]>({ url: `${API_V1}/playlists/${id}/songs`, method: 'GET' })
-  if (result !== undefined) {
-    if (typeof window !== 'undefined') cacheLibraryData(`playlist-songs:${id}`, result)
-    return result
+  try {
+    const result = await fetchData<PlaylistSong[]>({ url: `${API_V1}/playlists/${id}/songs`, method: 'GET' })
+    if (result !== undefined) {
+      if (typeof window !== 'undefined') cacheLibraryData(`playlist-songs:${id}`, result)
+      return result
+    }
+    return []
+  } catch (error) {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return await getCachedData<PlaylistSong[]>(`playlist-songs:${id}`) ?? []
+    }
+    throw error
   }
-  return await getCachedData<PlaylistSong[]>(`playlist-songs:${id}`) ?? []
 }
 
 export async function addSongToPlaylist(playlistId: string, songUuid: string): Promise<boolean | 'duplicate'> {
