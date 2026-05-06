@@ -1,6 +1,6 @@
 import { routes } from './routes'
 import { test, expect, APIRequestContext } from '@playwright/test'
-import { login, apiLoginAs, uniq, purgePlaylistsByPrefix, API_V1, BULK_USERNAME, BULK_PASSWORD } from './helpers'
+import { login, apiLoginAs, uniq, purgePlaylistsByPrefix, ignoreError, API_V1, BULK_USERNAME, BULK_PASSWORD } from './helpers'
 
 // Locks in the multi-select toolbar at keebox-beta-1: the fixed top-right
 // "Select" button, the bulk action bar, and the "+ Playlist" attach action.
@@ -124,29 +124,33 @@ test.describe('library bulk select', () => {
         await expect(page.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible({ timeout: 3000 })
     })
 
-    // FIXME: bulk Save offline downloads each track and writes to IndexedDB —
-    // produces network traffic and can hang in CI. Functionality test belongs
-    // behind a dedicated env-gated suite. Documents the visible-button path.
-    test.fixme('bulk Save offline triggers cache writes for selected songs', async ({ page }) => {
+    test('bulk Save offline button click produces no errors', async ({ page }) => {
+        const errors: string[] = []
+        page.on('pageerror', err => { if (!ignoreError(err.message)) errors.push(err.message) })
+
         await page.goto(routes.library)
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
 
         await page.getByRole('button', { name: 'Select', exact: true }).click()
         await page.getByTestId('song-card').first().click()
         await page.getByRole('button', { name: 'Save offline', exact: true }).click()
-        // Would need to assert IndexedDB contents or song-card cached badge.
+        await page.waitForTimeout(3000)
+
+        expect(errors, `Console errors: ${errors.join('\n')}`).toHaveLength(0)
     })
 
-    // FIXME: bulk Download opens browser save dialog per song — Playwright
-    // download interception is feasible but adds CI complexity. Sketch here.
-    test.fixme('bulk Download triggers a download per selected song', async ({ page }) => {
+    test('bulk Download triggers a download for selected song', async ({ page }) => {
         await page.goto(routes.library)
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
 
         await page.getByRole('button', { name: 'Select', exact: true }).click()
         await page.getByTestId('song-card').first().click()
-        await page.getByRole('button', { name: 'Download', exact: true }).click()
-        // Would assert page.waitForEvent('download') count.
+
+        const [download] = await Promise.all([
+            page.waitForEvent('download', { timeout: 10000 }),
+            page.getByRole('button', { name: 'Download', exact: true }).click(),
+        ])
+        expect(download.suggestedFilename()).toBeTruthy()
     })
 
     test('Select all button is hidden until select mode is active', async ({ page }) => {

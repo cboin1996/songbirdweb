@@ -52,7 +52,7 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
     const kebabRef = useRef<HTMLButtonElement>(null)
     const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
     const kebabJustClosed = useRef(false)
-    const { play, pause, resume, current, isPlaying, insertNext, showToast } = usePlayer()
+    const { play, pause, resume, current, isPlaying, insertNext, onLibraryAdd, onLibraryRemove, showToast } = usePlayer()
     const pathname = usePathname()
     function pageSource() {
         const href = typeof window !== 'undefined' ? window.location.pathname + window.location.search : pathname
@@ -81,12 +81,15 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
             setInLibrary(prev => !prev)
             if (inLibrary) {
                 onRemove?.()
+                onLibraryRemove(song.songId!)
                 if (offlineCached) {
                     uncacheSong(song.songId).catch(() => {})
                     removeServerOfflineSong(song.songId)
                     setOfflineCached(false)
                     onCacheChange?.(song.songId, false)
                 }
+            } else {
+                onLibraryAdd({ uuid: song.songId!, properties: song.properties, artwork_cached: song.artworkCached })
             }
         } else {
             setLibraryError(true)
@@ -344,6 +347,7 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
             <>
                 <div
                     data-testid="song-card"
+                    data-song-id={song.songId}
                     onClick={e => handleCardClick(e)}
                     onContextMenu={handleContextMenu}
                     role="button"
@@ -388,6 +392,7 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
         <>
             <div
                 data-testid="song-card"
+                data-song-id={song.songId}
                 onClick={e => handleCardClick(e)}
                 onContextMenu={handleContextMenu}
                 role="button"

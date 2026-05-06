@@ -120,7 +120,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     const router = useRouter()
     const searchParams = useSearchParams()
     const viewMode = (searchParams.get('view') as ViewMode | null) ?? 'songs'
-    const { play, pause, resume, current, isPlaying, playContext } = usePlayer()
+    const { play, pause, resume, current, isPlaying, playContext, onLibraryRemove } = usePlayer()
     const sectionRefs = useRef<Record<string, HTMLElement | null>>({})
     const stickyHeaderRef = useRef<HTMLDivElement | null>(null)
     const isDesktop = useIsDesktop()
@@ -520,12 +520,13 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
             el.style.animation = 'song-highlight 1.5s ease-out forwards'
             el.dataset.animated = 'once'
             el.addEventListener('animationend', () => { el.style.animation = '' }, { once: true })
-            // Remove ?song/?album from URL so subsequent letter-rail taps don't re-fire this effect
+            // Strip ?song/?album without triggering RSC refetch (router.replace recreates DOM nodes,
+            // wiping dataset.animated). history.replaceState updates the URL in-place.
             const params = new URLSearchParams(searchParams.toString())
             params.delete('song')
             params.delete('album')
             const qs = params.toString()
-            router.replace(qs ? `?${qs}` : window.location.pathname, { scroll: false })
+            window.history.replaceState(null, '', qs ? `?${qs}` : window.location.pathname)
         }
 
         tryScroll(0)
@@ -734,6 +735,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         const ids = [...selectedIds]
         await bulkRemoveFromLibrary(ids)
         for (const id of ids) {
+            onLibraryRemove(id)
             if (cachedIds.has(id)) {
                 try { await uncacheSong(id) } catch {}
                 removeServerOfflineSong(id)
@@ -1126,6 +1128,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                     )}
                     <div
                         ref={barRef}
+                        data-testid="letter-rail"
                         className="flex flex-col items-center py-2 touch-none select-none cursor-pointer"
                         onPointerDown={handleBarPointerDown}
                         onPointerMove={handleBarPointerMove}
@@ -1136,6 +1139,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                         {ALPHABET.map(letter => (
                             <span
                                 key={letter}
+                                {...(letter === (scrubLetter ?? activeLetter) ? { 'data-testid': 'letter-rail-active' } : {})}
                                 className={`w-7 h-5 md:w-8 md:h-6 flex items-center justify-center leading-none transition-colors ${
                                     letter === (scrubLetter ?? activeLetter)
                                         ? 'text-sm md:text-base font-bold text-sky-500'

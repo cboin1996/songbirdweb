@@ -9,6 +9,8 @@ export const BULK_USERNAME = process.env.E2E_BULK_USERNAME!
 export const BULK_PASSWORD = process.env.E2E_BULK_PASSWORD!
 export const IMPORT_USERNAME = process.env.E2E_IMPORT_USERNAME!
 export const IMPORT_PASSWORD = process.env.E2E_IMPORT_PASSWORD!
+export const QUEUE_USERNAME = process.env.E2E_QUEUE_USERNAME!
+export const QUEUE_PASSWORD = process.env.E2E_QUEUE_PASSWORD!
 // .env.local sets NEXT_PUBLIC_API_BASE_URL='' (empty) so the browser uses
 // relative URLs in dev. Tests call the API directly from outside the browser
 // and need an absolute URL — use `||` so empty string also falls through.

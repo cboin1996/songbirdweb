@@ -177,6 +177,8 @@ test-e2e-local: e2e-api-up e2e-next-up
 	E2E_BULK_PASSWORD=e2e-BulkPass-1 \
 	E2E_IMPORT_USERNAME=e2e-import \
 	E2E_IMPORT_PASSWORD=e2e-ImportPass-1 \
+	E2E_QUEUE_USERNAME=e2e-queue \
+	E2E_QUEUE_PASSWORD=e2e-QueuePass-1 \
 	npx playwright test --project=dev --workers=2
 
 .PHONY: test-e2e-local-mobile

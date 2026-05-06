@@ -65,8 +65,7 @@ test.describe('info page', () => {
 
     test('version cards have border styling (rendered)', async ({ page }) => {
         await page.goto(routes.info)
-        // cards are divs with rounded-lg border classes
-        const cards = page.locator('.rounded-lg.border')
+        const cards = page.getByTestId('version-card')
         await expect(cards.first()).toBeVisible({ timeout: 5000 })
         const count = await cards.count()
         expect(count).toBeGreaterThanOrEqual(3)

@@ -93,9 +93,7 @@ test.describe('playlists: create / add songs / delete', () => {
         // confirm() auto-accept
         page.once('dialog', d => d.accept())
         await tile.click({ button: 'right' })
-        // Scope Delete to the context-menu portal (rounded-lg shadow-xl py-1 fixed div)
-        // to avoid collisions with the modal's Delete button if any other test left it open.
-        const contextMenu = page.locator('div.fixed.z-50.shadow-xl').first()
+        const contextMenu = page.getByTestId('context-menu').first()
         await expect(contextMenu).toBeVisible({ timeout: 3000 })
         await contextMenu.getByRole('button', { name: 'Delete', exact: true }).click()
 
@@ -179,12 +177,7 @@ test.describe('playlists: create / add songs / delete', () => {
         // The IconPicker buttons sit right under the input/create row.
         // Cheap stable selector: pick by SVG title via locator-by-button-with-icon.
         // The icon picker buttons have no labels. Identify via order under the form.
-        const formRoot = page.locator('form').filter({ has: page.getByPlaceholder('playlist name') })
-        const iconButtons = formRoot.locator('button[type="button"]').filter({ hasNotText: /create/i })
-        // Skip the cancel (X) button; pick second icon button by index 2 (after [cancel-X, music, headphones, ...])
-        // Actually structure: cancel-X is before iconpicker. Icon picker is its own div with 10 buttons.
-        // Safer: scope to the IconPicker (flex flex-wrap gap-1 div).
-        const iconRow = formRoot.locator('div.flex.flex-wrap')
+        const iconRow = page.getByTestId('icon-picker').first()
         const icons = iconRow.locator('button[type="button"]')
         const iconCount = await icons.count()
         expect(iconCount, 'icon picker should expose >=2 options').toBeGreaterThan(1)

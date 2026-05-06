@@ -67,8 +67,8 @@ test.describe('library page', () => {
         const letter = await sections.first().getAttribute('data-letter')
         if (!letter) return
 
-        const rail = page.locator('div.touch-none.select-none.cursor-pointer')
-        const letterSpan = rail.locator('span.font-bold').filter({ hasText: new RegExp(`^${letter}$`) })
+        const rail = page.getByTestId('letter-rail')
+        const letterSpan = rail.getByTestId('letter-rail-active').filter({ hasText: new RegExp(`^${letter}$`) })
         await letterSpan.click()
         await expect(page).toHaveURL(new RegExp(`letter=${letter}`), { timeout: 5000 })
     })
@@ -258,7 +258,7 @@ test.describe('library page', () => {
 
     // === Tier 2 per-song deep-linking (scroll + highlight) ===
 
-    test.fixme('?song=<uuid> scrolls to matching song card and applies highlight animation', async ({ page }) => {
+    test('?song=<uuid> scrolls to matching song card and applies highlight animation', async ({ page }) => {
         await page.goto(routes.library)
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
 
@@ -284,17 +284,14 @@ test.describe('library page', () => {
         , { timeout: 5000 }).toBe('once')
     })
 
-    // FIXME: same root cause as the song-id animation fixme above — router.replace
-    // triggers an RSC refetch that recreates the DOM node, wiping dataset.animated.
-    // Skip until library-list switches to window.history.replaceState for the param strip.
-    test.fixme('?album=<id> scrolls to matching album and applies highlight animation', async ({ page }) => {
+    test('?album=<id> scrolls to matching album and applies highlight animation', async ({ page }) => {
         await page.goto(routes.libraryAlbums)
         const albumLocator = page.locator('[data-album-id]').first()
         await expect(albumLocator).toBeVisible({ timeout: 10000 })
 
-        // Real user flow: click album to play → player shows album context link with
+        // Click album play button → player shows album context link with
         // ?view=albums&album=<id> → click it → client-side nav (songs already in state).
-        await albumLocator.click()
+        await albumLocator.getByTestId('album-play').first().click()
         await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
 
         const contextLink = page.locator('a[href*="album="]').first()
@@ -332,8 +329,8 @@ test.describe('library page', () => {
 
         // The active letter span has text-sky-500 + font-bold directly on it
         // (not on a child). filter({has:...}) was looking for a descendant.
-        const rail = page.locator('div.touch-none.select-none.cursor-pointer')
-        const activeSpan = rail.locator('span.font-bold.text-sky-500')
+        const rail = page.getByTestId('letter-rail')
+        const activeSpan = rail.getByTestId('letter-rail-active')
         const activeText = await activeSpan.textContent()
         expect(activeText?.trim()).toBe(firstLetter)
 
@@ -342,13 +339,6 @@ test.describe('library page', () => {
         await expect(activeSpan).toHaveClass(/font-bold/)
     })
 
-    // FIXME: programmatic scrollIntoViewIfNeeded() doesn't trigger the rAF-debounced
-    // scroll handler that updates the active letter — only user wheel/touch events do.
-    // The active letter stays at "A" (initial first-letter highlight) instead of
-    // updating to the target. Selector fix is correct (was filter+has → now direct
-    // class on span) but the underlying issue is the test's scroll method.
-    // Either dispatch a wheel event or wait for letter-rail to expose a way to
-    // programmatically set the active letter.
     test.fixme('letter rail active letter updates when scrolling to a different section', async ({ page }) => {
         await page.goto(routes.library)
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
@@ -361,11 +351,16 @@ test.describe('library page', () => {
 
         const targetLetter = allLetters[Math.floor(allLetters.length / 2)]
 
-        await page.locator(`[data-letter="${targetLetter}"]`).scrollIntoViewIfNeeded()
+        // scrollIntoView with block:'start' puts the section header at the viewport top,
+        // past the sticky-bar threshold, so the rAF scroll handler picks it up.
+        await page.evaluate((letter) => {
+            document.querySelector(`[data-letter="${letter}"]`)
+                ?.scrollIntoView({ behavior: 'instant', block: 'start' })
+        }, targetLetter)
 
-        const rail = page.locator('div.touch-none.select-none.cursor-pointer')
+        const rail = page.getByTestId('letter-rail')
         await expect.poll(async () =>
-            (await rail.locator('span.font-bold.text-sky-500').textContent())?.trim()
+            (await rail.getByTestId('letter-rail-active').textContent())?.trim()
         , { timeout: 5000 }).toBe(targetLetter)
     })
 
@@ -373,12 +368,12 @@ test.describe('library page', () => {
         await page.goto(routes.library)
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
 
-        const rail = page.locator('div.touch-none.select-none.cursor-pointer')
+        const rail = page.getByTestId('letter-rail')
         const allSpans = rail.locator('span')
 
         // Active span has text-sky-500 + font-bold directly on it (not on a
         // child); same selector fix as the :319 sibling test.
-        const activeSpan = rail.locator('span.font-bold.text-sky-500')
+        const activeSpan = rail.getByTestId('letter-rail-active')
         await expect(activeSpan).toHaveClass(/text-sky-500/)
         await expect(activeSpan).toHaveClass(/font-bold/)
 

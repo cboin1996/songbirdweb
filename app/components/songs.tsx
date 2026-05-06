@@ -30,7 +30,7 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
     const [errorMsg, setErrorMsg] = useState('')
     const [readySong, setReadySong] = useState<DownloadedSong | null>(null)
     const inputRef = useRef<HTMLInputElement>(null)
-    const { play, current } = usePlayer()
+    const { play, current, onLibraryAdd } = usePlayer()
     useEffect(() => {
         fetchLibrary().then(entries => setLibraryIds(new Set(entries.map(e => e.song_id))))
     }, [])
@@ -60,6 +60,7 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
         const ok = await addToLibrary(readySong.songId)
         if (ok) {
             setLibraryIds(prev => new Set([...prev, readySong.songId!]))
+            onLibraryAdd({ uuid: readySong.songId!, properties: readySong.properties })
             dismiss()
         } else {
             setStatus('error')

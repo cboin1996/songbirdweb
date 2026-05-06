@@ -6,7 +6,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { FaPause, FaPlay, FaStepBackward, FaStepForward, FaRandom, FaRedo, FaList, FaTimes, FaVolumeUp, FaVolumeMute, FaBars, FaMusic } from "react-icons/fa"
 import Spinner from "./spinner"
-import { DOWNLOAD_URL, LibrarySong, PlayableSong, PlayerState, artworkUrl, songArtworkUrl, fetchLibrarySongs, fetchPlayerState, fetchSongById, recordPlay, savePlayerState, updatePosition } from "../lib/data"
+import { DOWNLOAD_URL, LibrarySong, PlayableSong, PlayerState, artworkUrl, songArtworkUrl, fetchLibrarySongs, fetchPlayerState, fetchSongById, recordPlay, savePlayerState, updatePosition, queueInsert, queueRemove, queueReorder as apiQueueReorder } from "../lib/data"
 import { getSongFile, cacheArtworkUrls } from "../lib/offline"
 import Slider from "./slider"
 import { routes } from "../lib/routes"
@@ -62,6 +62,8 @@ interface PlayerContextValue {
     insertNext: (song: PlayableSong) => void
     removeFromQueue: (index: number) => void
     reorderQueue: (fromIdx: number, toIdx: number) => void
+    onLibraryAdd: (song: PlayableSong) => void
+    onLibraryRemove: (songId: string) => void
     showToast: (msg: string, error?: boolean) => void
 }
 
@@ -82,6 +84,8 @@ const PlayerContext = createContext<PlayerContextValue>({
     insertNext: () => {},
     removeFromQueue: () => {},
     reorderQueue: () => {},
+    onLibraryAdd: () => {},
+    onLibraryRemove: () => {},
     showToast: () => {},
 })
 
@@ -320,17 +324,18 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
         const seed = state.shuffle_seed
         const savedPos = state.shuffle_position ?? 0
-        if (seed != null) {
+        if (state.shuffle_order && state.shuffle_order.length === restoredQueue.length) {
+            shuffleOrderRef.current = state.shuffle_order
+            if (seed != null) shuffleSeedRef.current = seed
+            shufflePosRef.current = Math.max(0, Math.min(savedPos, state.shuffle_order.length - 1))
+            setShuffleOrder([...state.shuffle_order])
+        } else if (seed != null) {
             shuffleSeedRef.current = seed
             const rest = seededShuffle(restoredQueue.map((_, i) => i).filter(i => i !== safeIndex), seed)
             const order = [safeIndex, ...rest]
             shuffleOrderRef.current = order
             shufflePosRef.current = Math.max(0, Math.min(savedPos, order.length - 1))
             setShuffleOrder([...order])
-        } else if (state.shuffle && state.shuffle_order && state.shuffle_order.length === restoredQueue.length) {
-            shuffleOrderRef.current = state.shuffle_order
-            shufflePosRef.current = Math.max(0, state.shuffle_order.indexOf(safeIndex))
-            setShuffleOrder([...state.shuffle_order])
         } else if (state.shuffle) {
             generateShuffleOrder(safeIndex)
         }
@@ -435,19 +440,19 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             setShuffleOrder([...order])
         }
         scheduleSave()
+        queueInsert(song.uuid, insertAt, song.source ?? undefined)
         const afterName = queueRef.current[queueIndexRef.current]?.properties?.trackName
         showToast(afterName ? `Playing after ${afterName}` : 'Added to queue')
     }
 
     function removeFromQueue(index: number) {
+        const songId = queueRef.current[index]?.uuid
         const q = [...queueRef.current]
         const currentIdx = queueIndexRef.current
         q.splice(index, 1)
         queueRef.current = q
         if (index <= currentIdx) queueIndexRef.current = Math.max(-1, currentIdx - 1)
         setQueue([...q])
-        // Preserve shuffle seed: drop the removed index from shuffleOrder and shift
-        // higher indices down by 1. Adjust shufflePosRef if the removal was before it.
         if (shuffleRef.current && shuffleOrderRef.current.length > 0) {
             const removedShufflePos = shuffleOrderRef.current.indexOf(index)
             const order = shuffleOrderRef.current
@@ -460,6 +465,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             setShuffleOrder([...order])
         }
         scheduleSave()
+        if (songId) queueRemove(songId)
     }
 
     // fromDpos / toDpos are *display positions* — i.e. positions in the queue panel as the
@@ -468,7 +474,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     function reorderQueue(fromDpos: number, toDpos: number) {
         if (fromDpos === toDpos || fromDpos === toDpos - 1) return
         if (shuffleRef.current) {
-            // Reorder the shuffle order array directly — preserves the seed.
             const order = [...shuffleOrderRef.current]
             const [moved] = order.splice(fromDpos, 1)
             const insertAt = toDpos > fromDpos ? toDpos - 1 : toDpos
@@ -481,9 +486,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             }
             setShuffleOrder([...order])
             scheduleSave()
+            apiQueueReorder(fromDpos, toDpos)
             return
         }
-        // Non-shuffle: dpos === queue index
         const q = [...queueRef.current]
         const [item] = q.splice(fromDpos, 1)
         const insertAt = toDpos > fromDpos ? toDpos - 1 : toDpos
@@ -497,6 +502,50 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         queueIndexRef.current = newIdx
         setQueue([...q])
         scheduleSave()
+        apiQueueReorder(fromDpos, toDpos)
+    }
+
+    function onLibraryAdd(song: PlayableSong) {
+        if (queueRef.current.length === 0) return
+        if (queueRef.current.some(s => s.uuid === song.uuid)) return
+        const q = [...queueRef.current]
+        if (shuffleRef.current) {
+            const insertAt = q.length
+            q.push(song)
+            queueRef.current = q
+            setQueue([...q])
+            if (shuffleOrderRef.current.length > 0) {
+                const remaining = shuffleOrderRef.current.length - shufflePosRef.current - 1
+                const offset = remaining > 0 ? 1 + Math.floor(Math.random() * remaining) : 1
+                const shuffleInsertAt = shufflePosRef.current + offset
+                const order = [...shuffleOrderRef.current]
+                order.splice(shuffleInsertAt, 0, insertAt)
+                shuffleOrderRef.current = order
+                setShuffleOrder([...order])
+            }
+            scheduleSave()
+            queueInsert(song.uuid, insertAt)
+        } else {
+            const trackName = song.properties?.trackName?.toLowerCase() ?? ''
+            const currentIdx = queueIndexRef.current
+            let insertAt = q.length
+            for (let i = currentIdx + 1; i < q.length; i++) {
+                const name = q[i].properties?.trackName?.toLowerCase() ?? ''
+                if (name > trackName) { insertAt = i; break }
+            }
+            q.splice(insertAt, 0, song)
+            queueRef.current = q
+            setQueue([...q])
+            scheduleSave()
+            queueInsert(song.uuid, insertAt)
+        }
+    }
+
+    function onLibraryRemove(songId: string) {
+        const idx = queueRef.current.findIndex(s => s.uuid === songId)
+        if (idx < 0) return
+        if (idx === queueIndexRef.current) return
+        removeFromQueue(idx)
     }
 
     function setMediaAction(action: MediaSessionAction, handler: MediaSessionActionHandler | null) {
@@ -642,7 +691,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 repeat: repeatRef.current,
                 queue: queueRef.current.map(s => s.uuid),
                 queue_index: queueIndexRef.current,
-                shuffle_order: null, // legacy — replaced by seed
+                shuffle_order: shuffleOrderRef.current,
                 play_context: ctx?.id ?? null,
                 shuffle_seed: shuffleSeedRef.current,
                 shuffle_position: shufflePosRef.current,
@@ -911,7 +960,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     const contextValue = useMemo(() => ({
         current, isPlaying, queue, shuffle, repeat, playContext,
-        play, pause, resume, skipNext, skipPrev, toggleShuffle, toggleRepeat, insertNext, removeFromQueue, reorderQueue, showToast,
+        play, pause, resume, skipNext, skipPrev, toggleShuffle, toggleRepeat, insertNext, removeFromQueue, reorderQueue, onLibraryAdd, onLibraryRemove, showToast,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }), [current, isPlaying, queue, shuffle, repeat, playContext, showToast])
 
@@ -1023,6 +1072,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                                     className={`flex items-center gap-3 px-4 border-t-2 border-b-2 transition-colors select-none ${isDropTarget ? 'border-t-sky-500' : 'border-t-transparent'} ${isDropAfter ? 'border-b-sky-500' : 'border-b-transparent'} ${isBeingDragged ? 'opacity-40' : ''} ${isActive ? 'bg-sky-50 dark:bg-sky-950/30' : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'}`}
                                                 >
                                                     <span
+                                                        data-testid="queue-drag-handle"
                                                         className="text-gray-300 dark:text-gray-600 cursor-grab active:cursor-grabbing shrink-0 touch-none select-none p-2 -m-2"
                                                         onPointerDown={e => { e.preventDefault(); dragFromRef.current = dpos; setDraggedQi(dpos); setQueueDropTarget(null) }}
                                                     >
@@ -1046,7 +1096,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                                             {song.source.label}
                                                         </Link>
                                                     )}
-                                                    <button onClick={() => removeFromQueue(qi)} className="shrink-0 text-gray-300 dark:text-gray-600 hover:text-red-400 transition-colors p-1">
+                                                    <button data-testid="queue-remove" onClick={() => removeFromQueue(qi)} className="shrink-0 text-gray-300 dark:text-gray-600 hover:text-red-400 transition-colors p-1">
                                                         <FaTimes size={10} />
                                                     </button>
                                                 </div>

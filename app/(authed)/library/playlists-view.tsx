@@ -42,7 +42,7 @@ function PlaylistIcon({ pl, size = 22 }: { pl: Playlist; size?: number }) {
 
 function IconPicker({ value, onChange }: { value: string; onChange: (k: string) => void }) {
     return (
-        <div className="flex flex-wrap gap-1">
+        <div data-testid="icon-picker" className="flex flex-wrap gap-1">
             {ICON_KEYS.map(k => {
                 const Icon = PLAYLIST_ICONS[k]
                 return (
@@ -326,6 +326,7 @@ export default function PlaylistsView({
                 <>
                     <div className="fixed inset-0 z-40" onClick={() => setMenuPl(null)} />
                     <div
+                        data-testid="context-menu"
                         className="fixed z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl py-1"
                         style={{ top: menuPos.top, left: menuPos.left }}
                     >

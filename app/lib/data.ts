@@ -597,6 +597,27 @@ export async function savePlayerState(state: PlayerState): Promise<void> {
   } catch {}
 }
 
+export async function queueInsert(songId: string, position?: number, source?: { id: string; label: string; href: string }): Promise<void> {
+  try {
+    const options = await buildFetchOptions('POST', { song_id: songId, position: position ?? null, source: source ?? null })
+    await fetch(`${API_V1}/player/queue`, options)
+  } catch {}
+}
+
+export async function queueRemove(songId: string): Promise<void> {
+  try {
+    const options = await buildFetchOptions('DELETE')
+    await fetch(`${API_V1}/player/queue/${songId}`, options)
+  } catch {}
+}
+
+export async function queueReorder(fromPosition: number, toPosition: number): Promise<void> {
+  try {
+    const options = await buildFetchOptions('PUT', { from_position: fromPosition, to_position: toPosition })
+    await fetch(`${API_V1}/player/queue/reorder`, options)
+  } catch {}
+}
+
 export async function updatePosition(songId: string, position: number): Promise<boolean> {
   try {
     const options = await buildFetchOptions('PATCH', { position })

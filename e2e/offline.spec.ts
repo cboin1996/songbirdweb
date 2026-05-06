@@ -16,7 +16,7 @@ test.describe('offline mode', () => {
     test('offline banner is hidden when online', async ({ page }) => {
         await page.goto(routes.library)
         await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
-        const banner = page.locator('.bg-amber-400')
+        const banner = page.getByTestId('offline-banner')
         await expect(banner).toHaveCount(0)
     })
 
@@ -27,7 +27,7 @@ test.describe('offline mode', () => {
         await page.context().setOffline(true)
         // Trigger the navigator.onLine event the OfflineBanner listens to.
         await page.evaluate(() => window.dispatchEvent(new Event('offline')))
-        const banner = page.locator('.bg-amber-400, .bg-sky-500\\/10')
+        const banner = page.getByTestId('offline-banner')
         await expect(banner.first()).toBeVisible({ timeout: 5000 })
         await page.context().setOffline(false)
     })
@@ -48,18 +48,14 @@ test.describe('offline mode', () => {
         await expect(page.getByText(/needs internet/i)).toBeVisible()
     })
 
-    // FIXME(0.1.0): going offline replaces the toolbar with OfflineGuard
-    // empty state, removing the button from the DOM entirely. Can't assert
-    // toBeDisabled() on a detached element. Needs a different assertion
-    // strategy (e.g. check button hidden + guard message visible).
-    test.fixme('save all offline button is disabled when offline', async ({ page }) => {
+    test('save all offline button hidden when offline (no cached songs)', async ({ page }) => {
         await page.goto(routes.library)
-        const saveAllBtn = page.getByTestId('save-all-offline')
+        const saveAllBtn = page.getByTestId('save-all-offline').first()
         await expect(saveAllBtn).toBeVisible({ timeout: 10000 })
         await expect(saveAllBtn).not.toBeDisabled()
         await page.context().setOffline(true)
         await page.evaluate(() => window.dispatchEvent(new Event('offline')))
-        await expect(saveAllBtn).toBeDisabled()
+        await expect(saveAllBtn).not.toBeVisible({ timeout: 5000 })
     })
 
     // === Tier 1 OfflineGuard pages ===
@@ -92,12 +88,7 @@ test.describe('offline mode', () => {
         await expect(page.getByRole('link', { name: /go to library/i })).toBeVisible()
     })
 
-    // FIXME(0.1.0): SW-gated. /library bundle is pre-cached by the SW at
-    // install (see public/sw.js: `cache.addAll(['/offline', '/', '/library'])`),
-    // but the SW doesn't register in dev mode — so clicking the link while
-    // offline navigates to chrome-error. This test belongs in e2e-prod/
-    // alongside the other SW-gated cases. Move it there + un-fixme.
-    test.fixme('OfflineGuard: clicking "go to library" lands on /library', async ({ page }) => {
+    test('OfflineGuard: clicking "go to library" lands on /library', async ({ page }) => {
         await page.goto(routes.explore)
         await flipOffline(page)
         const link = page.getByRole('link', { name: /go to library/i })

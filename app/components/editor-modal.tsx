@@ -2293,7 +2293,7 @@ export default function EditorModal({
 
         {/* close guard */}
         {closeConfirm && (
-          <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-amber-50 dark:bg-amber-950/40 border-b border-amber-200 dark:border-amber-900 shrink-0">
+          <div data-testid="editor-close-guard" className="flex items-center justify-between gap-3 px-4 py-2.5 bg-amber-50 dark:bg-amber-950/40 border-b border-amber-200 dark:border-amber-900 shrink-0">
             <p className="text-sm text-amber-700 dark:text-amber-400">Draft auto-saved — closing…</p>
             <div className="flex items-center gap-3 shrink-0">
               <button
@@ -2482,7 +2482,7 @@ export default function EditorModal({
 
               {/* transport row inside edit waveform card */}
               <div className="flex items-center gap-3 px-2 pb-2 border-t border-gray-100 dark:border-gray-800 pt-1.5" onClick={e => e.stopPropagation()}>
-                <button onClick={() => { switchToWaveform('edit'); handlePreview() }} disabled={!wsReady} title={previewing ? 'stop preview' : 'preview with edits'} className={`shrink-0 ${wsReady ? 'text-sky-500 hover:text-sky-400' : 'text-gray-300 dark:text-gray-700'}`}>
+                <button data-testid="editor-preview-btn" onClick={() => { switchToWaveform('edit'); handlePreview() }} disabled={!wsReady} title={previewing ? 'stop preview' : 'preview with edits'} className={`shrink-0 ${wsReady ? 'text-sky-500 hover:text-sky-400' : 'text-gray-300 dark:text-gray-700'}`}>
                   {previewing ? <FaPause size={12} /> : <FaPlay size={12} />}
                 </button>
 
@@ -2494,10 +2494,10 @@ export default function EditorModal({
                 <span className="text-sm text-gray-400 dark:text-gray-600 tabular-nums">· {fmt(resultDuration)}</span>
               )}
               <div className="flex-1" />
-              <button onClick={undo} disabled={!canUndo} title="undo (Ctrl+Z)" className={btnGhost}>
+              <button data-testid="editor-undo-btn" onClick={undo} disabled={!canUndo} title="undo (Ctrl+Z)" className={btnGhost}>
                 <FaUndo size={13} />
               </button>
-              <button onClick={redo} disabled={!canRedo} title="redo (Ctrl+Shift+Z)" className={btnGhost}>
+              <button data-testid="editor-redo-btn" onClick={redo} disabled={!canRedo} title="redo (Ctrl+Shift+Z)" className={btnGhost}>
                 <FaRedo size={13} />
               </button>
             </div>
@@ -2551,7 +2551,7 @@ export default function EditorModal({
               <span className="text-gray-200 dark:text-gray-700 select-none">·</span>
               <div className="flex items-center gap-3 shrink-0">
                 <label className="flex items-center gap-1.5 text-sm select-none">
-                  <input type="checkbox" checked={params.normalize} onChange={e => { pushHistory(paramsRef.current); setParams(prev => { const next = { ...prev, normalize: e.target.checked }; scheduleSave(next); return next }) }} className="accent-sky-500" />
+                  <input data-testid="editor-normalize-checkbox" type="checkbox" checked={params.normalize} onChange={e => { pushHistory(paramsRef.current); setParams(prev => { const next = { ...prev, normalize: e.target.checked }; scheduleSave(next); return next }) }} className="accent-sky-500" />
                   <span className={params.normalize ? 'text-sky-500' : 'text-gray-400'}>Normalize</span>
                 </label>
               </div>
@@ -2580,7 +2580,7 @@ export default function EditorModal({
                             {cut.fade_out > 0 && `◀${cut.fade_out.toFixed(1)}s`}{cut.fade_out > 0 && cut.fade_in > 0 && ' '}{cut.fade_in > 0 && `${cut.fade_in.toFixed(1)}s▶`}
                           </span>
                         )}
-                        <button onClick={() => removeCut(cut.id!)} title="remove cut" className="text-gray-400 hover:text-red-400 transition-colors shrink-0">
+                        <button data-testid="editor-remove-cut-btn" onClick={() => removeCut(cut.id!)} title="remove cut" className="text-gray-400 hover:text-red-400 transition-colors shrink-0">
                           <FaTimes size={12} />
                         </button>
                       </div>
@@ -2657,7 +2657,7 @@ export default function EditorModal({
               </div>
               {isAdmin && (
                 <label className="flex items-center gap-1.5 text-sm select-none cursor-pointer">
-                  <input type="checkbox" checked={publishAsOriginal} onChange={e => { setPublishAsOriginal(e.target.checked); setOverwrite(e.target.checked) }} className="accent-red-500" />
+                  <input data-testid="editor-overwrite-checkbox" type="checkbox" checked={publishAsOriginal} onChange={e => { setPublishAsOriginal(e.target.checked); setOverwrite(e.target.checked) }} className="accent-red-500" />
                   <span className={publishAsOriginal ? 'text-red-400 font-medium' : 'text-gray-400'}>save as original</span>
                 </label>
               )}

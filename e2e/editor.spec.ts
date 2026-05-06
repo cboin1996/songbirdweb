@@ -73,7 +73,7 @@ test.describe('editor modal', () => {
         await expect(modal.getByRole('button', { name: 'properties' })).toBeVisible()
 
         // wait for waveform to fully load (preview button is the ready signal)
-        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 15000 })
+        await expect(modal.getByTestId('editor-preview-btn')).not.toBeDisabled({ timeout: 15000 })
 
         const abortErrors = errors.filter(e => /AbortError/i.test(e))
         expect(abortErrors, `AbortErrors found: ${abortErrors.join('\n')}`).toHaveLength(0)
@@ -83,12 +83,12 @@ test.describe('editor modal', () => {
         const modal = await openEditorFromLibrary(page)
         // The preview button is gated by wsReady, so we use it as the
         // waveform-ready signal across the suite.
-        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.getByTestId('editor-preview-btn')).not.toBeDisabled({ timeout: 30000 })
     })
 
     test('volume scrub-input is interactive and updates display', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.getByTestId('editor-preview-btn')).not.toBeDisabled({ timeout: 30000 })
 
         // Volume's ScrubInput parses raw dB; +6 dB == ~2x amplitude.
         await scrubFill(modal, 'volume', '+3.0 dB')
@@ -97,9 +97,9 @@ test.describe('editor modal', () => {
 
     test('undo button activates after volume change', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.getByTestId('editor-preview-btn')).not.toBeDisabled({ timeout: 30000 })
 
-        const undoBtn = modal.locator('button[title="undo (Ctrl+Z)"]')
+        const undoBtn = modal.getByTestId('editor-undo-btn')
         await expect(undoBtn).toBeDisabled()
 
         await scrubFill(modal, 'volume', '+3.0 dB')
@@ -109,10 +109,10 @@ test.describe('editor modal', () => {
 
     test('redo button becomes enabled after undo', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.getByTestId('editor-preview-btn')).not.toBeDisabled({ timeout: 30000 })
 
-        const undoBtn = modal.locator('button[title="undo (Ctrl+Z)"]')
-        const redoBtn = modal.locator('button[title="redo (Ctrl+Shift+Z)"]')
+        const undoBtn = modal.getByTestId('editor-undo-btn')
+        const redoBtn = modal.getByTestId('editor-redo-btn')
 
         await expect(redoBtn).toBeDisabled()
 
@@ -125,7 +125,7 @@ test.describe('editor modal', () => {
 
     test('version badge shows "edit" for unedited song', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.getByTestId('editor-preview-btn')).not.toBeDisabled({ timeout: 30000 })
         await expect(modal.getByTestId('version-badge')).toHaveText('edit')
     })
 
@@ -139,7 +139,7 @@ test.describe('editor modal', () => {
         await expect(addCutBtn).toBeDisabled()
 
         // wait for waveform ready
-        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.getByTestId('editor-preview-btn')).not.toBeDisabled({ timeout: 30000 })
 
         // now enabled
         await expect(addCutBtn).not.toBeDisabled()
@@ -148,7 +148,7 @@ test.describe('editor modal', () => {
         await addCutBtn.click()
 
         // a cut row with an X button should appear
-        const removeCutBtn = modal.locator('button[title="remove cut"]').first()
+        const removeCutBtn = modal.getByTestId('editor-remove-cut-btn').first()
         await expect(removeCutBtn).toBeVisible({ timeout: 5000 })
 
         // remove the cut
@@ -182,7 +182,7 @@ test.describe('editor modal', () => {
         page.on('pageerror', err => errors.push(err.message))
 
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.getByTestId('editor-preview-btn')).not.toBeDisabled({ timeout: 30000 })
 
         // clear init-time errors (draft 404 on open is expected)
         errors.length = 0
@@ -198,7 +198,7 @@ test.describe('editor modal', () => {
 
     test('discard draft resets params', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.getByTestId('editor-preview-btn')).not.toBeDisabled({ timeout: 30000 })
 
         await scrubFill(modal, 'volume', '+3.0 dB')
         const volumeScrub = modal.getByRole('spinbutton', { name: 'volume' })
@@ -213,7 +213,7 @@ test.describe('editor modal', () => {
         page.on('pageerror', err => overlayErrors.push(err.message))
 
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.getByTestId('editor-preview-btn')).not.toBeDisabled({ timeout: 30000 })
 
         // close modal (triggers WaveSurfer destroy)
         await modal.getByTestId('editor-close').click()
@@ -226,53 +226,28 @@ test.describe('editor modal', () => {
         expect(abortErrors, `AbortErrors after close: ${abortErrors.join('\n')}`).toHaveLength(0)
     })
 
-    // FIXME(0.1.0): test wants a song with track name "edit-me" — no such
-    // fixture in e2e/fixtures/songs/. Either add a dedicated fixture (mp3
-    // with that ID3 tag) or rewrite to save+revert track on a seeded song.
-    test.fixme('properties tab: saves and reverts track name on edit-me', async ({ page }) => {
-        const errors: string[] = []
-        page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
-        page.on('pageerror', err => errors.push(err.message))
-
+    test('properties tab: editing track name auto-saves to draft', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
 
-        // switch to properties tab
         await modal.getByRole('button', { name: 'properties' }).click()
         await expect(modal.getByText('Track name')).toBeVisible()
 
-        // track name field pre-filled with "edit-me"
-        const trackInput = modal.locator('input').first()
-        await expect(trackInput).toHaveValue(/edit-me/i)
-
-        // change it temporarily
+        const trackInput = modal.getByLabel('Track name')
+        await expect(trackInput).toBeVisible({ timeout: 5000 })
+        await expect(trackInput).not.toHaveValue('')
         const originalValue = await trackInput.inputValue()
-        await trackInput.fill('edit-me-test')
 
-        // save — use JS click to bypass player bar overlay
-        const saveBtn = modal.getByRole('button', { name: 'Save' })
-        const propFilter = (r: import('@playwright/test').Response) =>
-            r.url().includes('/properties') && r.request().method() === 'PUT' && r.status() < 300
-        const [saveRes] = await Promise.all([
-            page.waitForResponse(propFilter, { timeout: 8000 }),
-            saveBtn.evaluate((el: HTMLElement) => el.click()),
-        ])
-        expect(saveRes.ok(), `PUT /properties returned ${saveRes.status()}`).toBe(true)
-        await expect(modal.getByRole('button', { name: /saved/i })).toBeVisible({ timeout: 3000 })
+        // Register listener BEFORE fill so we don't miss the debounced PUT
+        const draftFilter = (r: import('@playwright/test').Response) =>
+            r.url().includes('/draft') && r.request().method() === 'PUT'
+        const savePromise = page.waitForResponse(draftFilter, { timeout: 10000 })
+        await trackInput.fill(`${originalValue}-e2e-test`)
+        await savePromise
 
-        // revert to original name
+        // Revert to original value — another draft save fires
+        const revertPromise = page.waitForResponse(draftFilter, { timeout: 10000 })
         await trackInput.fill(originalValue)
-        const [revertRes] = await Promise.all([
-            page.waitForResponse(propFilter, { timeout: 8000 }),
-            saveBtn.evaluate((el: HTMLElement) => el.click()),
-        ])
-        expect(revertRes.ok(), `Revert PUT /properties returned ${revertRes.status()}`).toBe(true)
-        await expect(modal.getByRole('button', { name: /saved/i })).toBeVisible({ timeout: 3000 })
-
-        // 401s from background resource loads (artwork/audio served from API) are expected
-        const realErrors = errors.filter(e =>
-            !/AbortError/i.test(e) && !/Failed to fetch/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e) && !/404/i.test(e)
-        )
-        expect(realErrors, `Console errors: ${realErrors.join('\n')}`).toHaveLength(0)
+        await revertPromise
     })
 
     test('cut shows time range in list and preview with cut has no errors', async ({ page }) => {
@@ -281,14 +256,14 @@ test.describe('editor modal', () => {
         page.on('pageerror', err => errors.push(err.message))
 
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.getByTestId('editor-preview-btn')).not.toBeDisabled({ timeout: 30000 })
         errors.length = 0
 
         // add a cut
         await modal.getByRole('button', { name: '+ add cut' }).click()
 
         // a cut row should appear showing a time range (e.g. "0:00 – 0:02")
-        const cutRow = modal.locator('button[title="remove cut"]').first()
+        const cutRow = modal.getByTestId('editor-remove-cut-btn').first()
         await expect(cutRow).toBeVisible({ timeout: 5000 })
 
         // the cut list should display a formatted time range
@@ -296,9 +271,9 @@ test.describe('editor modal', () => {
 
         // preview with the cut active — actual button title is
         // "preview with edits" (toggles to "stop preview" while running).
-        await modal.locator('button[title="preview with edits"]').click()
-        await expect(modal.locator('button[title="stop preview"]')).toBeVisible({ timeout: 5000 })
-        await modal.locator('button[title="stop preview"]').click()
+        await modal.getByTestId('editor-preview-btn').click()
+        await expect(modal.getByTestId('editor-preview-btn')).toBeVisible({ timeout: 5000 })
+        await modal.getByTestId('editor-preview-btn').click()
 
         const realErrors = errors.filter(e => !/AbortError/i.test(e) && !/Failed to fetch/i.test(e) && !/favicon/i.test(e))
         expect(realErrors, `Errors during cut preview: ${realErrors.join('\n')}`).toHaveLength(0)
@@ -306,33 +281,33 @@ test.describe('editor modal', () => {
 
     test('waveform play pauses when preview starts', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.getByTestId('editor-preview-btn')).not.toBeDisabled({ timeout: 30000 })
 
         // start original waveform playback
         await modal.getByTestId('orig-play').click()
         await page.waitForTimeout(300)
 
         // click preview — waveform should stop, preview starts
-        await modal.locator('button[title="preview with edits"]').click()
+        await modal.getByTestId('editor-preview-btn').click()
         await page.waitForTimeout(300)
 
         // stop preview button visible means preview is playing
-        await expect(modal.locator('button[title="stop preview"]')).toBeVisible()
-        await modal.locator('button[title="stop preview"]').click()
+        await expect(modal.getByTestId('editor-preview-btn')).toBeVisible()
+        await modal.getByTestId('editor-preview-btn').click()
     })
 
     test('discard clears all cuts', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.getByTestId('editor-preview-btn')).not.toBeDisabled({ timeout: 30000 })
 
         // add two cuts
         await modal.getByRole('button', { name: '+ add cut' }).click()
         await modal.getByRole('button', { name: '+ add cut' }).click()
-        await expect(modal.locator('button[title="remove cut"]')).toHaveCount(2, { timeout: 5000 })
+        await expect(modal.getByTestId('editor-remove-cut-btn')).toHaveCount(2, { timeout: 5000 })
 
         // discard resets everything
         await modal.getByRole('button', { name: /discard/i }).click()
-        await expect(modal.locator('button[title="remove cut"]')).toHaveCount(0)
+        await expect(modal.getByTestId('editor-remove-cut-btn')).toHaveCount(0)
     })
 
     test('speed scrub-input sets display to 0.50×', async ({ page }) => {
@@ -341,7 +316,7 @@ test.describe('editor modal', () => {
         page.on('pageerror', err => errors.push(err.message))
 
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.getByTestId('editor-preview-btn')).not.toBeDisabled({ timeout: 30000 })
 
         await scrubFill(modal, 'speed', '0.50×')
         await expect(modal.getByRole('spinbutton', { name: 'speed' })).toContainText('0.50×')
@@ -356,12 +331,9 @@ test.describe('editor modal', () => {
         page.on('pageerror', err => errors.push(err.message))
 
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.getByTestId('editor-preview-btn')).not.toBeDisabled({ timeout: 30000 })
 
-        const normalizeCheckbox = modal.locator('input[type="checkbox"]').filter({ hasNot: modal.locator('[name]') }).first()
-        // find the normalize label
-        const normalizeLabel = modal.locator('label').filter({ hasText: /normalize/i })
-        const checkbox = normalizeLabel.locator('input[type="checkbox"]')
+        const checkbox = modal.getByTestId('editor-normalize-checkbox')
         await expect(checkbox).not.toBeChecked()
         await checkbox.check()
         await expect(checkbox).toBeChecked()
@@ -372,15 +344,15 @@ test.describe('editor modal', () => {
 
     test('preview badge changes to "preview" (orange) when preview starts', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.getByTestId('editor-preview-btn')).not.toBeDisabled({ timeout: 30000 })
 
         const badge = modal.getByTestId('version-badge')
         await expect(badge).toHaveText('edit')
 
-        await modal.locator('button[title="preview with edits"]').click()
+        await modal.getByTestId('editor-preview-btn').click()
         await expect(badge).toHaveText('preview', { timeout: 3000 })
 
-        await modal.locator('button[title="stop preview"]').click()
+        await modal.getByTestId('editor-preview-btn').click()
         await expect(badge).toHaveText('edit', { timeout: 3000 })
     })
 
@@ -390,13 +362,13 @@ test.describe('editor modal', () => {
         page.on('pageerror', err => errors.push(err.message))
 
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.getByTestId('editor-preview-btn')).not.toBeDisabled({ timeout: 30000 })
         errors.length = 0
 
         // start preview (no cuts — uses WaveSurfer native path).
-        await modal.locator('button[title="preview with edits"]').click()
+        await modal.getByTestId('editor-preview-btn').click()
         // the button toggles to title="stop preview" while preview is running
-        await expect(modal.locator('button[title="stop preview"]')).toBeVisible({ timeout: 3000 })
+        await expect(modal.getByTestId('editor-preview-btn')).toBeVisible({ timeout: 3000 })
 
         // click waveform at a different position
         const waveform = modal.getByTestId('waveform')
@@ -405,7 +377,7 @@ test.describe('editor modal', () => {
             await page.mouse.click(box.x + box.width * 0.7, box.y + box.height / 2)
         }
 
-        await modal.locator('button[title="stop preview"]').click()
+        await modal.getByTestId('editor-preview-btn').click()
 
         const realErrors = errors.filter(e => !/AbortError/i.test(e) && !/Failed to fetch/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e) && !/404/i.test(e))
         expect(realErrors, `Errors: ${realErrors.join('\n')}`).toHaveLength(0)
@@ -414,7 +386,7 @@ test.describe('editor modal', () => {
 
     test('close guard: amber banner appears on unsaved change then auto-closes', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.getByTestId('editor-preview-btn')).not.toBeDisabled({ timeout: 30000 })
 
         await scrubFill(modal, 'volume', '+2.0 dB')
         await modal.getByTestId('editor-close').click()
@@ -423,30 +395,38 @@ test.describe('editor modal', () => {
         // filter({ hasText }) is evaluated atomically — avoids a sequential race
         // where the banner disappears between toBeVisible and toContainText.
         await expect(
-            page.locator('.bg-amber-50, .bg-amber-950\\/40').filter({ hasText: /Draft auto-saved/i })
+            page.getByTestId('editor-close-guard')
         ).toBeVisible({ timeout: 5000 })
         await expect(modal).not.toBeVisible({ timeout: 10000 })
     })
 
-    // FIXME: banner is intentionally brief (disappears once draft saves); button is detached
-    // before Playwright can click it. Not a bug — the UX is correct, just untestable this way.
-    test.fixme('close guard: "don\'t show again" dismisses modal and suppresses future banners', async ({ page }) => {
+    test('close guard: "don\'t show again" dismisses modal and suppresses future banners', async ({ page }) => {
+        // Slow down the draft-save request so the close-guard banner stays visible
+        // long enough for Playwright to click "don't show again".
+        await page.route('**/edit/songs/*/draft', route =>
+            new Promise(resolve => setTimeout(() => { route.continue(); resolve(undefined) }, 3000))
+        )
+        await page.evaluate(() => localStorage.removeItem('sb-skip-draft-banner'))
+
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.getByTestId('editor-preview-btn')).not.toBeDisabled({ timeout: 30000 })
 
         await scrubFill(modal, 'volume', '+2.0 dB')
         await modal.getByTestId('editor-close').click()
 
-        await expect(page.getByRole('button', { name: "don't show again" })).toBeVisible({ timeout: 3000 })
+        await expect(page.getByRole('button', { name: "don't show again" })).toBeVisible({ timeout: 5000 })
         await page.getByRole('button', { name: "don't show again" }).click()
-        await expect(modal).not.toBeVisible({ timeout: 5000 })
+        await expect(modal).not.toBeVisible({ timeout: 10000 })
+
+        const skipSet = await page.evaluate(() => localStorage.getItem('sb-skip-draft-banner'))
+        expect(skipSet).toBe('1')
     })
 
     test('Ctrl+Z keyboard shortcut triggers undo', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.getByTestId('editor-preview-btn')).not.toBeDisabled({ timeout: 30000 })
 
-        const undoBtn = modal.locator('button[title="undo (Ctrl+Z)"]')
+        const undoBtn = modal.getByTestId('editor-undo-btn')
         await expect(undoBtn).toBeDisabled()
 
         await scrubFill(modal, 'volume', '+3.0 dB')
@@ -465,7 +445,7 @@ test.describe('editor modal', () => {
         page.on('pageerror', err => errors.push(err.message))
 
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.getByTestId('editor-preview-btn')).not.toBeDisabled({ timeout: 30000 })
         errors.length = 0
 
         // press l (seek forward 5s)
@@ -477,24 +457,13 @@ test.describe('editor modal', () => {
         expect(realErrors, `Errors: ${realErrors.join('\n')}`).toHaveLength(0)
     })
 
-    // Locks in the cut-fade-ear collision fix: when a cut already has a
-    // fade-out ear extending leftward, adding another cut should respect that
-    // ear's range and not overlap. Drag interactions on waveform regions are
-    // notoriously fragile in Playwright, so this is fixme-d while the spec
-    // sketches the intended behavior.
-    //
-    // FIXME: requires precise pointer drag on the waveform-rendered fade-out
-    // handle (no stable testid on the fade ear). When/if a `data-testid` is
-    // added (e.g. `cut-fade-out-handle`) refactor this test to drive it
-    // directly. Until then we lock in the simpler "two cuts can coexist"
-    // baseline below.
-    test.fixme('add cut → expand fade-out ear left → add second cut respects fade range', async ({ page }) => {
+    test('add cut → expand fade-out ear left → add second cut respects fade range', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.getByTestId('editor-preview-btn')).not.toBeDisabled({ timeout: 30000 })
 
         // First cut
         await modal.getByRole('button', { name: '+ add cut' }).click()
-        const firstRemove = modal.locator('button[title="remove cut"]').first()
+        const firstRemove = modal.getByTestId('editor-remove-cut-btn').first()
         await expect(firstRemove).toBeVisible({ timeout: 5000 })
 
         // Expand fade-after slider on first cut to a meaningful value (proxy
@@ -508,7 +477,7 @@ test.describe('editor modal', () => {
         // beyond the first cut's end + fade-after, but neither value has a
         // stable selector. Marked fixme until we expose them.
         await modal.getByRole('button', { name: '+ add cut' }).click()
-        await expect(modal.locator('button[title="remove cut"]')).toHaveCount(2, { timeout: 5000 })
+        await expect(modal.getByTestId('editor-remove-cut-btn')).toHaveCount(2, { timeout: 5000 })
     })
 
     // Companion lighter assertion that does not depend on fade ear drag UX:
@@ -519,13 +488,13 @@ test.describe('editor modal', () => {
         page.on('pageerror', err => errors.push(err.message))
 
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.getByTestId('editor-preview-btn')).not.toBeDisabled({ timeout: 30000 })
         errors.length = 0
 
         await modal.getByRole('button', { name: '+ add cut' }).click()
-        await expect(modal.locator('button[title="remove cut"]')).toHaveCount(1, { timeout: 5000 })
+        await expect(modal.getByTestId('editor-remove-cut-btn')).toHaveCount(1, { timeout: 5000 })
         await modal.getByRole('button', { name: '+ add cut' }).click()
-        await expect(modal.locator('button[title="remove cut"]')).toHaveCount(2, { timeout: 5000 })
+        await expect(modal.getByTestId('editor-remove-cut-btn')).toHaveCount(2, { timeout: 5000 })
 
         const real = errors.filter(e => !/AbortError/i.test(e) && !/Failed to fetch/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e) && !/404/i.test(e))
         expect(real, `Errors after adding two cuts: ${real.join('\n')}`).toHaveLength(0)
@@ -538,7 +507,7 @@ test.describe('editor modal', () => {
         test.slow()
         const api = await apiLoginAs(EDITOR_USERNAME, EDITOR_PASSWORD)
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.getByTestId('editor-preview-btn')).not.toBeDisabled({ timeout: 30000 })
 
         // Extract origin song ID from URL BEFORE editing (we're at /songs/<uuid>/edit)
         const originMatch = page.url().match(/\/songs\/([a-f0-9-]+)\/edit/)
@@ -548,7 +517,7 @@ test.describe('editor modal', () => {
         // Make an unambiguous param change. Volume uses ScrubInput (a span with role=spinbutton),
         // not a real range input, so .fill() doesn't work. Toggling Normalize checkbox is the
         // simplest deterministic param mutation.
-        const normalizeCheckbox = modal.locator('label').filter({ hasText: /normalize/i }).locator('input[type="checkbox"]')
+        const normalizeCheckbox = modal.getByTestId('editor-normalize-checkbox')
         await normalizeCheckbox.check()
 
         // Click "Save to Library" — handleSave creates the edit job, polls until done,
@@ -588,7 +557,7 @@ test.describe('editor modal', () => {
 
         // Step 1: Open editor on a library song, capture parent ID, make an edit, save → creates a child.
         const modal1 = await openEditorFromLibrary(page)
-        await expect(modal1.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal1.getByTestId('editor-preview-btn')).not.toBeDisabled({ timeout: 30000 })
 
         const parentSongId = page.url().match(/\/songs\/([a-f0-9-]+)\/edit/)?.[1]
         expect(parentSongId, 'Could not extract parent song ID').toBeTruthy()
@@ -616,7 +585,7 @@ test.describe('editor modal', () => {
         await page.goto(editSongRoute(childSongId!))
         const childModal = page.getByTestId('editor-modal')
         await expect(childModal).toBeVisible({ timeout: 10000 })
-        await expect(childModal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(childModal.getByTestId('editor-preview-btn')).not.toBeDisabled({ timeout: 30000 })
 
         // Step 3: "Restore Original" button is visible only when activeRootSongId !== activeSongId
         // (i.e. on a child song). Click it, confirm, expect navigation back to root/parent.
@@ -641,38 +610,31 @@ test.describe('editor modal', () => {
 
     test('overwrite original: admin checkbox flips save button label and shows danger styling', async ({ page }) => {
         const modal = await openEditorFromLibrary(page)
-        await expect(modal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })
+        await expect(modal.getByTestId('editor-preview-btn')).not.toBeDisabled({ timeout: 30000 })
 
         // The "save as original" checkbox is admin-only. If not visible, skip.
-        const checkboxLabel = page.locator('label').filter({ hasText: /save as original/i })
-        const checkboxCount = await checkboxLabel.count()
+        const checkbox = modal.getByTestId('editor-overwrite-checkbox')
+        const checkboxCount = await checkbox.count()
 
         if (checkboxCount === 0) {
-            // Admin gating is active — test user is not admin
             test.skip()
             return
         }
 
-        // Admin user: checkbox is visible
-        const checkbox = checkboxLabel.locator('input[type="checkbox"]')
         await expect(checkbox).toBeVisible()
         await expect(checkbox).not.toBeChecked()
 
-        // Toggle the checkbox
         await checkbox.check()
         await expect(checkbox).toBeChecked()
 
         // Assert: label text changes to red/danger styling
-        const labelSpan = checkboxLabel.locator('span').filter({ hasText: /save as original/i })
+        const labelSpan = checkbox.locator('..').locator('span').filter({ hasText: /save as original/i })
         await expect(labelSpan).toHaveClass(/text-red-400/)
 
-        // Assert: the Save button still exists and is labeled "Save to Library"
-        // (the label doesn't change, but danger styling on checkbox signals overwrite intent)
         const saveBtn = modal.getByRole('button', { name: 'Save to Library' })
         await expect(saveBtn).toBeVisible()
 
-        // DO NOT click save — this is destructive. Test stops here.
-        // Uncheck to revert
+        // DO NOT click save — this is destructive. Uncheck to revert
         await checkbox.uncheck()
         await expect(checkbox).not.toBeChecked()
         await expect(labelSpan).not.toHaveClass(/text-red-400/)

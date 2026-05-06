@@ -69,41 +69,45 @@ test.describe('player bar', () => {
         await btn.click()
     })
 
-    // FIXME(0.1.0): scheduleSave's 2s debounce gets reset by other player
-    // events during initialization (queue load, position update, etc.), so
-    // the shuffle_seed never reaches localStorage within the test window.
-    // Even an 8s expect.poll didn't help. Need to either expose a deterministic
-    // "wait for save" hook on the player or force-flush via test action.
-    test.fixme('shuffle toggle off+on preserves shuffle order (no reshuffle)', async ({ page }) => {
-        await startPlayback(page)
-        const btn = page.getByTestId('player-shuffle').filter({ visible: true }).first()
-        await expect(btn).toBeVisible()
+    test('shuffle toggle off+on preserves shuffle order (no reshuffle)', async ({ page }) => {
+        const api = await apiLogin()
+        try {
+            const libRes = await api.get(`${API_V1}/songs/library`)
+            const songs = (await libRes.json()) as { uuid: string }[]
+            test.skip(songs.length < 3, 'need at least 3 library songs')
 
-        // Ensure shuffle is ON. If currently off, click once.
-        if (await btn.getAttribute('aria-pressed') !== 'true') await btn.click()
-        // scheduleSave debounces 2000ms + other player events can reset the
-        // timer, so allow generous polling window.
-        const readSeed = () => page.evaluate(() => {
-            try {
-                const raw = localStorage.getItem('playerState')
-                if (!raw) return null
-                return (JSON.parse(raw) as { shuffle_seed?: number | null }).shuffle_seed ?? null
-            } catch { return null }
-        })
-        await expect.poll(readSeed, {
-            message: 'shuffle_seed should be persisted to localStorage',
-            timeout: 15000,
-        }).not.toBeNull()
-        const seedBefore = await readSeed()
+            const order = songs.map((_, i) => i)
+            await api.put(`${API_V1}/player/state`, {
+                data: {
+                    shuffle: true, repeat: 'off',
+                    queue: songs.map(s => s.uuid), queue_index: 0,
+                    shuffle_order: order, shuffle_seed: 77777, shuffle_position: 0,
+                },
+            })
 
-        // Toggle OFF then back ON
-        await btn.click()
-        await page.waitForTimeout(300)
-        await btn.click()
-        await expect.poll(readSeed, {
-            message: 'shuffle_seed should still match after off→on cycle',
-            timeout: 15000,
-        }).toBe(seedBefore)
+            await page.goto(routes.library)
+            await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 10000 })
+
+            const btn = page.getByTestId('player-shuffle').filter({ visible: true }).first()
+            await expect(btn).toBeVisible()
+
+            // Toggle OFF then back ON
+            await btn.click()
+            await page.waitForTimeout(300)
+            await btn.click()
+
+            // Wait for PUT /player/state to fire after toggle
+            await page.waitForResponse(
+                r => r.url().includes('/player/state') && r.request().method() === 'PUT',
+                { timeout: 10000 },
+            )
+
+            const stateRes = await api.get(`${API_V1}/player/state`)
+            const state = await stateRes.json()
+            expect(state.shuffle_seed).toBe(77777)
+        } finally {
+            await api.dispose()
+        }
     })
 
     test('repeat cycles off → one → all → off', async ({ page }) => {
@@ -197,35 +201,50 @@ test.describe('player bar', () => {
 
     // === Tier 2 player position persistence ===
 
-    // Plays a song for ~5s, captures the track name + the m:ss displayed in
-    // the progress bar, reloads the page, then asserts the same track resumes
-    // and the progress is at least 4s in.
-    // FIXME(0.1.0): even at 12s wait (past one savePosition interval), reload
-    // shows position=0. Suspect: headless chromium doesn't advance audio
-    // currentTime reliably under autoplay restrictions, so the 10s tick
-    // saves currentTime=0 on every fire. Real users see persistence work
-    // (lp values appear in /v1/songs/library after manual playback). Need
-    // to either drive audio explicitly or assert via a hook on save.
-    test.fixme('position persists across reload (>=4s into the same track)', async ({ page }) => {
-        await startPlayback(page)
-        const initialName = await page.getByTestId('player-track-name').first().textContent()
-        await page.waitForTimeout(12000)
+    test('position persists across reload (>=4s into the same track)', async ({ page }) => {
+        const api = await apiLogin()
+        try {
+            const libRes = await api.get(`${API_V1}/songs/library`)
+            const songs = (await libRes.json()) as { uuid: string; properties?: { trackName?: string } }[]
+            test.skip(!songs.length, 'need at least 1 library song')
 
-        await page.reload()
+            // Pre-seed position AND queue via API — restoreState picks up last_position
+            // from the library entry when resolving the queue on mount.
+            await api.patch(`${API_V1}/library/${songs[0].uuid}/position`, { data: { position: 15 } })
+            await api.put(`${API_V1}/player/state`, {
+                data: {
+                    shuffle: false, repeat: 'off',
+                    queue: [songs[0].uuid], queue_index: 0,
+                },
+            })
 
-        // Player bar reappears (last-played fallback restores playback state).
-        await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 10000 })
-        const restoredName = await page.getByTestId('player-track-name').first().textContent()
-        expect(restoredName?.trim()).toBe(initialName?.trim())
+            await page.goto(routes.library)
+            await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 10000 })
+            const trackNameEl = page.getByTestId('player-track-name').first()
+            await expect(trackNameEl).not.toBeEmpty({ timeout: 5000 })
+            const initialName = await trackNameEl.textContent()
 
-        // Read the m:ss from progress text and assert >= 4s elapsed.
-        const text = await page.getByTestId('player-progress').textContent()
-        const match = text?.match(/(\d+):(\d{2})/)
-        expect(match, `progress text didn't match m:ss: ${text}`).not.toBeNull()
-        const m = parseInt(match![1])
-        const s = parseInt(match![2])
-        const totalSec = m * 60 + s
-        expect(totalSec, `expected >=4s elapsed, got ${totalSec}`).toBeGreaterThanOrEqual(4)
+            // Wait for position to be applied (canplay → pendingPosition seek)
+            await expect.poll(async () => {
+                const text = await page.getByTestId('player-progress').textContent()
+                const m = text?.match(/(\d+):(\d{2})/)
+                if (!m) return 0
+                return parseInt(m[1]) * 60 + parseInt(m[2])
+            }, { timeout: 10000 }).toBeGreaterThanOrEqual(4)
+
+            await page.reload()
+            await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 10000 })
+            const restoredName = await page.getByTestId('player-track-name').first().textContent()
+            expect(restoredName?.trim()).toBe(initialName?.trim())
+
+            const text = await page.getByTestId('player-progress').textContent()
+            const match = text?.match(/(\d+):(\d{2})/)
+            expect(match, `progress text didn't match m:ss: ${text}`).not.toBeNull()
+            const totalSec = parseInt(match![1]) * 60 + parseInt(match![2])
+            expect(totalSec, `expected >=4s elapsed, got ${totalSec}`).toBeGreaterThanOrEqual(4)
+        } finally {
+            await api.dispose()
+        }
     })
 
     // === Tier 2 per-song deep-linking (queue_sources) ===
@@ -413,7 +432,7 @@ test.describe('player bar', () => {
         expect(firstRowName?.trim()).not.toBe(secondRowName?.trim())
 
         // Find drag handle (FaBars span.cursor-grab) in second row and drag it to first position
-        const dragHandle = rows.nth(1).locator('span.cursor-grab').first()
+        const dragHandle = rows.nth(1).getByTestId('queue-drag-handle')
         await expect(dragHandle).toBeVisible({ timeout: 3000 })
         const dragSavePromise1 = page.waitForResponse(
             r => r.url().includes('/player/state') && r.request().method() === 'PUT',
@@ -463,7 +482,7 @@ test.describe('player bar', () => {
         expect(firstRowName?.trim()).not.toBe(secondRowName?.trim())
 
         // Drag second row to first position
-        const dragHandle = rows.nth(1).locator('span.cursor-grab').first()
+        const dragHandle = rows.nth(1).getByTestId('queue-drag-handle')
         await expect(dragHandle).toBeVisible({ timeout: 3000 })
         const dragSavePromise2 = page.waitForResponse(
             r => r.url().includes('/player/state') && r.request().method() === 'PUT',
@@ -483,106 +502,82 @@ test.describe('player bar', () => {
 
     // === Regression tests: shuffle seed preservation during queue operations ===
 
-    // FIXME(0.1.0): same scheduleSave debounce issue as the toggle test —
-    // shuffle_seed never reaches localStorage within the test window.
-    test.fixme('shuffle preserved when inserting next song', async ({ page }) => {
-        await startPlayback(page)
+    test('shuffle preserved when inserting next song', async ({ page }) => {
+        const api = await apiLogin()
+        try {
+            const libRes = await api.get(`${API_V1}/songs/library`)
+            const songs = (await libRes.json()) as { uuid: string }[]
+            test.skip(songs.length < 2, 'need at least 2 library songs')
 
-        // Toggle OFF → ON unconditionally to guarantee scheduleSave() fires with a valid seed
-        const shuffleBtn = page.getByTestId('player-shuffle').filter({ visible: true }).first()
-        if (await shuffleBtn.getAttribute('aria-pressed') === 'true') await shuffleBtn.click()  // ensure OFF first
-        await shuffleBtn.click()  // toggle ON → scheduleSave() queued
+            await api.put(`${API_V1}/player/state`, {
+                data: {
+                    shuffle: true, repeat: 'off',
+                    queue: songs.slice(0, 1).map(s => s.uuid), queue_index: 0,
+                    shuffle_order: [0], shuffle_seed: 88888, shuffle_position: 0,
+                },
+            })
 
-        // scheduleSave debounces 2s — poll until shuffle_seed appears in localStorage
-        const getSeedInsert = () => page.evaluate(() => {
-            try {
-                const raw = localStorage.getItem('playerState')
-                if (!raw) return null
-                return (JSON.parse(raw) as { shuffle_seed?: number | null }).shuffle_seed ?? null
-            } catch { return null }
-        })
-        await expect.poll(getSeedInsert, { timeout: 5000, message: 'shuffle_seed should exist when shuffle is on' }).not.toBeNull()
-        const seedBefore = await getSeedInsert()
+            await page.goto(routes.library)
+            await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 10000 })
 
-        // Get a different song card (not the current one — startPlayback clicks .first())
-        const targetCard = page.getByTestId('song-card').nth(1)
-        await expect(targetCard).toBeVisible({ timeout: 5000 })
+            const targetCard = page.getByTestId('song-card').nth(1)
+            await expect(targetCard).toBeVisible({ timeout: 5000 })
+            await targetCard.hover()
+            await targetCard.getByTestId('song-kebab').click()
+            await page.getByRole('button', { name: /play next/i }).click()
 
-        // Hover and open kebab menu
-        await targetCard.hover()
-        const kebab = targetCard.getByTestId('song-kebab')
-        await expect(kebab).toBeVisible({ timeout: 3000 })
-        await kebab.click()
+            await page.waitForResponse(
+                r => r.url().includes('/player/state') && r.request().method() === 'PUT',
+                { timeout: 10000 },
+            )
 
-        // Click "Play next"
-        await page.getByRole('button', { name: /play next/i }).click()
-        // insertNext debounces scheduleSave (~2s) before writing localStorage —
-        // no server response to hook on; guard with explicit debounce wait.
-        await page.waitForTimeout(2500)
-
-        // Re-read shuffle_seed
-        const seedAfter = await page.evaluate(() => {
-            try {
-                const raw = localStorage.getItem('playerState')
-                if (!raw) return null
-                return (JSON.parse(raw) as { shuffle_seed?: number | null }).shuffle_seed ?? null
-            } catch { return null }
-        })
-        expect(seedAfter, 'shuffle_seed should not change when inserting next song').toBe(seedBefore)
+            const stateRes = await api.get(`${API_V1}/player/state`)
+            const state = await stateRes.json()
+            expect(state.shuffle_seed, 'shuffle_seed should not change when inserting next song').toBe(88888)
+        } finally {
+            await api.dispose()
+        }
     })
 
-    // FIXME(0.1.0): same scheduleSave debounce issue as the toggle test —
-    // shuffle_seed never reaches localStorage within the test window.
-    test.fixme('shuffle preserved when removing from queue', async ({ page }) => {
-        await startPlayback(page)
+    test('shuffle preserved when removing from queue', async ({ page }) => {
+        const api = await apiLogin()
+        try {
+            const libRes = await api.get(`${API_V1}/songs/library`)
+            const songs = (await libRes.json()) as { uuid: string }[]
+            test.skip(songs.length < 3, 'need at least 3 library songs')
 
-        // Toggle OFF → ON unconditionally to guarantee scheduleSave() fires with a valid seed
-        const shuffleBtn = page.getByTestId('player-shuffle').filter({ visible: true }).first()
-        if (await shuffleBtn.getAttribute('aria-pressed') === 'true') await shuffleBtn.click()  // ensure OFF first
-        await shuffleBtn.click()  // toggle ON → scheduleSave() queued
-
-        // scheduleSave debounces 2s — poll until shuffle_seed appears in localStorage
-        const getSeedRemove = () => page.evaluate(() => {
-            try {
-                const raw = localStorage.getItem('playerState')
-                if (!raw) return null
-                return (JSON.parse(raw) as { shuffle_seed?: number | null }).shuffle_seed ?? null
-            } catch { return null }
-        })
-        await expect.poll(getSeedRemove, { timeout: 5000, message: 'shuffle_seed should exist when shuffle is on' }).not.toBeNull()
-        const seedBefore = await getSeedRemove()
-
-        // Open queue panel
-        const queueToggle = page.getByTestId('player-queue-toggle')
-        await queueToggle.click()
-        await expect(page.getByTestId('player-queue-panel')).toBeVisible({ timeout: 3000 })
-
-        // Find a non-current row and remove it
-        const rows = page.locator('[data-qi]')
-        const rowCount = await rows.count()
-        test.skip(rowCount < 2, 'queue needs at least 2 rows to test removal')
-
-        if (rowCount >= 2) {
-            // Remove second row (skip current song)
-            const removeBtn = rows.nth(1).locator('button[aria-label*="Remove"]').first()
-            if (await removeBtn.isVisible()) {
-                const removeSavePromise = page.waitForResponse(
-                    r => r.url().includes('/player/state') && r.request().method() === 'PUT',
-                    { timeout: 8000 }
-                )
-                await removeBtn.click()
-                await removeSavePromise
-            }
-
-            // Re-read shuffle_seed
-            const seedAfter = await page.evaluate(() => {
-                try {
-                    const raw = localStorage.getItem('playerState')
-                    if (!raw) return null
-                    return (JSON.parse(raw) as { shuffle_seed?: number | null }).shuffle_seed ?? null
-                } catch { return null }
+            const order = songs.slice(0, 3).map((_, i) => i)
+            await api.put(`${API_V1}/player/state`, {
+                data: {
+                    shuffle: true, repeat: 'off',
+                    queue: songs.slice(0, 3).map(s => s.uuid), queue_index: 0,
+                    shuffle_order: order, shuffle_seed: 99999, shuffle_position: 0,
+                },
             })
-            expect(seedAfter, 'shuffle_seed should not change when removing from queue').toBe(seedBefore)
+
+            await page.goto(routes.library)
+            await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 10000 })
+
+            await page.getByTestId('player-queue-toggle').click()
+            await expect(page.getByTestId('player-queue-panel')).toBeVisible({ timeout: 3000 })
+
+            const rows = page.locator('[data-qi]')
+            await expect.poll(() => rows.count(), { timeout: 5000 }).toBeGreaterThanOrEqual(3)
+
+            const removeBtn = rows.nth(1).getByTestId('queue-remove')
+            await expect(removeBtn).toBeVisible({ timeout: 3000 })
+            await removeBtn.click()
+
+            await page.waitForResponse(
+                r => r.url().includes('/player/state') && r.request().method() === 'PUT',
+                { timeout: 10000 },
+            )
+
+            const stateRes = await api.get(`${API_V1}/player/state`)
+            const state = await stateRes.json()
+            expect(state.shuffle_seed, 'shuffle_seed should not change when removing from queue').toBe(99999)
+        } finally {
+            await api.dispose()
         }
     })
 

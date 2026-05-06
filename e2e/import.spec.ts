@@ -183,41 +183,6 @@ test.describe('import page', () => {
 
     // === Tier 1 beforeunload warning ===
 
-    // === Status badge filter ===
-
-    // Status badges are display-only — no click-to-filter exists. Delete or
-    // rewrite when/if badge click filtering is added to import-jobs-table.
-    test.fixme('clicking a status badge filters table to that status', async ({ page }) => {
-        await page.goto(routes.import)
-        const filePath = makeRealAudioCopy('filter-badge-test.mp3')
-        try {
-            await page.getByTestId('import-file-input').setInputFiles(filePath)
-            const row = page.locator('tr', { hasText: 'filter-badge-test.mp3' }).first()
-            await expect(row.locator('text=/^(done|failed|duplicate)$/').first()).toBeVisible({ timeout: 20000 })
-
-            // The failed badge should now be visible — click it to filter
-            const failedBadge = page.getByTestId('filter-failed')
-            await expect(failedBadge).toBeVisible({ timeout: 5000 })
-            await failedBadge.click()
-
-            // All visible rows must be failed
-            const statusCells = page.locator('tbody tr td:nth-child(3)')
-            const count = await statusCells.count()
-            expect(count).toBeGreaterThan(0)
-            for (let i = 0; i < count; i++) {
-                await expect(statusCells.nth(i)).toContainText('failed')
-            }
-
-            // Badge shows active state (× appended)
-            await expect(failedBadge).toContainText('×')
-
-            // Click again to clear
-            await failedBadge.click()
-            await expect(failedBadge).not.toContainText('×')
-        } finally {
-            fs.unlinkSync(filePath)
-        }
-    })
 
     test('duplicate row shows "original added" link', async ({ page }) => {
         await page.goto(routes.import)
