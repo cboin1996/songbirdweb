@@ -1,4 +1,4 @@
-import { routes } from './routes'
+import { routes, exploreQuery } from './routes'
 import { test, expect, Page } from '@playwright/test'
 import { USERNAME, PASSWORD, login, ignoreError } from './helpers'
 
@@ -92,7 +92,7 @@ test.describe('explore page', () => {
     })
 
     test('clearing search removes q param from URL', async ({ page }) => {
-        await page.goto('/explore?q=jolene')
+        await page.goto(exploreQuery('q=jolene'))
         const input = page.getByPlaceholder(/search/i).first()
         await expect(input).toBeVisible({ timeout: 5000 })
         await input.clear()
@@ -100,7 +100,7 @@ test.describe('explore page', () => {
     })
 
     test('explore page shows song cards or empty state', async ({ page }) => {
-        await page.goto('/explore?window=all&sort=plays')
+        await page.goto(exploreQuery('window=all&sort=plays'))
         await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {})
         const hasCards = await page.getByTestId('song-card').count() > 0
         const hasEmpty = await page.getByText(/no data yet/i).isVisible()
@@ -111,7 +111,7 @@ test.describe('explore page', () => {
         const errors: string[] = []
         page.on('pageerror', err => { if (!ignoreError(err.message)) errors.push(err.message) })
 
-        await page.goto('/explore?window=all&sort=plays')
+        await page.goto(exploreQuery('window=all&sort=plays'))
         await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {})
 
         const cards = page.getByTestId('song-card')
@@ -135,7 +135,7 @@ test.describe('explore page', () => {
     // === Tier 2 relative timestamps ===
 
     test('"recently added" sort renders relative ago labels', async ({ page }) => {
-        await page.goto('/explore?sort=recent')
+        await page.goto(exploreQuery('sort=recent'))
         await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {})
         const cards = page.getByTestId('song-card')
         const cardCount = await cards.count()
@@ -165,7 +165,7 @@ test.describe('explore page', () => {
 
     test('explore: player link includes ?window=...&sort=...&song=<uuid>', async ({ page }) => {
         // Navigate to explore with specific window and sort params
-        await page.goto('/explore?window=all&sort=plays')
+        await page.goto(exploreQuery('window=all&sort=plays'))
         await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {})
 
         const cards = page.getByTestId('song-card')

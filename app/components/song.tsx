@@ -7,7 +7,7 @@ import { cacheSong, uncacheSong } from "../lib/offline";
 import { FaBookmark, FaRegBookmark, FaEllipsisV, FaLock, FaCloudDownloadAlt } from "react-icons/fa";
 import Image from "next/image";
 import { usePlayer } from "./player";
-import { editSongRoute } from "../lib/routes";
+import { routes, editSongRoute } from "../lib/routes";
 import { useUser } from "../lib/user-context";
 import { useOnline } from "../lib/use-online";
 import CommunityBadge from "./community-badge";
@@ -56,8 +56,8 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
     const pathname = usePathname()
     function pageSource() {
         const href = typeof window !== 'undefined' ? window.location.pathname + window.location.search : pathname
-        return pathname.includes('/explore') ? { label: 'Explore', href, id: 'explore' }
-            : pathname.includes('/download') ? { label: 'Downloads', href, id: 'downloads' }
+        return pathname.includes(routes.explore) ? { label: 'Explore', href, id: 'explore' }
+            : pathname.includes(routes.download) ? { label: 'Downloads', href, id: 'downloads' }
             : { label: 'Library', href, id: 'library' }
     }
     const isCurrentSong = current?.uuid === song.songId

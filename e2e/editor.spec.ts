@@ -1,4 +1,4 @@
-import { routes } from './routes'
+import { routes, editSongRoute } from './routes'
 import { test, expect, Page, Locator } from '@playwright/test'
 import { USERNAME, PASSWORD, login, ignoreError, apiLogin, apiLoginAs, API_V1, EDITOR_USERNAME, EDITOR_PASSWORD } from './helpers'
 
@@ -613,7 +613,7 @@ test.describe('editor modal', () => {
         expect(childSongId, 'Child song ID should differ from parent').not.toBe(parentSongId)
 
         // Step 2: Navigate to the child editor — modal1 unmounted on save, need a fresh editor instance.
-        await page.goto(`/songs/${childSongId}/edit`)
+        await page.goto(editSongRoute(childSongId!))
         const childModal = page.getByTestId('editor-modal')
         await expect(childModal).toBeVisible({ timeout: 10000 })
         await expect(childModal.locator('button[title="preview with edits"]')).not.toBeDisabled({ timeout: 30000 })

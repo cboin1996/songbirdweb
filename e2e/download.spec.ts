@@ -1,4 +1,4 @@
-import { routes } from './routes'
+import { routes, downloadSongQuery, downloadAlbumQuery, downloadUrlQuery } from './routes'
 import { test, expect, Page } from '@playwright/test'
 import { USERNAME, PASSWORD, login, ignoreError } from './helpers'
 
@@ -44,7 +44,7 @@ test.describe('download page', () => {
     // --- song search sub-page ---
 
     test('song search: results appear for "jolene"', async ({ page }) => {
-        await page.goto('/download/song?query=jolene')
+        await page.goto(downloadSongQuery('jolene'))
         const card = page.getByTestId('song-card').filter({ hasText: /jolene/i }).first()
         await expect(card).toBeVisible({ timeout: 15000 })
     })
@@ -52,7 +52,7 @@ test.describe('download page', () => {
     // Use a seeded library title so the first card is a library match (has songId).
     // Pure iTunes results have no songId → no kebab/library-toggle/playable file.
     test('song search: kebab menu opens on hover', async ({ page }) => {
-        await page.goto('/download/song?query=sound%20of%20silence')
+        await page.goto(downloadSongQuery('sound of silence'))
         const card = page.getByTestId('song-card').first()
         await expect(card).toBeVisible({ timeout: 15000 })
         await card.hover()
@@ -60,7 +60,7 @@ test.describe('download page', () => {
     })
 
     test('song search: kebab menu shows expected actions', async ({ page }) => {
-        await page.goto('/download/song?query=sound%20of%20silence')
+        await page.goto(downloadSongQuery('sound of silence'))
         const card = page.getByTestId('song-card').first()
         await expect(card).toBeVisible({ timeout: 15000 })
         await card.hover()
@@ -77,7 +77,7 @@ test.describe('download page', () => {
         const errors: string[] = []
         page.on('pageerror', err => { if (!ignoreError(err.message)) errors.push(err.message) })
 
-        await page.goto('/download/song?query=sound%20of%20silence')
+        await page.goto(downloadSongQuery('sound of silence'))
         const card = page.getByTestId('song-card').first()
         await expect(card).toBeVisible({ timeout: 15000 })
         await card.click()
@@ -88,7 +88,7 @@ test.describe('download page', () => {
     })
 
     test('song search: library bookmark button visible on card', async ({ page }) => {
-        await page.goto('/download/song?query=sound%20of%20silence')
+        await page.goto(downloadSongQuery('sound of silence'))
         const card = page.getByTestId('song-card').first()
         await expect(card).toBeVisible({ timeout: 15000 })
         await expect(card.getByTestId('song-library-toggle')).toBeVisible()
@@ -125,7 +125,7 @@ test.describe('download page', () => {
 
         try {
             // 'jolene' is not in our seed library → first iTunes match leads.
-            await page.goto('/download/song?query=jolene')
+            await page.goto(downloadSongQuery('jolene'))
 
             // iTunes cards have no kebab/library-toggle (no songId yet).
             const itunesCard = page.getByTestId('song-card')
@@ -178,7 +178,7 @@ test.describe('download page', () => {
         let songUuid: string | null = null
 
         try {
-            await page.goto('/download/album?query=rumours')
+            await page.goto(downloadAlbumQuery('rumours'))
 
             // First album in the iTunes results.
             const album = page.getByRole('button').filter({ hasText: /rumours/i }).first()
@@ -230,7 +230,7 @@ test.describe('download page', () => {
             // The URL flow takes the source URL via query param. Search bar
             // above submits to /download/url?query=…; navigate directly here.
             const url = 'https://archive.org/download/testmp3testfile/mpthreetest.mp3'
-            await page.goto(`/download/url?query=${encodeURIComponent(url)}`)
+            await page.goto(downloadUrlQuery(url))
 
             // Download starts automatically. After completion, "ready" state
             // shows an "add to library" button — user must click to commit.
