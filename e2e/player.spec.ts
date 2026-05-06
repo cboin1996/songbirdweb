@@ -1,14 +1,17 @@
 import { routes } from './routes'
 import { test, expect, Page } from '@playwright/test'
 import { USERNAME, PASSWORD, login, ignoreError, apiLogin, API_V1 } from './helpers'
+import { LibraryPage, PlayerBar } from './pages'
 
 
 async function startPlayback(page: Page) {
-    await page.goto(routes.library)
-    const card = page.getByTestId('song-card').first()
+    const lib = new LibraryPage(page)
+    const player = new PlayerBar(page)
+    await lib.goto()
+    const card = lib.songCards.first()
     await expect(card).toBeVisible({ timeout: 10000 })
     await card.click()
-    await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
+    await player.waitForBar()
 }
 
 test.describe('player bar', () => {
@@ -19,57 +22,56 @@ test.describe('player bar', () => {
     })
 
     test('player bar appears after clicking a song', async ({ page }) => {
-        await page.goto(routes.library)
-        const card = page.getByTestId('song-card').first()
+        const lib = new LibraryPage(page)
+        const player = new PlayerBar(page)
+        await lib.goto()
+        const card = lib.songCards.first()
         await expect(card).toBeVisible({ timeout: 10000 })
         await card.click()
-        await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
+        await player.waitForBar()
     })
 
     test('player shows track name of clicked song', async ({ page }) => {
-        await page.goto(routes.library)
-        // pick the first card that has a non-empty track name displayed
-        const card = page.getByTestId('song-card').filter({ hasText: /\w/ }).first()
+        const lib = new LibraryPage(page)
+        const player = new PlayerBar(page)
+        await lib.goto()
+        const card = lib.songCards.filter({ hasText: /\w/ }).first()
         await expect(card).toBeVisible({ timeout: 10000 })
         await card.click()
-        await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
-        // wait for track name to populate (may be async)
-        await expect(page.getByTestId('player-track-name').first()).not.toBeEmpty({ timeout: 5000 })
+        await player.waitForBar()
+        await player.waitForTrackName()
     })
 
     test('play/pause button toggles playback', async ({ page }) => {
         const errors: string[] = []
         page.on('pageerror', err => { if (!ignoreError(err.message)) errors.push(err.message) })
 
+        const player = new PlayerBar(page)
         await startPlayback(page)
-        const btn = page.getByTestId('player-play-pause')
-        await expect(btn).toBeVisible()
+        await expect(player.playPause).toBeVisible()
 
-        // click to pause
-        await btn.click()
-        // click to resume
-        await btn.click()
+        await player.playPause.click()
+        await player.playPause.click()
 
         expect(errors).toHaveLength(0)
     })
 
     test('shuffle button toggles active class', async ({ page }) => {
+        const player = new PlayerBar(page)
         await startPlayback(page)
-        // Player has compact + full bars in the DOM (one hidden via CSS at desktop/mobile breakpoint).
-        const btn = page.getByTestId('player-shuffle').filter({ visible: true }).first()
-        await expect(btn).toBeVisible()
+        await expect(player.shuffle).toBeVisible()
 
-        const before = await btn.getAttribute('class')
-        await btn.click()
-        await expect(btn).not.toHaveAttribute('class', before || '')
-        const after = await btn.getAttribute('class')
+        const before = await player.shuffle.getAttribute('class')
+        await player.shuffle.click()
+        await expect(player.shuffle).not.toHaveAttribute('class', before || '')
+        const after = await player.shuffle.getAttribute('class')
         expect(after).not.toEqual(before)
 
-        // toggle back off
-        await btn.click()
+        await player.shuffle.click()
     })
 
     test('shuffle toggle off+on preserves shuffle order (no reshuffle)', async ({ page }) => {
+        const player = new PlayerBar(page)
         const api = await apiLogin()
         try {
             const libRes = await api.get(`${API_V1}/songs/library`)
@@ -86,17 +88,14 @@ test.describe('player bar', () => {
             })
 
             await page.goto(routes.library)
-            await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 10000 })
+            await player.waitForBar(10000)
 
-            const btn = page.getByTestId('player-shuffle').filter({ visible: true }).first()
-            await expect(btn).toBeVisible()
+            await expect(player.shuffle).toBeVisible()
 
-            // Toggle OFF then back ON
-            await btn.click()
+            await player.shuffle.click()
             await page.waitForTimeout(300)
-            await btn.click()
+            await player.shuffle.click()
 
-            // Wait for PUT /player/state to fire after toggle
             await page.waitForResponse(
                 r => r.url().includes('/player/state') && r.request().method() === 'PUT',
                 { timeout: 10000 },
@@ -111,57 +110,51 @@ test.describe('player bar', () => {
     })
 
     test('repeat cycles off → one → all → off', async ({ page }) => {
+        const player = new PlayerBar(page)
         await startPlayback(page)
-        const btn = page.getByTestId('player-repeat').filter({ visible: true }).first()
-        await expect(btn).toBeVisible()
+        await expect(player.repeat).toBeVisible()
 
-        // Reset to 'off' state (player persists last state, initial is 'all')
         for (let i = 0; i < 3; i++) {
-            const cls = await btn.getAttribute('class') ?? ''
+            const cls = await player.repeat.getAttribute('class') ?? ''
             if (cls.includes('text-gray-400')) break
-            await btn.click()
-            await expect.poll(() => btn.getAttribute('class'), { timeout: 2000 }).not.toBe(cls)
+            await player.repeat.click()
+            await expect.poll(() => player.repeat.getAttribute('class'), { timeout: 2000 }).not.toBe(cls)
         }
 
-        // off → one (shows "1" superscript)
-        await btn.click()
-        await expect(btn).toHaveClass(/text-sky-500/, { timeout: 2000 })
-        await expect(btn.locator('span')).toBeVisible({ timeout: 2000 })
+        await player.repeat.click()
+        await expect(player.repeat).toHaveClass(/text-sky-500/, { timeout: 2000 })
+        await expect(player.repeat.locator('span')).toBeVisible({ timeout: 2000 })
 
-        // one → all (superscript disappears)
-        await btn.click()
-        await expect(btn).toHaveClass(/text-sky-500/, { timeout: 2000 })
-        await expect(btn.locator('span')).toHaveCount(0)
+        await player.repeat.click()
+        await expect(player.repeat).toHaveClass(/text-sky-500/, { timeout: 2000 })
+        await expect(player.repeat.locator('span')).toHaveCount(0)
 
-        // all → off
-        await btn.click()
-        await expect(btn).toHaveClass(/text-gray-400/, { timeout: 2000 })
+        await player.repeat.click()
+        await expect(player.repeat).toHaveClass(/text-gray-400/, { timeout: 2000 })
     })
 
     test('queue toggle shows and hides queue panel', async ({ page }) => {
+        const player = new PlayerBar(page)
         await startPlayback(page)
-        const btn = page.getByTestId('player-queue-toggle')
-        await expect(btn).toBeVisible()
+        await expect(player.queueToggle).toBeVisible()
 
-        // open queue
-        await btn.click()
-        await expect(btn).toHaveClass(/text-sky-500/, { timeout: 2000 })
+        await player.queueToggle.click()
+        await expect(player.queueToggle).toHaveClass(/text-sky-500/, { timeout: 2000 })
 
-        // close queue
-        await btn.click()
-        await expect(btn).toHaveClass(/text-gray-400/, { timeout: 2000 })
+        await player.queueToggle.click()
+        await expect(player.queueToggle).toHaveClass(/text-gray-400/, { timeout: 2000 })
     })
 
     test('progress bar click seeks without error', async ({ page }) => {
         const errors: string[] = []
         page.on('pageerror', err => { if (!ignoreError(err.message)) errors.push(err.message) })
 
+        const player = new PlayerBar(page)
         await startPlayback(page)
 
-        const progressBar = page.getByTestId('player-progress')
-        await expect(progressBar).toBeVisible({ timeout: 5000 })
+        await expect(player.progress).toBeVisible({ timeout: 5000 })
 
-        const box = await progressBar.boundingBox()
+        const box = await player.progress.boundingBox()
         if (box) {
             await page.mouse.click(box.x + box.width * 0.5, box.y + box.height / 2)
         }
@@ -169,23 +162,23 @@ test.describe('player bar', () => {
     })
 
     test('timestamps render in M:SS format', async ({ page }) => {
+        const player = new PlayerBar(page)
         await startPlayback(page)
 
-        const progress = page.getByTestId('player-progress')
-        await expect(progress).toBeVisible({ timeout: 5000 })
-        // Progress bar renders both elapsed and remaining timestamps. Poll
-        // until the M:SS format is present — avoids racing on the first paint.
+        await expect(player.progress).toBeVisible({ timeout: 5000 })
         await expect.poll(async () =>
-            (await progress.textContent())?.match(/\d+:\d{2}/) ? true : false
+            (await player.progress.textContent())?.match(/\d+:\d{2}/) ? true : false
         , { timeout: 5000 }).toBe(true)
     })
 
     test('player shows "from Library" context link', async ({ page }) => {
-        await page.goto(routes.library)
-        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
-        await page.getByRole('button', { name: 'play all' }).click()
-        await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
-        await expect(page.getByText(/from Library/i)).toBeVisible({ timeout: 10000 })
+        const lib = new LibraryPage(page)
+        const player = new PlayerBar(page)
+        await lib.goto()
+        await lib.waitForSongs()
+        await lib.playAllBtn.click()
+        await player.waitForBar()
+        await expect(player.contextLink(/from Library/i)).toBeVisible({ timeout: 10000 })
     })
 
     test('no console errors during playback', async ({ page }) => {
@@ -202,14 +195,13 @@ test.describe('player bar', () => {
     // === Tier 2 player position persistence ===
 
     test('position persists across reload (>=4s into the same track)', async ({ page }) => {
+        const player = new PlayerBar(page)
         const api = await apiLogin()
         try {
             const libRes = await api.get(`${API_V1}/songs/library`)
             const songs = (await libRes.json()) as { uuid: string; properties?: { trackName?: string } }[]
             test.skip(!songs.length, 'need at least 1 library song')
 
-            // Pre-seed position AND queue via API — restoreState picks up last_position
-            // from the library entry when resolving the queue on mount.
             await api.patch(`${API_V1}/library/${songs[0].uuid}/position`, { data: { position: 15 } })
             await api.put(`${API_V1}/player/state`, {
                 data: {
@@ -219,28 +211,18 @@ test.describe('player bar', () => {
             })
 
             await page.goto(routes.library)
-            await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 10000 })
-            const trackNameEl = page.getByTestId('player-track-name').first()
-            await expect(trackNameEl).not.toBeEmpty({ timeout: 5000 })
-            const initialName = await trackNameEl.textContent()
+            await player.waitForBar(10000)
+            await player.waitForTrackName()
+            const initialName = await player.getTrackName()
 
-            // Wait for position to be applied (canplay → pendingPosition seek)
-            await expect.poll(async () => {
-                const text = await page.getByTestId('player-progress').textContent()
-                const m = text?.match(/(\d+):(\d{2})/)
-                if (!m) return 0
-                return parseInt(m[1]) * 60 + parseInt(m[2])
-            }, { timeout: 10000 }).toBeGreaterThanOrEqual(4)
+            await expect.poll(async () => player.getProgressSeconds(), { timeout: 10000 }).toBeGreaterThanOrEqual(4)
 
             await page.reload()
-            await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 10000 })
-            const restoredName = await page.getByTestId('player-track-name').first().textContent()
-            expect(restoredName?.trim()).toBe(initialName?.trim())
+            await player.waitForBar(10000)
+            const restoredName = await player.getTrackName()
+            expect(restoredName).toBe(initialName)
 
-            const text = await page.getByTestId('player-progress').textContent()
-            const match = text?.match(/(\d+):(\d{2})/)
-            expect(match, `progress text didn't match m:ss: ${text}`).not.toBeNull()
-            const totalSec = parseInt(match![1]) * 60 + parseInt(match![2])
+            const totalSec = await player.getProgressSeconds()
             expect(totalSec, `expected >=4s elapsed, got ${totalSec}`).toBeGreaterThanOrEqual(4)
         } finally {
             await api.dispose()
@@ -250,29 +232,26 @@ test.describe('player bar', () => {
     // === Tier 2 per-song deep-linking (queue_sources) ===
 
     test('library songs: player link includes ?song=<uuid>', async ({ page }) => {
-        await page.goto(routes.library)
-        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
+        const lib = new LibraryPage(page)
+        const player = new PlayerBar(page)
+        await lib.goto()
+        await lib.waitForSongs()
 
-        // data-song-id is on the wrapper <div> around the Song component,
-        // not on the song-card testid itself.
         const songId = await page.locator('[data-song-id]').first().getAttribute('data-song-id')
         expect(songId).toBeTruthy()
 
-        // Use play-all to guarantee ctx is set regardless of prior player state.
-        await page.getByRole('button', { name: 'play all' }).click()
-        await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
+        await lib.playAllBtn.click()
+        await player.waitForBar()
 
-        // Player bar shows "from {label}" inside the source <Link> (renders
-        // as <a>); the matched span's parent IS the <a>, not a wrapper of one.
-        const contextLink = page.getByText(/from library/i)
+        const contextLink = player.contextLink(/from library/i)
         await expect(contextLink).toBeVisible({ timeout: 5000 })
         const href = await contextLink.locator('..').getAttribute('href')
         expect(href).toContain(`?song=${songId}`)
     })
 
     test('library genres: player link includes ?view=genres&song=<uuid>', async ({ page }) => {
+        const player = new PlayerBar(page)
         await page.goto(routes.libraryGenres)
-        // data-song-id is on the wrapper, not the song-card testid element.
         const card = page.locator('[data-song-id]').first()
         await expect(card).toBeVisible({ timeout: 10000 })
 
@@ -280,9 +259,8 @@ test.describe('player bar', () => {
         expect(songId).toBeTruthy()
 
         await card.click()
-        await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
+        await player.waitForBar()
 
-        // The context link should reflect the genres view + song UUID
         const link = page.locator('a[href*="genres"]').first()
         const href = await link.getAttribute('href')
         expect(href).toContain(`genres`)
@@ -290,42 +268,42 @@ test.describe('player bar', () => {
     })
 
     test('album card click opens modal with song list', async ({ page }) => {
+        const lib = new LibraryPage(page)
         await page.goto(routes.libraryAlbums)
-        const card = page.locator('[data-album-id]').first()
+        const card = lib.albums().first()
         await expect(card).toBeVisible({ timeout: 10000 })
 
         await card.click()
-        const modal = page.getByTestId('album-modal')
-        await expect(modal).toBeVisible({ timeout: 3000 })
+        await expect(lib.albumModal()).toBeVisible({ timeout: 3000 })
     })
 
     test('album modal close dismisses on X button', async ({ page }) => {
+        const lib = new LibraryPage(page)
         await page.goto(routes.libraryAlbums)
-        const card = page.locator('[data-album-id]').first()
+        const card = lib.albums().first()
         await expect(card).toBeVisible({ timeout: 10000 })
 
         await card.click()
-        const modal = page.getByTestId('album-modal')
+        const modal = lib.albumModal()
         await expect(modal).toBeVisible({ timeout: 3000 })
 
-        // Close via the X button in the modal header
         await modal.getByRole('button').filter({ has: page.locator('svg') }).last().click()
         await expect(modal).not.toBeVisible({ timeout: 3000 })
     })
 
     test('album play button starts playback with album context', async ({ page }) => {
+        const lib = new LibraryPage(page)
+        const player = new PlayerBar(page)
         await page.goto(routes.libraryAlbums)
-        const card = page.locator('[data-album-id]').first()
+        const card = lib.albums().first()
         await expect(card).toBeVisible({ timeout: 10000 })
 
         const albumId = await card.getAttribute('data-album-id')
         expect(albumId).toBeTruthy()
 
-        // Click the play button (not the card itself)
-        await card.getByTestId('album-play').click({ force: true })
-        await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
+        await lib.albumPlay(card).click({ force: true })
+        await player.waitForBar()
 
-        // Context link should point to album view
         const link = page.locator('a[href*="albums"]').first()
         const href = await link.getAttribute('href')
         expect(href).toContain(`albums`)
@@ -334,43 +312,37 @@ test.describe('player bar', () => {
     })
 
     test('album play button toggles pause when same album is active', async ({ page }) => {
+        const lib = new LibraryPage(page)
+        const player = new PlayerBar(page)
         await page.goto(routes.libraryAlbums)
-        const card = page.locator('[data-album-id]').first()
+        const card = lib.albums().first()
         await expect(card).toBeVisible({ timeout: 10000 })
 
-        // Start playback
-        await card.getByTestId('album-play').click({ force: true })
-        await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
+        await lib.albumPlay(card).click({ force: true })
+        await player.waitForBar()
 
-        // Click play again on the same album — should pause
-        await card.getByTestId('album-play').click({ force: true })
-        // The player play/pause button should now show the play icon (paused state)
-        const playPauseBtn = page.getByTestId('player-play-pause')
-        // When paused, aria or icon changes — check the audio is paused
-        await expect(playPauseBtn).toBeVisible()
+        await lib.albumPlay(card).click({ force: true })
+        await expect(player.playPause).toBeVisible()
     })
 
     test('queue_sources persists across reload (cross-session)', async ({ page }) => {
+        const lib = new LibraryPage(page)
+        const player = new PlayerBar(page)
         const api = await apiLogin()
         try {
-        // Play a song from library
-        await page.goto(routes.library)
-        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
+        await lib.goto()
+        await lib.waitForSongs()
 
-        // data-song-id is on the wrapper div, not the song-card testid element.
         const songId = await page.locator('[data-song-id]').first().getAttribute('data-song-id')
         expect(songId).toBeTruthy()
 
-        await page.getByRole('button', { name: 'play all' }).click()
-        await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
+        await lib.playAllBtn.click()
+        await player.waitForBar()
 
-        // Capture the context link href before reload
         const linkBefore = page.locator('a[href*="library?song="]').first()
         const hrefBefore = await linkBefore.getAttribute('href')
         expect(hrefBefore).toContain(`song=${songId}`)
 
-        // scheduleSave debounces 2s then PUTs to server — poll until the server has the new state
-        // before reloading, otherwise the restore on mount fetches stale server state.
         await expect.poll(async () => {
             const r = await api.get(`${API_V1}/player/state`)
             if (!r.ok()) return null
@@ -378,13 +350,10 @@ test.describe('player bar', () => {
             return body?.current_song_uuid
         }, { timeout: 10000 }).toBe(songId)
 
-        // Reload the page — queue_sources should be restored server-side
         await page.reload()
 
-        // Player bar should still show (persisted via queue_sources)
-        await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
+        await player.waitForBar()
 
-        // The context link should still have the same song UUID
         const linkAfter = page.locator('a[href*="library?song="]').first()
         const hrefAfter = await linkAfter.getAttribute('href')
         expect(hrefAfter).toContain(`song=${songId}`)
@@ -396,16 +365,13 @@ test.describe('player bar', () => {
     // === Queue drag-reorder ===
 
     test('queue drag preserves shuffle seed (shuffle on, regression test)', async ({ page }) => {
+        const player = new PlayerBar(page)
         await startPlayback(page)
 
-        // Toggle OFF → ON unconditionally: guarantees scheduleSave() fires even when
-        // shuffle was already on (pause/resume path skips scheduleSave, leaving
-        // localStorage stale from a prior session).
-        const shuffleBtn = page.getByTestId('player-shuffle').filter({ visible: true }).first()
-        if (await shuffleBtn.getAttribute('aria-pressed') === 'true') await shuffleBtn.click()  // ensure OFF first
-        await shuffleBtn.click()  // toggle ON → scheduleSave() queued
+        const shuffleBtn = player.shuffle
+        if (await shuffleBtn.getAttribute('aria-pressed') === 'true') await shuffleBtn.click()
+        await shuffleBtn.click()
 
-        // scheduleSave debounces 2s — poll until shuffle_seed appears in localStorage
         const getSeed = () => page.evaluate(() => {
             try {
                 const raw = localStorage.getItem('playerState')
@@ -416,23 +382,17 @@ test.describe('player bar', () => {
         await expect.poll(getSeed, { timeout: 5000, message: 'shuffle_seed should exist when shuffle is on' }).not.toBeNull()
         const seedBefore = await getSeed()
 
-        // Open queue panel
-        const queueToggle = page.getByTestId('player-queue-toggle')
-        await queueToggle.click()
-        await expect(page.getByTestId('player-queue-panel')).toBeVisible({ timeout: 3000 })
+        await player.openQueue()
 
-        // Get queue rows and verify at least 2 exist
-        const rows = page.locator('[data-qi]')
+        const rows = player.queueRows()
         const rowCount = await rows.count()
         expect(rowCount, 'queue should have at least 2 rows to drag').toBeGreaterThanOrEqual(2)
 
-        // Read track name of first row before drag
         const firstRowName = await rows.nth(0).locator('p').first().textContent()
         const secondRowName = await rows.nth(1).locator('p').first().textContent()
         expect(firstRowName?.trim()).not.toBe(secondRowName?.trim())
 
-        // Find drag handle (FaBars span.cursor-grab) in second row and drag it to first position
-        const dragHandle = rows.nth(1).getByTestId('queue-drag-handle')
+        const dragHandle = player.queueDragHandle(rows.nth(1))
         await expect(dragHandle).toBeVisible({ timeout: 3000 })
         const dragSavePromise1 = page.waitForResponse(
             r => r.url().includes('/player/state') && r.request().method() === 'PUT',
@@ -441,7 +401,6 @@ test.describe('player bar', () => {
         await dragHandle.dragTo(rows.nth(0))
         await dragSavePromise1
 
-        // Assert shuffle_seed is unchanged
         const seedAfter = await page.evaluate(() => {
             try {
                 const raw = localStorage.getItem('playerState')
@@ -451,38 +410,31 @@ test.describe('player bar', () => {
         })
         expect(seedAfter, 'shuffle_seed must NOT change after drag (regression test)').toBe(seedBefore)
 
-        // Verify the second song is now at the first position
-        const newFirstRowName = await page.locator('[data-qi]').nth(0).locator('p').first().textContent()
+        const newFirstRowName = await player.queueRows().nth(0).locator('p').first().textContent()
         expect(newFirstRowName?.trim()).toBe(secondRowName?.trim())
     })
 
     test('queue drag reorders song (shuffle off)', async ({ page }) => {
+        const player = new PlayerBar(page)
         await startPlayback(page)
 
-        // Ensure shuffle is OFF
-        const shuffleBtn = page.getByTestId('player-shuffle').filter({ visible: true }).first()
+        const shuffleBtn = player.shuffle
         if (await shuffleBtn.getAttribute('aria-pressed') === 'true') {
             await shuffleBtn.click()
             await expect(shuffleBtn).toHaveAttribute('aria-pressed', 'false')
         }
 
-        // Open queue panel
-        const queueToggle = page.getByTestId('player-queue-toggle')
-        await queueToggle.click()
-        await expect(page.getByTestId('player-queue-panel')).toBeVisible({ timeout: 3000 })
+        await player.openQueue()
 
-        // Get queue rows
-        const rows = page.locator('[data-qi]')
+        const rows = player.queueRows()
         const rowCount = await rows.count()
         expect(rowCount, 'queue should have at least 2 rows to drag').toBeGreaterThanOrEqual(2)
 
-        // Read track names before drag
         const firstRowName = await rows.nth(0).locator('p').first().textContent()
         const secondRowName = await rows.nth(1).locator('p').first().textContent()
         expect(firstRowName?.trim()).not.toBe(secondRowName?.trim())
 
-        // Drag second row to first position
-        const dragHandle = rows.nth(1).getByTestId('queue-drag-handle')
+        const dragHandle = player.queueDragHandle(rows.nth(1))
         await expect(dragHandle).toBeVisible({ timeout: 3000 })
         const dragSavePromise2 = page.waitForResponse(
             r => r.url().includes('/player/state') && r.request().method() === 'PUT',
@@ -491,18 +443,18 @@ test.describe('player bar', () => {
         await dragHandle.dragTo(rows.nth(0))
         await dragSavePromise2
 
-        // Verify second song moved to first position
-        const newFirstRowName = await page.locator('[data-qi]').nth(0).locator('p').first().textContent()
+        const newFirstRowName = await player.queueRows().nth(0).locator('p').first().textContent()
         expect(newFirstRowName?.trim()).toBe(secondRowName?.trim())
 
-        // Verify original first song moved down (or out if was at end)
-        const newSecondRowName = await page.locator('[data-qi]').nth(1).locator('p').first().textContent()
+        const newSecondRowName = await player.queueRows().nth(1).locator('p').first().textContent()
         expect(newSecondRowName?.trim()).toBe(firstRowName?.trim())
     })
 
     // === Regression tests: shuffle seed preservation during queue operations ===
 
     test('shuffle preserved when inserting next song', async ({ page }) => {
+        const lib = new LibraryPage(page)
+        const player = new PlayerBar(page)
         const api = await apiLogin()
         try {
             const libRes = await api.get(`${API_V1}/songs/library`)
@@ -517,13 +469,13 @@ test.describe('player bar', () => {
                 },
             })
 
-            await page.goto(routes.library)
-            await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 10000 })
+            await lib.goto()
+            await player.waitForBar(10000)
 
-            const targetCard = page.getByTestId('song-card').nth(1)
+            const targetCard = lib.songCards.nth(1)
             await expect(targetCard).toBeVisible({ timeout: 5000 })
             await targetCard.hover()
-            await targetCard.getByTestId('song-kebab').click()
+            await lib.kebab(targetCard).click()
             await page.getByRole('button', { name: /play next/i }).click()
 
             await page.waitForResponse(
@@ -540,6 +492,7 @@ test.describe('player bar', () => {
     })
 
     test('shuffle preserved when removing from queue', async ({ page }) => {
+        const player = new PlayerBar(page)
         const api = await apiLogin()
         try {
             const libRes = await api.get(`${API_V1}/songs/library`)
@@ -556,15 +509,14 @@ test.describe('player bar', () => {
             })
 
             await page.goto(routes.library)
-            await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 10000 })
+            await player.waitForBar(10000)
 
-            await page.getByTestId('player-queue-toggle').click()
-            await expect(page.getByTestId('player-queue-panel')).toBeVisible({ timeout: 3000 })
+            await player.openQueue()
 
-            const rows = page.locator('[data-qi]')
+            const rows = player.queueRows()
             await expect.poll(() => rows.count(), { timeout: 5000 }).toBeGreaterThanOrEqual(3)
 
-            const removeBtn = rows.nth(1).getByTestId('queue-remove')
+            const removeBtn = player.queueRemoveBtn(rows.nth(1))
             await expect(removeBtn).toBeVisible({ timeout: 3000 })
             await removeBtn.click()
 
@@ -582,8 +534,8 @@ test.describe('player bar', () => {
     })
 
     test('Queued pill appears on manually inserted song', async ({ page }) => {
-        // Set up a single-song queue via API so "Play next" won't hit the
-        // "Already in queue" guard for every library song.
+        const lib = new LibraryPage(page)
+        const player = new PlayerBar(page)
         const api = await apiLogin()
         const libRes = await api.get(`${API_V1}/songs/library`)
         const songs = (await libRes.json()) as { uuid: string }[]
@@ -593,23 +545,20 @@ test.describe('player bar', () => {
         })
         await api.dispose()
 
-        await page.goto(routes.library)
-        await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 10000 })
+        await lib.goto()
+        await player.waitForBar(10000)
 
-        // "Play next" on second song — it's not in the single-song queue
-        const targetCard = page.getByTestId('song-card').nth(1)
+        const targetCard = lib.songCards.nth(1)
         await expect(targetCard).toBeVisible({ timeout: 5000 })
         await targetCard.hover()
         await page.waitForTimeout(200)
-        const kebab = targetCard.getByTestId('song-kebab')
+        const kebab = lib.kebab(targetCard)
         await expect(kebab).toBeVisible({ timeout: 3000 })
         await kebab.click()
         await page.getByRole('button', { name: /play next/i }).click()
         await page.waitForTimeout(1500)
 
-        // Open queue panel — inserted song should show "Queued" pill
-        await page.getByTestId('player-queue-toggle').click()
-        await expect(page.getByTestId('player-queue-panel')).toBeVisible({ timeout: 3000 })
-        await expect(page.locator('[data-qi]').locator('span', { hasText: 'Queued' }).first()).toBeVisible({ timeout: 3000 })
+        await player.openQueue()
+        await expect(player.queueRows().locator('span', { hasText: 'Queued' }).first()).toBeVisible({ timeout: 3000 })
     })
 })

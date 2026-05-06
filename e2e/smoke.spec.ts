@@ -1,9 +1,8 @@
 import { routes } from './routes'
 import { test, expect } from '@playwright/test'
 import { login, ignoreError } from './helpers'
+import { LibraryPage, PlayerBar, CommonPage } from './pages'
 
-// Smoke / regression: the absolute critical path. If any of these fail,
-// nothing else matters. Kept tight so it runs fast and gives a clear signal.
 test.describe('smoke: login → library → play', () => {
     test.describe.configure({ mode: 'serial' })
 
@@ -12,26 +11,23 @@ test.describe('smoke: login → library → play', () => {
         page.on('console', m => { if (m.type() === 'error' && !ignoreError(m.text())) errors.push(m.text()) })
         page.on('pageerror', err => { if (!ignoreError(err.message)) errors.push(err.message) })
 
-        // login redirects to /download
+        const lib = new LibraryPage(page)
+        const player = new PlayerBar(page)
+        const common = new CommonPage(page)
+
         await login(page)
 
-        // navigate to library — at least one song card must render
-        await page.goto(routes.library)
-        const card = page.getByTestId('song-card').first()
-        await expect(card).toBeVisible({ timeout: 10000 })
+        await lib.goto()
+        await lib.waitForSongs()
 
-        // start playback by clicking the card
-        await card.click()
-        await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
-        await expect(page.getByTestId('player-track-name').first()).not.toBeEmpty({ timeout: 5000 })
+        await lib.songCards.first().click()
+        await player.waitForBar()
+        await player.waitForTrackName()
 
-        // pause and resume to confirm playback toggles work end-to-end
-        const playPause = page.getByTestId('player-play-pause')
-        await playPause.click()
-        await playPause.click()
+        await player.playPause.click()
+        await player.playPause.click()
 
-        // logout returns to root
-        await page.getByRole('button', { name: 'Log out' }).click()
+        await common.logoutBtn.click()
         await expect(page).toHaveURL('/')
 
         expect(errors, `Console errors: ${errors.join('\n')}`).toHaveLength(0)

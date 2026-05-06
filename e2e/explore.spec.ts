@@ -1,6 +1,7 @@
 import { routes, exploreQuery } from './routes'
 import { test, expect, Page } from '@playwright/test'
 import { USERNAME, PASSWORD, login, ignoreError } from './helpers'
+import { PlayerBar } from './pages'
 
 
 test.describe('explore page', () => {
@@ -43,7 +44,6 @@ test.describe('explore page', () => {
 
     test('sort dropdown contains: most played, most downloaded, most saved', async ({ page }) => {
         await page.goto(routes.explore)
-        // Sort was redesigned from buttons to a <select> dropdown.
         const sort = page.getByRole('combobox')
         await expect(sort).toBeVisible({ timeout: 5000 })
         const opts = sort.locator('option')
@@ -66,7 +66,6 @@ test.describe('explore page', () => {
 
     test('"recently played" sort updates URL', async ({ page }) => {
         await page.goto(routes.explore)
-        // Recently played only appears when viewFilter === 'you'
         await page.getByRole('button', { name: 'you', exact: true }).click()
         await page.getByRole('combobox').selectOption('recently_played')
         await expect(page).toHaveURL(/sort=recently_played/)
@@ -74,7 +73,6 @@ test.describe('explore page', () => {
 
     test('search input is visible', async ({ page }) => {
         await page.goto(routes.explore)
-        // Placeholder was simplified to just "search…" when toolbar was redesigned.
         await expect(page.locator('main').first().getByPlaceholder(/search/i)).toBeVisible({ timeout: 5000 })
     })
 
@@ -111,13 +109,14 @@ test.describe('explore page', () => {
         const errors: string[] = []
         page.on('pageerror', err => { if (!ignoreError(err.message)) errors.push(err.message) })
 
+        const player = new PlayerBar(page)
         await page.goto(exploreQuery('window=all&sort=plays'))
         await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {})
 
         const cards = page.getByTestId('song-card')
         if (await cards.count() > 0) {
             await cards.first().click()
-            await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
+            await player.waitForBar()
         }
         expect(errors).toHaveLength(0)
     })
@@ -140,8 +139,6 @@ test.describe('explore page', () => {
         const cards = page.getByTestId('song-card')
         const cardCount = await cards.count()
         test.skip(cardCount === 0, 'no recently-added cards present')
-        // Format: "added Xs ago", "Xm ago", "Xh ago", "Xd ago", "Xmo ago",
-        // "Xy ago", or "added just now".
         const re = /(\d+)(s|m|h|d|mo|y) ago|just now/i
         const html = await page.locator('main').first().innerText()
         expect(html, `expected relative-time text in explore page: ${html}`).toMatch(re)
@@ -149,7 +146,6 @@ test.describe('explore page', () => {
 
     test('"recently played" sort renders relative ago labels (you view)', async ({ page }) => {
         await page.goto(routes.explore)
-        // Recently played requires "you" view filter.
         await page.getByRole('button', { name: 'you', exact: true }).click()
         await page.getByRole('combobox').selectOption('recently_played')
         await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {})
@@ -164,7 +160,7 @@ test.describe('explore page', () => {
     // === Tier 2 per-song deep-linking (explore context) ===
 
     test('explore: player link includes ?window=...&sort=...&song=<uuid>', async ({ page }) => {
-        // Navigate to explore with specific window and sort params
+        const player = new PlayerBar(page)
         await page.goto(exploreQuery('window=all&sort=plays'))
         await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {})
 
@@ -173,17 +169,13 @@ test.describe('explore page', () => {
             test.skip()
         }
 
-        // data-song-id is on the wrapper div around each Song, not on the card.
         const songId = await page.locator('[data-song-id]').first().getAttribute('data-song-id')
         expect(songId).toBeTruthy()
 
         await cards.first().click()
-        const playerBar = page.getByTestId('player-bar')
-        await expect(playerBar).toBeVisible({ timeout: 5000 })
+        await player.waitForBar()
 
-        // Scope to the player bar; otherwise `a[href*="explore"]` matches
-        // the navbar's plain /explore link first (no song= param).
-        const link = playerBar.locator('a[href*="explore"]').first()
+        const link = player.bar.locator('a[href*="explore"]').first()
         const href = await link.getAttribute('href')
         expect(href).toContain('window=all')
         expect(href).toContain('sort=plays')
@@ -196,21 +188,16 @@ test.describe('explore page', () => {
         await page.goto(routes.explore)
         await expect(page.locator('main').first()).toBeVisible({ timeout: 10000 })
 
-        // Click the "you" filter button
         const youBtn = page.getByRole('button', { name: 'you', exact: true })
         await expect(youBtn).toBeVisible({ timeout: 5000 })
         await youBtn.click()
 
-        // Assert URL contains view=you
         await expect(page).toHaveURL(/view=you/, { timeout: 5000 })
 
-        // Verify the "you" button has active class
         await expect(youBtn).toHaveClass(/bg-sky-500|text-sky-500|bg-white/)
 
-        // Reload page
         await page.reload()
 
-        // Verify "you" filter is still active and URL still has view=you
         await expect(page).toHaveURL(/view=you/)
         await expect(youBtn).toHaveClass(/bg-sky-500|text-sky-500|bg-white/)
     })

@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { login, USERNAME, PASSWORD, API_BASE, ignoreError } from '../e2e/helpers'
+import { LibraryPage, PlayerBar } from '../e2e/pages'
 
 test.describe('Offline Behavior', () => {
   test('login then go offline → /library still loads (cached shell)', async ({ page }) => {
@@ -7,13 +8,10 @@ test.describe('Offline Behavior', () => {
     await page.goto('/library')
     await expect(page).toHaveURL(/\/library/)
 
-    // Go offline
     await page.context().setOffline(true)
 
-    // Reload while offline
     await page.reload()
 
-    // Should still see library cached shell (header, nav, etc.)
     await expect(page).toHaveURL(/\/library/)
     await expect(page.locator('text=/library|saved|playlist/i').first()).toBeVisible({ timeout: 5000 })
   })
@@ -22,81 +20,55 @@ test.describe('Offline Behavior', () => {
     await login(page)
     await page.goto('/library')
 
-    // Go offline
     await page.context().setOffline(true)
 
-    // Try to navigate to a route that likely wasn't pre-cached
     await page.goto('/nonexistent-route-12345', { waitUntil: 'domcontentloaded' })
 
-    // SW serves /offline content for the failed navigation; URL doesn't change
-    // Assert /offline page content instead (characteristic text from offline/page.tsx)
     await expect(page.locator('text=/songs saved for offline will still play/i')).toBeVisible()
   })
 
   test("OfflineGuard on /import shows offline state", async ({ page }) => {
     await login(page)
-    // Load /import while online to ensure it’s cached
     await page.goto("/import")
     await expect(page).toHaveURL(/\/import/)
     await page.waitForLoadState("networkidle")
 
-    // Go offline and reload page
-    // The OfflineGuard component (in layout.tsx) should detect offline state via useOnline() hook
-    // and render with text: "you’re offline" (with curly apostrophe U+2019) + feature text
     await page.context().setOffline(true)
     await page.reload()
-    await page.waitForTimeout(1000) // Allow offline event to propagate
+    await page.waitForTimeout(1000)
 
-    // OfflineGuard renders: "you’re offline" + "{feature} needs internet..." + "go to library" link
-    // The apostrophe in the component is the right single quotation mark (U+2019)
-    // Playwright’s text locator does substring matching, so we can match the exact text with the Unicode character
     const rightSingleQuote = "’"
     const offlineText = `you${rightSingleQuote}re offline`
 
-    // Try to find the OfflineGuard text; if not found, page may not have offline detection properly set up
-    // (but the component code is correct, so this is a test environment limitation)
     try {
       await page.locator(`text=${offlineText}`).waitFor({ timeout: 2000 })
       await expect(page.locator(`text=${offlineText}`)).toBeVisible()
     } catch {
-      // Offline detection may not work perfectly in test environment
-      // Fallback: just verify the page is still at /import and accessible
       await expect(page).toHaveURL(/\/import/)
     }
   })
 
-  // Core offline UX: save song offline → reload (clears in-flight player
-  // state effects) → click song → audio.src is a blob: URL (sourced from
-  // OPFS) → go offline → still plays. cacheSong (app/lib/offline.ts) writes
-  // to OPFS; loadSong (player.tsx) swaps audio.src to a blob: URL when
-  // getSongFile finds the cached file.
-  //
-  // The reload between save and click is necessary because Chromium
-  // serializes concurrent navigator.storage.getDirectory() calls — without
-  // the reload, the mount-effect getSongFile (player.tsx ~line 779) is
-  // still in flight when our click triggers a second getSongFile, and the
-  // second call gets a stale empty dir view. Reloading drops the in-flight
-  // chain, and on the fresh mount OPFS already has the file.
   test('saved-offline song plays after going offline', async ({ page, context }) => {
     test.setTimeout(60000)
 
-    await login(page)
-    await page.goto('/library')
+    const lib = new LibraryPage(page)
+    const player = new PlayerBar(page)
 
-    const card = page.getByTestId('song-card').first()
-    await expect(card).toBeVisible({ timeout: 10000 })
+    await login(page)
+    await lib.goto()
+    await lib.waitForSongs()
+
     const songId = await page.locator('[data-song-id]').first().getAttribute('data-song-id')
     expect(songId).toBeTruthy()
 
-    // Save the song offline via kebab → "Save offline".
+    const card = lib.songCards.first()
     await card.hover()
-    await card.getByTestId('song-kebab').click()
+    await lib.kebab(card).click()
     await page.getByRole('button', { name: /save offline/i }).click()
     await expect(
       page.getByRole('button', { name: /remove offline copy/i })
     ).toBeVisible({ timeout: 30000 })
 
-    // Verify OPFS write succeeded.
     const opfsHasFile = await page.evaluate(async (id) => {
       const root = await navigator.storage.getDirectory()
       try {
@@ -108,16 +80,11 @@ test.describe('Offline Behavior', () => {
     }, songId)
     expect(opfsHasFile).toBeGreaterThan(0)
 
-    // Reload — clears any in-flight mount-effect OPFS chains. On the fresh
-    // mount, the player will check getSongFile against an OPFS that already
-    // has the file, no concurrent writes racing.
     await page.reload()
-    await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
+    await lib.waitForSongs()
 
-    // Click the song to play it. After this, audio.src should be a blob:
-    // URL because the saved-offline song is served from OPFS.
     await page.locator(`[data-song-id="${songId}"]`).first().click()
-    await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
+    await player.waitForBar()
 
     await expect.poll(
       () => page.locator('audio').first().evaluate((el: HTMLAudioElement) => el.src),
@@ -129,7 +96,6 @@ test.describe('Offline Behavior', () => {
       { timeout: 5000 }
     ).toBeGreaterThanOrEqual(2)
 
-    // Go offline — src stays blob:, audio remains playable from OPFS.
     await context.setOffline(true)
     await page.evaluate(() => window.dispatchEvent(new Event('offline')))
 
@@ -143,19 +109,19 @@ test.describe('Offline Behavior', () => {
   })
 
   test.fixme('kebab menu actions are disabled when offline (Download, Play next, Edit)', async ({ page }) => {
+    const lib = new LibraryPage(page)
     await login(page)
-    await page.goto('/library')
-    // Wait for library to render (and SW to cache shell) before going offline.
-    await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
+    await lib.goto()
+    await lib.waitForSongs()
     await page.waitForLoadState('networkidle')
 
     await page.context().setOffline(true)
     await page.evaluate(() => window.dispatchEvent(new Event('offline')))
 
-    const card = page.getByTestId('song-card').first()
+    const card = lib.songCards.first()
     await card.hover()
-    await card.getByTestId('song-kebab').click()
-    const menu = page.getByTestId('song-kebab-menu')
+    await lib.kebab(card).click()
+    const menu = lib.kebabMenu()
     await expect(menu).toBeVisible({ timeout: 3000 })
 
     await expect(menu.getByRole('button', { name: 'Download' })).toBeDisabled()

@@ -1,6 +1,7 @@
 import { routes } from './routes'
 import { test, expect, Page } from '@playwright/test'
 import { USERNAME, PASSWORD, login, ignoreError } from './helpers'
+import { CommonPage } from './pages'
 
 
 test.describe('info page', () => {
@@ -11,8 +12,8 @@ test.describe('info page', () => {
     })
 
     test('info page accessible via navbar link', async ({ page }) => {
+        const common = new CommonPage(page)
         await page.goto(routes.download)
-        // Navbar may render link in compact + mobile contexts; use first match.
         const infoLink = page.locator('a[href="/info"]').first()
         await expect(infoLink).toBeVisible({ timeout: 5000 })
         await infoLink.click()
@@ -34,7 +35,6 @@ test.describe('info page', () => {
 
     test('each card shows a version string', async ({ page }) => {
         await page.goto(routes.info)
-        // version strings match "vX.Y.Z" or "unknown"
         const versionText = page.locator('text=/v\\d+\\.\\d+|unknown/')
         await expect(versionText.first()).toBeVisible({ timeout: 10000 })
     })
@@ -44,7 +44,6 @@ test.describe('info page', () => {
         const githubLinks = page.locator('a[href*="github.com/cboin1996"]')
         await expect(githubLinks.first()).toBeVisible({ timeout: 10000 })
         const count = await githubLinks.count()
-        // three cards, each with a "file a bug report" link
         expect(count).toBeGreaterThanOrEqual(3)
     })
 
@@ -64,10 +63,10 @@ test.describe('info page', () => {
     })
 
     test('version cards have border styling (rendered)', async ({ page }) => {
+        const common = new CommonPage(page)
         await page.goto(routes.info)
-        const cards = page.getByTestId('version-card')
-        await expect(cards.first()).toBeVisible({ timeout: 5000 })
-        const count = await cards.count()
+        await expect(common.versionCards.first()).toBeVisible({ timeout: 5000 })
+        const count = await common.versionCards.count()
         expect(count).toBeGreaterThanOrEqual(3)
     })
 
