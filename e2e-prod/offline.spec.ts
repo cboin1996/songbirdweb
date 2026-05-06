@@ -115,14 +115,14 @@ test.describe('Offline Behavior', () => {
     await lib.waitForSongs()
     await page.waitForLoadState('networkidle')
 
-    await page.context().setOffline(true)
-    await page.evaluate(() => window.dispatchEvent(new Event('offline')))
-
     const card = lib.songCards.first()
     await card.hover()
     await lib.kebab(card).click()
     const menu = lib.kebabMenu()
     await expect(menu).toBeVisible({ timeout: 3000 })
+
+    await page.context().setOffline(true)
+    await page.evaluate(() => window.dispatchEvent(new Event('offline')))
 
     await expect(menu.getByRole('button', { name: 'Download' })).toBeDisabled()
     await expect(menu.getByRole('button', { name: 'Play next' })).toBeDisabled()
