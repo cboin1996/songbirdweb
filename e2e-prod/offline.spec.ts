@@ -108,7 +108,7 @@ test.describe('Offline Behavior', () => {
     await context.setOffline(false)
   })
 
-  test.fixme('kebab menu actions are disabled when offline (Download, Play next, Edit)', async ({ page }) => {
+  test('kebab menu actions are disabled when offline (Download, Play next, Edit)', async ({ page }) => {
     const lib = new LibraryPage(page)
     await login(page)
     await lib.goto()
