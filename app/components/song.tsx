@@ -77,10 +77,9 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
         if (!song.songId || libraryPending) return
         setLibraryPending(true)
         setLibraryError(false)
-        const ok = inLibrary
-            ? await removeFromLibrary(song.songId)
-            : await addToLibrary(song.songId)
-        if (ok) {
+        try {
+            if (inLibrary) await removeFromLibrary(song.songId)
+            else await addToLibrary(song.songId)
             setInLibrary(prev => !prev)
             queryClient.invalidateQueries({ queryKey: queryKeys.library })
             queryClient.invalidateQueries({ queryKey: queryKeys.librarySongs })
@@ -89,14 +88,14 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
                 onLibraryRemove(song.songId!)
                 if (offlineCached) {
                     uncacheSong(song.songId).catch(() => {})
-                    removeServerOfflineSong(song.songId)
+                    removeServerOfflineSong(song.songId).catch(() => {})
                     setOfflineCached(false)
                     onCacheChange?.(song.songId, false)
                 }
             } else {
                 onLibraryAdd({ uuid: song.songId!, properties: song.properties, artwork_cached: song.artworkCached })
             }
-        } else {
+        } catch {
             setLibraryError(true)
         }
         setLibraryPending(false)
@@ -147,12 +146,12 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
                 await uncacheSong(song.songId)
                 setOfflineCached(false)
                 onCacheChange?.(song.songId, false)
-                removeServerOfflineSong(song.songId)
+                removeServerOfflineSong(song.songId).catch(() => {})
             } else {
                 await cacheSong(song.songId, (pct) => setOfflineProgress(pct))
                 setOfflineCached(true)
                 onCacheChange?.(song.songId, true)
-                addServerOfflineSong(song.songId)
+                addServerOfflineSong(song.songId).catch(() => {})
             }
         } catch {
             // silently fail — user sees no change since state wasn't updated
@@ -162,23 +161,26 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
 
     async function handleShare() {
         if (!song.songId) return
-        const result = await createShareToken(song.songId)
-        if (!result) return
-        // Clipboard can throw in headless / restricted contexts (no permission,
-        // insecure context). Token is still created — surface the success
-        // state so the user sees feedback. They can copy from the share page.
         try {
-            await navigator.clipboard.writeText(`${window.location.origin}/share/${result.token}`)
-        } catch { /* swallow — UI feedback below */ }
-        setCopied(true)
-        setTimeout(() => setCopied(false), 2000)
+            const result = await createShareToken(song.songId)
+            try {
+                await navigator.clipboard.writeText(`${window.location.origin}/share/${result.token}`)
+            } catch { /* clipboard can fail in restricted contexts */ }
+            setCopied(true)
+            setTimeout(() => setCopied(false), 2000)
+        } catch {
+            showToast('failed to create share link', true)
+        }
     }
 
     async function handleDownload() {
         if (!song.songId) return
         setDownloadError(false)
-        const ok = await downloadSongToFile(song.songId, song.properties.trackName, song.properties.artistName)
-        if (!ok) setDownloadError(true)
+        try {
+            await downloadSongToFile(song.songId, song.properties.trackName, song.properties.artistName)
+        } catch {
+            setDownloadError(true)
+        }
     }
 
     function openEditor() {
@@ -269,9 +271,13 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
                                         key={pl.id}
                                         onClick={async () => {
                                             if (!song.songId) return
-                                            const result = await addSongToPlaylist(pl.id, song.songId)
-                                            if (result === 'duplicate') showToast(`cannot add duplicate to playlist '${pl.name}'`, true)
-                                            else if (result) { showToast(`added to ${pl.name}`); onPlaylistAdd?.() }
+                                            try {
+                                                const result = await addSongToPlaylist(pl.id, song.songId)
+                                                if (result === 'duplicate') showToast(`cannot add duplicate to playlist '${pl.name}'`, true)
+                                                else { showToast(`added to ${pl.name}`); onPlaylistAdd?.() }
+                                            } catch {
+                                                showToast('failed to add to playlist', true)
+                                            }
                                             setPlaylistPickerOpen(false)
                                             closeKebab()
                                         }}

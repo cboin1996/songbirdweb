@@ -27,39 +27,41 @@ export default function DownloadViaUrl({ query }: { query: string }) {
     async function startDownload() {
         setStatus('downloading')
         setErrorMsg('')
-        const result = await downloadSongViaUrl(query, true)
-        if (!result || result.song_ids.length === 0) {
-            setStatus('error')
-            setErrorMsg('download failed')
-            return
+        try {
+            const result = await downloadSongViaUrl(query, true)
+            if (!result || result.song_ids.length === 0) {
+                setStatus('error'); setErrorMsg('download failed'); return
+            }
+            setSongId(result.song_ids[0])
+            setProperties(result.properties ?? null)
+            setArtworkCached(result.artwork_cached ?? false)
+            setStatus('ready')
+        } catch {
+            setStatus('error'); setErrorMsg('download failed')
         }
-        setSongId(result.song_ids[0])
-        setProperties(result.properties ?? null)
-        setArtworkCached(result.artwork_cached ?? false)
-        setStatus('ready')
     }
 
     async function handleAddToLibrary() {
         if (!songId) return
         setStatus('saving')
-        const ok = await addToLibrary(songId)
-        if (ok) {
+        try {
+            await addToLibrary(songId)
             if (properties) onLibraryAdd({ uuid: songId, properties, artwork_cached: artworkCached })
             setDoneAction('library'); setStatus('done')
+        } catch {
+            setStatus('error'); setErrorMsg('could not add to library')
         }
-        else { setStatus('error'); setErrorMsg('could not add to library') }
     }
 
     async function handleDownloadToFile() {
         if (!songId) return
         setStatus('saving')
-        const ok = await downloadSongToFile(
-            songId,
-            properties?.trackName ?? songId,
-            properties?.artistName ?? ''
-        )
-        if (ok) { setDoneAction('file'); setStatus('done') }
-        else { setStatus('error'); setErrorMsg('file download failed') }
+        try {
+            await downloadSongToFile(songId, properties?.trackName ?? songId, properties?.artistName ?? '')
+            setDoneAction('file'); setStatus('done')
+        } catch {
+            setStatus('error'); setErrorMsg('file download failed')
+        }
     }
 
     if (!query) return <p className="text-sm text-gray-400">no url provided</p>

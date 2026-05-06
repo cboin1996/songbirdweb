@@ -61,14 +61,14 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
     async function handleAddToLibrary() {
         if (!readySong?.songId) return
         setStatus('saving')
-        const ok = await addToLibrary(readySong.songId)
-        if (ok) {
+        try {
+            await addToLibrary(readySong.songId)
             queryClient.setQueryData<LibraryEntry[]>(queryKeys.library, prev =>
                 [...(prev ?? []), { song_id: readySong.songId!, added_at: new Date().toISOString(), last_position: 0, last_played_at: null }]
             )
             onLibraryAdd({ uuid: readySong.songId!, properties: readySong.properties })
             dismiss()
-        } else {
+        } catch {
             setStatus('error')
             setErrorMsg('could not add to library')
         }
@@ -77,9 +77,12 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
     async function handleDeviceDownload() {
         if (!readySong?.songId) return
         setStatus('saving')
-        const ok = await downloadSongToFile(readySong.songId, readySong.properties.trackName, readySong.properties.artistName)
-        if (ok) dismiss()
-        else { setStatus('error'); setErrorMsg('file download failed') }
+        try {
+            await downloadSongToFile(readySong.songId, readySong.properties.trackName, readySong.properties.artistName)
+            dismiss()
+        } catch {
+            setStatus('error'); setErrorMsg('file download failed')
+        }
     }
 
     async function handleSongDownload(e: React.FormEvent) {
@@ -88,24 +91,28 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
         if (!song || !text.trim()) return
         setStatus('downloading')
         setErrorMsg('')
-        const result = await downloadSongViaUrl(text)
-        if (!result || result.song_ids.length === 0) {
-            setStatus('error'); setErrorMsg('download failed'); return
-        }
-        const songId = result.song_ids[0]
-        if (result.cached) {
-            const existing = songs.find(s => s.songId === songId) ?? { ...song, songId }
-            setReadySong(existing)
+        try {
+            const result = await downloadSongViaUrl(text)
+            if (!result || result.song_ids.length === 0) {
+                setStatus('error'); setErrorMsg('download failed'); return
+            }
+            const songId = result.song_ids[0]
+            if (result.cached) {
+                const existing = songs.find(s => s.songId === songId) ?? { ...song, songId }
+                setReadySong(existing)
+                setStatus('ready')
+                return
+            }
+            setStatus('tagging')
+            const tagged = await tagSong(songId, song.properties)
+            if (!tagged) { setStatus('error'); setErrorMsg('tagging failed'); return }
+            const updated = { ...song, songId }
+            setSongs(prev => prev.map((s, i) => i === activeIndex ? updated : s))
+            setReadySong(updated)
             setStatus('ready')
-            return
+        } catch {
+            setStatus('error'); setErrorMsg('download failed')
         }
-        setStatus('tagging')
-        const tagged = await tagSong(songId, song.properties)
-        if (!tagged) { setStatus('error'); setErrorMsg('tagging failed'); return }
-        const updated = { ...song, songId }
-        setSongs(prev => prev.map((s, i) => i === activeIndex ? updated : s))
-        setReadySong(updated)
-        setStatus('ready')
     }
 
     function renderSection(sectionSongs: DownloadedSong[], label: string) {

@@ -34,19 +34,25 @@ export default function UserTable({ initialUsers, perUser }: Props) {
     function handleSearchChange(v: string) { setSearch(v); setUserPage(0) }
 
     async function handleToggleActive(user: UserInfo) {
-        const updated = await updateUser(user.id, { is_active: !user.is_active })
-        if (updated) setUsers(prev => prev.map(u => u.id === user.id ? updated : u))
+        try {
+            const updated = await updateUser(user.id, { is_active: !user.is_active })
+            setUsers(prev => prev.map(u => u.id === user.id ? updated : u))
+        } catch {}
     }
 
     async function handleToggleRole(user: UserInfo) {
         const newRole = user.role === 'admin' ? 'user' : 'admin'
-        const updated = await updateUser(user.id, { role: newRole })
-        if (updated) setUsers(prev => prev.map(u => u.id === user.id ? updated : u))
+        try {
+            const updated = await updateUser(user.id, { role: newRole })
+            setUsers(prev => prev.map(u => u.id === user.id ? updated : u))
+        } catch {}
     }
 
     async function handleDelete(user: UserInfo) {
-        const ok = await deleteUser(user.id)
-        if (ok) setUsers(prev => prev.filter(u => u.id !== user.id))
+        try {
+            await deleteUser(user.id)
+            setUsers(prev => prev.filter(u => u.id !== user.id))
+        } catch {}
     }
 
     async function handleInvite(e: React.FormEvent) {
@@ -56,16 +62,16 @@ export default function UserTable({ initialUsers, perUser }: Props) {
             setInviteError('passwords do not match')
             return
         }
-        const user = await registerUser(username, email, password)
-        if (!user) {
+        try {
+            const user = await registerUser(username, email, password)
+            setUsers(prev => [...prev, user])
+            setUsername('')
+            setEmail('')
+            setPassword('')
+            setConfirmPassword('')
+        } catch {
             setInviteError('invite failed — username or email may already exist')
-            return
         }
-        setUsers(prev => [...prev, user])
-        setUsername('')
-        setEmail('')
-        setPassword('')
-        setConfirmPassword('')
     }
 
     return (

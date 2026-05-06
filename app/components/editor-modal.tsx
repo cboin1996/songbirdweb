@@ -1896,7 +1896,7 @@ export default function EditorModal({
     setRestoring(true)
     await Promise.all([removeFromLibrary(activeSongId), deleteEditDraft(activeSongIdRef.current)])
     uncacheSong(activeSongId).catch(() => {})
-    removeServerOfflineSong(activeSongId)
+    removeServerOfflineSong(activeSongId).catch(() => {})
     await addToLibrary(restoredId)
     setRestoring(false)
     router.refresh()
@@ -1910,7 +1910,7 @@ export default function EditorModal({
     setRestoring(true)
     await removeFromLibrary(activeSongId)
     uncacheSong(activeSongId).catch(() => {})
-    removeServerOfflineSong(activeSongId)
+    removeServerOfflineSong(activeSongId).catch(() => {})
     await addToLibrary(parentSongId)
     setRestoring(false)
     router.refresh()
@@ -2767,16 +2767,15 @@ export default function EditorModal({
                     e.target.value = ''
                     if (!file || !songId) return
                     setArtworkUploadStatus('uploading')
-                    const ok = await uploadSongArtwork(songId, file)
-                    if (ok) {
+                    try {
+                      await uploadSongArtwork(songId, file)
                       setArtworkUploadStatus('done')
                       setProps(p => ({ ...p, artworkUrl100: `${API_V1}/songs/${songId}/artwork` }))
                       setArtworkPreviewError(false)
-                      setTimeout(() => setArtworkUploadStatus('idle'), 3000)
-                    } else {
+                    } catch {
                       setArtworkUploadStatus('error')
-                      setTimeout(() => setArtworkUploadStatus('idle'), 3000)
                     }
+                    setTimeout(() => setArtworkUploadStatus('idle'), 3000)
                   }}
                 />
               </div>

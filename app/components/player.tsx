@@ -360,7 +360,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     }
 
     const savePosition = useCallback((song: PlayableSong, time: number) => {
-        updatePosition(song.uuid, time)
+        updatePosition(song.uuid, time).catch(() => {})
     }, [])
 
     async function loadSong(song: PlayableSong, fromStart = false) {
@@ -440,7 +440,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             setShuffleOrder([...order])
         }
         scheduleSave()
-        queueInsert(song.uuid, insertAt, song.source ?? undefined)
+        queueInsert(song.uuid, insertAt, song.source ?? undefined).catch(() => {})
         const afterName = queueRef.current[queueIndexRef.current]?.properties?.trackName
         showToast(afterName ? `Playing after ${afterName}` : 'Added to queue')
     }
@@ -465,7 +465,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             setShuffleOrder([...order])
         }
         scheduleSave()
-        if (songId) queueRemove(songId)
+        if (songId) queueRemove(songId).catch(() => {})
     }
 
     // fromDpos / toDpos are *display positions* — i.e. positions in the queue panel as the
@@ -486,7 +486,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             }
             setShuffleOrder([...order])
             scheduleSave()
-            apiQueueReorder(fromDpos, toDpos)
+            apiQueueReorder(fromDpos, toDpos).catch(() => {})
             return
         }
         const q = [...queueRef.current]
@@ -524,7 +524,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 setShuffleOrder([...order])
             }
             scheduleSave()
-            queueInsert(song.uuid, insertAt)
+            queueInsert(song.uuid, insertAt).catch(() => {})
         } else {
             const trackName = song.properties?.trackName?.toLowerCase() ?? ''
             const currentIdx = queueIndexRef.current
@@ -537,7 +537,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             queueRef.current = q
             setQueue([...q])
             scheduleSave()
-            queueInsert(song.uuid, insertAt)
+            queueInsert(song.uuid, insertAt).catch(() => {})
         }
     }
 
@@ -700,7 +700,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 queue_sources: sources,
             }
             try { localStorage.setItem('playerState', JSON.stringify({ ...state, saved_at: new Date().toISOString() })) } catch {}
-            savePlayerState(state)
+            savePlayerState(state).catch(() => {})
         }, 2000)
     }
 
@@ -848,7 +848,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             if (audioRef.current && current) savePosition(current, audioRef.current.currentTime)
         }, 10000)
         const playTimer = setTimeout(() => {
-            if (current) recordPlay(current.uuid)
+            if (current) recordPlay(current.uuid).catch(() => {})
         }, 30000)
         return () => {
             clearInterval(posTimer)

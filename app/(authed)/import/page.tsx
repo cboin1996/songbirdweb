@@ -40,17 +40,15 @@ export default function ImportPage() {
         tableRef.current?.addJob(optimistic)
         try {
           const job = await startImport(file, isAdmin && asOriginal)
-          if (job) {
-            tableRef.current?.addJob(job, tempId)
-          } else {
-            tableRef.current?.addJob({
-              job_id: tempId,
-              status: 'failed',
-              filename: file.name,
-              error: 'upload rejected (422)',
-              created_at: new Date().toISOString(),
-            }, tempId)
-          }
+          tableRef.current?.addJob(job, tempId)
+        } catch {
+          tableRef.current?.addJob({
+            job_id: tempId,
+            status: 'failed',
+            filename: file.name,
+            error: 'upload failed',
+            created_at: new Date().toISOString(),
+          }, tempId)
         } finally {
           setPendingUploads(p => p - 1)
         }

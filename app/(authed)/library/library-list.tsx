@@ -249,11 +249,13 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
 
     async function handlePublishConfirm(ids: string[]) {
         setPublishing(true)
-        await publishSongs(ids)
+        try {
+            await publishSongs(ids)
+            setPublishModalOpen(false)
+            await queryClient.invalidateQueries({ queryKey: queryKeys.librarySongs })
+            queryClient.invalidateQueries({ queryKey: queryKeys.eligibleSongs })
+        } catch {}
         setPublishing(false)
-        setPublishModalOpen(false)
-        await queryClient.invalidateQueries({ queryKey: queryKeys.librarySongs })
-        queryClient.invalidateQueries({ queryKey: queryKeys.eligibleSongs })
     }
 
     async function cacheSongsById(songList: LibrarySong[]) {
@@ -264,7 +266,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
             try {
                 await cacheSong(song.uuid)
                 setCachedIds(prev => new Set([...prev, song.uuid]))
-                addServerOfflineSong(song.uuid)
+                addServerOfflineSong(song.uuid).catch(() => {})
                 if (song.properties) {
                     const artUrls = [
                         artworkUrl(song.properties.artworkUrl100, 400),
@@ -734,12 +736,12 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     async function handleBulkRemoveFromLibrary() {
         setBulkLoading(true)
         const ids = [...selectedIds]
-        await bulkRemoveFromLibrary(ids)
+        try { await bulkRemoveFromLibrary(ids) } catch { setBulkLoading(false); return }
         for (const id of ids) {
             onLibraryRemove(id)
             if (cachedIds.has(id)) {
                 try { await uncacheSong(id) } catch {}
-                removeServerOfflineSong(id)
+                removeServerOfflineSong(id).catch(() => {})
             }
         }
         setCachedIds(prev => { const next = new Set(prev); ids.forEach(id => next.delete(id)); return next })
@@ -758,7 +760,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                 try {
                     await cacheSong(id)
                     setCachedIds(prev => new Set([...prev, id]))
-                    addServerOfflineSong(id)
+                    addServerOfflineSong(id).catch(() => {})
                 } catch {}
             }
         }
@@ -771,7 +773,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         for (const id of selectedIds) {
             const song = songs.find(s => s.uuid === id)
             if (song?.properties) {
-                await downloadSongToFile(id, song.properties.trackName, song.properties.artistName)
+                try { await downloadSongToFile(id, song.properties.trackName, song.properties.artistName) } catch {}
             }
         }
         exitSelectMode()
@@ -784,7 +786,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
             if (cachedIds.has(id)) {
                 try { await uncacheSong(id) } catch {}
                 setCachedIds(prev => { const next = new Set(prev); next.delete(id); return next })
-                removeServerOfflineSong(id)
+                removeServerOfflineSong(id).catch(() => {})
             }
         }
         exitSelectMode()
@@ -794,8 +796,10 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     async function bulkAddToPlaylist(playlistId: string) {
         setBulkLoading(true)
         setBulkPlaylistPicking(false)
-        await bulkAddSongsToPlaylist(playlistId, [...selectedIds])
-        await refreshPlaylists()
+        try {
+            await bulkAddSongsToPlaylist(playlistId, [...selectedIds])
+            await refreshPlaylists()
+        } catch {}
         exitSelectMode()
         setBulkLoading(false)
     }

@@ -23,6 +23,7 @@ enum ResponseTypes {
   json,
   bytes,
   blob,
+  none,
 }
 
 const SKIP_REFRESH_URLS = new Set([
@@ -77,24 +78,40 @@ async function fetchData<T>(args: {
   url: string;
   method: string;
   body?: any;
+  rawBody?: BodyInit;
   responseType?: ResponseTypes;
   silentStatuses?: number[];
 }): Promise<T | undefined> {
   const responseType = args.responseType ?? ResponseTypes.json;
-  const options = await buildFetchOptions(args.method, args.body);
+  let options: RequestInit;
+  if (args.rawBody) {
+    const isServer = typeof window === 'undefined';
+    options = { method: args.method, body: args.rawBody };
+    if (!isServer) options.credentials = 'include';
+  } else {
+    options = await buildFetchOptions(args.method, args.body);
+  }
   const response = await fetch(args.url, options);
   if (!response.ok) {
     const silent = args.silentStatuses ?? []
     if (response.status === 401 && typeof window !== 'undefined' && !SKIP_REFRESH_URLS.has(args.url)) {
       const refreshed = await tryRefresh()
       if (refreshed) {
-        const retryOptions = await buildFetchOptions(args.method, args.body)
+        let retryOptions: RequestInit;
+        if (args.rawBody) {
+          retryOptions = { method: args.method, body: args.rawBody };
+          retryOptions.credentials = 'include';
+        } else {
+          retryOptions = await buildFetchOptions(args.method, args.body)
+        }
         const retryResponse = await fetch(args.url, retryOptions)
         if (retryResponse.ok) {
           if (responseType === ResponseTypes.json) return await retryResponse.json() as T;
           if (responseType === ResponseTypes.bytes) return await retryResponse.bytes() as T;
           if (responseType === ResponseTypes.blob) return await retryResponse.blob() as T;
+          return undefined;
         }
+        throw new FetchError(`${retryResponse.status} ${args.method} ${args.url}`, retryResponse.status)
       }
       redirectToLogin()
       return undefined;
@@ -260,35 +277,19 @@ export async function fetchExplore(window: ExploreWindow = 'week'): Promise<Expl
 }
 
 export async function recordPlay(songId: string): Promise<void> {
-  try {
-    const options = await buildFetchOptions('POST')
-    await fetch(`${API_V1}/songs/${songId}/play`, options)
-  } catch {}
+  await fetchData({ url: `${API_V1}/songs/${songId}/play`, method: 'POST', responseType: ResponseTypes.none })
 }
 
-export async function addToLibrary(songId: string): Promise<boolean> {
-  const result = await fetchData<LibraryEntry>({ url: `${API_V1}/library/${songId}`, method: 'POST' })
-  return result !== undefined
+export async function addToLibrary(songId: string): Promise<void> {
+  await fetchData<LibraryEntry>({ url: `${API_V1}/library/${songId}`, method: 'POST' })
 }
 
-export async function removeFromLibrary(songId: string): Promise<boolean> {
-  try {
-    const options = await buildFetchOptions('DELETE')
-    const response = await fetch(`${API_V1}/library/${songId}`, options)
-    return response.ok
-  } catch {
-    return false
-  }
+export async function removeFromLibrary(songId: string): Promise<void> {
+  await fetchData({ url: `${API_V1}/library/${songId}`, method: 'DELETE', responseType: ResponseTypes.none })
 }
 
-export async function bulkRemoveFromLibrary(songIds: string[]): Promise<boolean> {
-  try {
-    const options = await buildFetchOptions('DELETE', { song_ids: songIds })
-    const response = await fetch(`${API_V1}/library/bulk`, options)
-    return response.ok
-  } catch {
-    return false
-  }
+export async function bulkRemoveFromLibrary(songIds: string[]): Promise<void> {
+  await fetchData({ url: `${API_V1}/library/bulk`, method: 'DELETE', body: { song_ids: songIds }, responseType: ResponseTypes.none })
 }
 
 export interface DownloadedSong {
@@ -401,9 +402,9 @@ export async function fetchSong(id: string): Promise<Blob | undefined> {
   });
 }
 
-export async function downloadSongToFile(songId: string, trackName: string, artistName: string): Promise<boolean> {
+export async function downloadSongToFile(songId: string, trackName: string, artistName: string): Promise<void> {
   const blob = await fetchSong(songId)
-  if (!blob) return false
+  if (!blob) throw new FetchError('failed to fetch song file')
   const url = window.URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
@@ -412,7 +413,6 @@ export async function downloadSongToFile(songId: string, trackName: string, arti
   link.click()
   document.body.removeChild(link)
   window.URL.revokeObjectURL(url)
-  return true
 }
 
 export async function fetchPropertiesFromItunes(
@@ -479,18 +479,14 @@ export async function fetchUsers(): Promise<UserInfo[]> {
   return await fetchData<UserInfo[]>({ url: `${API_V1}/admin/users`, method: 'GET' }) ?? []
 }
 
-export async function updateUser(id: string, body: { role?: string; is_active?: boolean }): Promise<UserInfo | undefined> {
-  return fetchData<UserInfo>({ url: `${API_V1}/admin/users/${id}`, method: 'PATCH', body })
+export async function updateUser(id: string, body: { role?: string; is_active?: boolean }): Promise<UserInfo> {
+  const result = await fetchData<UserInfo>({ url: `${API_V1}/admin/users/${id}`, method: 'PATCH', body })
+  if (!result) throw new FetchError('failed to update user')
+  return result
 }
 
-export async function deleteUser(id: string): Promise<boolean> {
-  try {
-    const options = await buildFetchOptions('DELETE')
-    const response = await fetch(`${API_V1}/admin/users/${id}`, options)
-    return response.ok
-  } catch {
-    return false
-  }
+export async function deleteUser(id: string): Promise<void> {
+  await fetchData({ url: `${API_V1}/admin/users/${id}`, method: 'DELETE', responseType: ResponseTypes.none })
 }
 
 export interface EditJobSummary {
@@ -597,45 +593,29 @@ export async function fetchPlayerState(): Promise<PlayerState | undefined> {
 }
 
 export async function savePlayerState(state: PlayerState): Promise<void> {
-  try {
-    const options = await buildFetchOptions('PUT', state)
-    await fetch(`${API_V1}/player/state`, options)
-  } catch {}
+  await fetchData({ url: `${API_V1}/player/state`, method: 'PUT', body: state, responseType: ResponseTypes.none })
 }
 
 export async function queueInsert(songId: string, position?: number, source?: { id: string; label: string; href: string }): Promise<void> {
-  try {
-    const options = await buildFetchOptions('POST', { song_id: songId, position: position ?? null, source: source ?? null })
-    await fetch(`${API_V1}/player/queue`, options)
-  } catch {}
+  await fetchData({ url: `${API_V1}/player/queue`, method: 'POST', body: { song_id: songId, position: position ?? null, source: source ?? null }, responseType: ResponseTypes.none })
 }
 
 export async function queueRemove(songId: string): Promise<void> {
-  try {
-    const options = await buildFetchOptions('DELETE')
-    await fetch(`${API_V1}/player/queue/${songId}`, options)
-  } catch {}
+  await fetchData({ url: `${API_V1}/player/queue/${songId}`, method: 'DELETE', responseType: ResponseTypes.none })
 }
 
 export async function queueReorder(fromPosition: number, toPosition: number): Promise<void> {
-  try {
-    const options = await buildFetchOptions('PUT', { from_position: fromPosition, to_position: toPosition })
-    await fetch(`${API_V1}/player/queue/reorder`, options)
-  } catch {}
+  await fetchData({ url: `${API_V1}/player/queue/reorder`, method: 'PUT', body: { from_position: fromPosition, to_position: toPosition }, responseType: ResponseTypes.none })
 }
 
-export async function updatePosition(songId: string, position: number): Promise<boolean> {
-  try {
-    const options = await buildFetchOptions('PATCH', { position })
-    const response = await fetch(`${API_V1}/library/${songId}/position`, options)
-    return response.ok
-  } catch {
-    return false
-  }
+export async function updatePosition(songId: string, position: number): Promise<void> {
+  await fetchData({ url: `${API_V1}/library/${songId}/position`, method: 'PATCH', body: { position }, responseType: ResponseTypes.none })
 }
 
-export async function registerUser(username: string, email: string, password: string): Promise<UserInfo | undefined> {
-  return fetchData<UserInfo>({ url: `${API_V1}/auth/register`, method: 'POST', body: { username, email, password } })
+export async function registerUser(username: string, email: string, password: string): Promise<UserInfo> {
+  const result = await fetchData<UserInfo>({ url: `${API_V1}/auth/register`, method: 'POST', body: { username, email, password } })
+  if (!result) throw new FetchError('failed to register user')
+  return result
 }
 
 export interface VersionInfo {
@@ -659,18 +639,14 @@ export interface ShareInfo {
   properties: Properties | null
 }
 
-export async function createShareToken(songId: string): Promise<ShareToken | undefined> {
-  return fetchData<ShareToken>({ url: `${API_V1}/share/songs/${songId}`, method: 'POST' })
+export async function createShareToken(songId: string): Promise<ShareToken> {
+  const result = await fetchData<ShareToken>({ url: `${API_V1}/share/songs/${songId}`, method: 'POST' })
+  if (!result) throw new FetchError('failed to create share token')
+  return result
 }
 
 export async function fetchShareInfo(token: string): Promise<ShareInfo | undefined> {
-  try {
-    const res = await fetch(`${API_V1}/share/${token}/info`)
-    if (!res.ok) return undefined
-    return res.json()
-  } catch {
-    return undefined
-  }
+  return fetchData<ShareInfo>({ url: `${API_V1}/share/${token}/info`, method: 'GET', silentStatuses: [404] })
 }
 
 export interface ImportJobResult {
@@ -684,17 +660,13 @@ export interface ImportJobResult {
   created_at?: string
 }
 
-export async function startImport(file: File, asOriginal = false): Promise<ImportJobResult | undefined> {
-  try {
-    const formData = new FormData()
-    formData.append('file', file)
-    const url = asOriginal ? `${API_V1}/import?as_original=true` : `${API_V1}/import`
-    const response = await fetch(url, { method: 'POST', body: formData, credentials: 'include' })
-    if (!response.ok) return undefined
-    return response.json()
-  } catch {
-    return undefined
-  }
+export async function startImport(file: File, asOriginal = false): Promise<ImportJobResult> {
+  const formData = new FormData()
+  formData.append('file', file)
+  const url = asOriginal ? `${API_V1}/import?as_original=true` : `${API_V1}/import`
+  const result = await fetchData<ImportJobResult>({ url, method: 'POST', rawBody: formData })
+  if (!result) throw new FetchError('failed to start import')
+  return result
 }
 
 export interface ImportJobsPage {
@@ -708,23 +680,11 @@ export async function listImportJobs(limit = 20, offset = 0): Promise<ImportJobs
 }
 
 export async function pollImportJob(jobId: string): Promise<ImportJobResult | undefined> {
-  try {
-    const response = await fetch(`${API_V1}/import/${jobId}`, { credentials: 'include' })
-    if (!response.ok) return undefined
-    return response.json()
-  } catch {
-    return undefined
-  }
+  return fetchData<ImportJobResult>({ url: `${API_V1}/import/${jobId}`, method: 'GET', silentStatuses: [404] })
 }
 
-export async function changePassword(currentPassword: string, newPassword: string): Promise<boolean> {
-  try {
-    const options = await buildFetchOptions('PATCH', { current_password: currentPassword, new_password: newPassword })
-    const response = await fetch(`${API_V1}/auth/password`, options)
-    return response.ok
-  } catch {
-    return false
-  }
+export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  await fetchData({ url: `${API_V1}/auth/password`, method: 'PATCH', body: { current_password: currentPassword, new_password: newPassword }, responseType: ResponseTypes.none })
 }
 
 export async function tagSong(
@@ -794,19 +754,13 @@ export async function fetchEditDraft(songId: string): Promise<DraftWithMeta | un
 }
 
 export async function saveEditDraft(songId: string, params: EditParams): Promise<void> {
-  try {
-    const options = await buildFetchOptions('PUT', params)
-    await fetch(`${API_V1}/edit/songs/${songId}/draft`, options)
-    window.dispatchEvent(new CustomEvent(EVENTS.draftChanged))
-  } catch {}
+  await fetchData({ url: `${API_V1}/edit/songs/${songId}/draft`, method: 'PUT', body: params, responseType: ResponseTypes.none })
+  window.dispatchEvent(new CustomEvent(EVENTS.draftChanged))
 }
 
 export async function deleteEditDraft(songId: string): Promise<void> {
-  try {
-    const options = await buildFetchOptions('DELETE')
-    await fetch(`${API_V1}/edit/songs/${songId}/draft`, options)
-    window.dispatchEvent(new CustomEvent(EVENTS.draftChanged))
-  } catch {}
+  await fetchData({ url: `${API_V1}/edit/songs/${songId}/draft`, method: 'DELETE', responseType: ResponseTypes.none })
+  window.dispatchEvent(new CustomEvent(EVENTS.draftChanged))
 }
 
 export interface Playlist {
@@ -842,20 +796,20 @@ export async function fetchPlaylists(): Promise<Playlist[]> {
   }
 }
 
-export async function createPlaylist(name: string, icon?: string | null): Promise<Playlist | undefined> {
-  return fetchData<Playlist>({ url: `${API_V1}/playlists`, method: 'POST', body: { name, icon } })
+export async function createPlaylist(name: string, icon?: string | null): Promise<Playlist> {
+  const result = await fetchData<Playlist>({ url: `${API_V1}/playlists`, method: 'POST', body: { name, icon } })
+  if (!result) throw new FetchError('failed to create playlist')
+  return result
 }
 
-export async function renamePlaylist(id: string, name: string, icon?: string | null): Promise<Playlist | undefined> {
-  return fetchData<Playlist>({ url: `${API_V1}/playlists/${id}`, method: 'PATCH', body: { name, icon } })
+export async function renamePlaylist(id: string, name: string, icon?: string | null): Promise<Playlist> {
+  const result = await fetchData<Playlist>({ url: `${API_V1}/playlists/${id}`, method: 'PATCH', body: { name, icon } })
+  if (!result) throw new FetchError('failed to rename playlist')
+  return result
 }
 
-export async function deletePlaylist(id: string): Promise<boolean> {
-  try {
-    const options = await buildFetchOptions('DELETE')
-    const response = await fetch(`${API_V1}/playlists/${id}`, options)
-    return response.ok
-  } catch { return false }
+export async function deletePlaylist(id: string): Promise<void> {
+  await fetchData({ url: `${API_V1}/playlists/${id}`, method: 'DELETE', responseType: ResponseTypes.none })
 }
 
 export async function fetchPlaylistSongs(id: string): Promise<PlaylistSong[]> {
@@ -874,45 +828,30 @@ export async function fetchPlaylistSongs(id: string): Promise<PlaylistSong[]> {
   }
 }
 
-export async function addSongToPlaylist(playlistId: string, songUuid: string): Promise<boolean | 'duplicate'> {
+export async function addSongToPlaylist(playlistId: string, songUuid: string): Promise<'ok' | 'duplicate'> {
   try {
-    const options = await buildFetchOptions('POST', { song_uuid: songUuid })
-    const response = await fetch(`${API_V1}/playlists/${playlistId}/songs`, options)
-    if (response.status === 409) return 'duplicate'
-    return response.ok
-  } catch { return false }
+    await fetchData({ url: `${API_V1}/playlists/${playlistId}/songs`, method: 'POST', body: { song_uuid: songUuid }, responseType: ResponseTypes.none })
+    return 'ok'
+  } catch (e) {
+    if (e instanceof FetchError && e.status === 409) return 'duplicate'
+    throw e
+  }
 }
 
-export async function bulkAddSongsToPlaylist(playlistId: string, songUuids: string[]): Promise<boolean> {
-  try {
-    const options = await buildFetchOptions('POST', { song_uuids: songUuids })
-    const response = await fetch(`${API_V1}/playlists/${playlistId}/songs/bulk`, options)
-    return response.ok
-  } catch { return false }
+export async function bulkAddSongsToPlaylist(playlistId: string, songUuids: string[]): Promise<void> {
+  await fetchData({ url: `${API_V1}/playlists/${playlistId}/songs/bulk`, method: 'POST', body: { song_uuids: songUuids }, responseType: ResponseTypes.none })
 }
 
-export async function removeSongFromPlaylist(playlistId: string, songUuid: string): Promise<boolean> {
-  try {
-    const options = await buildFetchOptions('DELETE')
-    const response = await fetch(`${API_V1}/playlists/${playlistId}/songs/${songUuid}`, options)
-    return response.ok
-  } catch { return false }
+export async function removeSongFromPlaylist(playlistId: string, songUuid: string): Promise<void> {
+  await fetchData({ url: `${API_V1}/playlists/${playlistId}/songs/${songUuid}`, method: 'DELETE', responseType: ResponseTypes.none })
 }
 
-export async function bulkRemoveSongsFromPlaylist(playlistId: string, songUuids: string[]): Promise<boolean> {
-  try {
-    const options = await buildFetchOptions('DELETE', { song_uuids: songUuids })
-    const response = await fetch(`${API_V1}/playlists/${playlistId}/songs/bulk`, options)
-    return response.ok
-  } catch { return false }
+export async function bulkRemoveSongsFromPlaylist(playlistId: string, songUuids: string[]): Promise<void> {
+  await fetchData({ url: `${API_V1}/playlists/${playlistId}/songs/bulk`, method: 'DELETE', body: { song_uuids: songUuids }, responseType: ResponseTypes.none })
 }
 
-export async function reorderPlaylistSongs(playlistId: string, songUuids: string[]): Promise<boolean> {
-  try {
-    const options = await buildFetchOptions('PATCH', { song_uuids: songUuids })
-    const response = await fetch(`${API_V1}/playlists/${playlistId}/songs`, options)
-    return response.ok
-  } catch { return false }
+export async function reorderPlaylistSongs(playlistId: string, songUuids: string[]): Promise<void> {
+  await fetchData({ url: `${API_V1}/playlists/${playlistId}/songs`, method: 'PATCH', body: { song_uuids: songUuids }, responseType: ResponseTypes.none })
 }
 
 export async function fetchServerOfflineSongs(): Promise<string[]> {
@@ -929,26 +868,15 @@ export async function syncOfflineSongs(localIds: string[]): Promise<string[]> {
 }
 
 export async function addServerOfflineSong(songId: string): Promise<void> {
-  try {
-    const options = await buildFetchOptions('POST')
-    await fetch(`${API_V1}/library/offline/${songId}`, options)
-  } catch {}
+  await fetchData({ url: `${API_V1}/library/offline/${songId}`, method: 'POST', responseType: ResponseTypes.none })
 }
 
 export async function removeServerOfflineSong(songId: string): Promise<void> {
-  try {
-    const options = await buildFetchOptions('DELETE')
-    await fetch(`${API_V1}/library/offline/${songId}`, options)
-  } catch {}
+  await fetchData({ url: `${API_V1}/library/offline/${songId}`, method: 'DELETE', responseType: ResponseTypes.none })
 }
 
 export async function clearServerOfflineSongs(): Promise<void> {
-  try {
-    const options = await buildFetchOptions('DELETE')
-    await fetch(`${API_V1}/library/offline`, options)
-  } catch (e) {
-    console.error('clearServerOfflineSongs:', e)
-  }
+  await fetchData({ url: `${API_V1}/library/offline`, method: 'DELETE', responseType: ResponseTypes.none })
 }
 
 export interface EligibleSong {
@@ -974,18 +902,12 @@ export async function fetchSongEligibility(songId: string): Promise<SongEligibil
 
 export async function publishSongs(songIds: string[]): Promise<number> {
   const result = await fetchData<{ published: number }>({ url: `${API_V1}/library/publish`, method: 'POST', body: { song_ids: songIds } })
-  return result?.published ?? 0
+  if (!result) throw new FetchError('failed to publish songs')
+  return result.published
 }
 
-export async function uploadSongArtwork(songId: string, file: File): Promise<boolean> {
-  try {
-    const formData = new FormData()
-    formData.append('file', file)
-    const response = await fetch(`${API_V1}/songs/${songId}/artwork`, {
-      method: 'POST',
-      body: formData,
-      credentials: 'include',
-    })
-    return response.ok
-  } catch { return false }
+export async function uploadSongArtwork(songId: string, file: File): Promise<void> {
+  const formData = new FormData()
+  formData.append('file', file)
+  await fetchData({ url: `${API_V1}/songs/${songId}/artwork`, method: 'POST', rawBody: formData, responseType: ResponseTypes.none })
 }
