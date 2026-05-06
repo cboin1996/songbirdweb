@@ -7,7 +7,7 @@ import { cacheSong, uncacheSong } from "../lib/offline";
 import { FaBookmark, FaRegBookmark, FaEllipsisV, FaLock, FaCloudDownloadAlt } from "react-icons/fa";
 import Image from "next/image";
 import { usePlayer } from "./player";
-import { editSongRoute } from "../lib/routes";
+import { routes, editSongRoute } from "../lib/routes";
 import { useUser } from "../lib/user-context";
 import { useOnline } from "../lib/use-online";
 import CommunityBadge from "./community-badge";
@@ -52,12 +52,12 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
     const kebabRef = useRef<HTMLButtonElement>(null)
     const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
     const kebabJustClosed = useRef(false)
-    const { play, pause, resume, current, isPlaying, insertNext, showToast } = usePlayer()
+    const { play, pause, resume, current, isPlaying, insertNext, onLibraryAdd, onLibraryRemove, showToast } = usePlayer()
     const pathname = usePathname()
     function pageSource() {
         const href = typeof window !== 'undefined' ? window.location.pathname + window.location.search : pathname
-        return pathname.includes('/explore') ? { label: 'Explore', href, id: 'explore' }
-            : pathname.includes('/download') ? { label: 'Downloads', href, id: 'downloads' }
+        return pathname.includes(routes.explore) ? { label: 'Explore', href, id: 'explore' }
+            : pathname.includes(routes.download) ? { label: 'Downloads', href, id: 'downloads' }
             : { label: 'Library', href, id: 'library' }
     }
     const isCurrentSong = current?.uuid === song.songId
@@ -79,7 +79,18 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
             : await addToLibrary(song.songId)
         if (ok) {
             setInLibrary(prev => !prev)
-            if (inLibrary) onRemove?.()
+            if (inLibrary) {
+                onRemove?.()
+                onLibraryRemove(song.songId!)
+                if (offlineCached) {
+                    uncacheSong(song.songId).catch(() => {})
+                    removeServerOfflineSong(song.songId)
+                    setOfflineCached(false)
+                    onCacheChange?.(song.songId, false)
+                }
+            } else {
+                onLibraryAdd({ uuid: song.songId!, properties: song.properties, artwork_cached: song.artworkCached })
+            }
         } else {
             setLibraryError(true)
         }
@@ -336,6 +347,7 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
             <>
                 <div
                     data-testid="song-card"
+                    data-song-id={song.songId}
                     onClick={e => handleCardClick(e)}
                     onContextMenu={handleContextMenu}
                     role="button"
@@ -380,6 +392,7 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
         <>
             <div
                 data-testid="song-card"
+                data-song-id={song.songId}
                 onClick={e => handleCardClick(e)}
                 onContextMenu={handleContextMenu}
                 role="button"

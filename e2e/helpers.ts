@@ -1,4 +1,5 @@
 import { Page, expect, APIRequestContext, request as pwRequest } from '@playwright/test'
+import { routes } from './routes'
 
 export const USERNAME = process.env.TEST_USERNAME!
 export const PASSWORD = process.env.TEST_PASSWORD!
@@ -8,6 +9,8 @@ export const BULK_USERNAME = process.env.E2E_BULK_USERNAME!
 export const BULK_PASSWORD = process.env.E2E_BULK_PASSWORD!
 export const IMPORT_USERNAME = process.env.E2E_IMPORT_USERNAME!
 export const IMPORT_PASSWORD = process.env.E2E_IMPORT_PASSWORD!
+export const QUEUE_USERNAME = process.env.E2E_QUEUE_USERNAME!
+export const QUEUE_PASSWORD = process.env.E2E_QUEUE_PASSWORD!
 // .env.local sets NEXT_PUBLIC_API_BASE_URL='' (empty) so the browser uses
 // relative URLs in dev. Tests call the API directly from outside the browser
 // and need an absolute URL — use `||` so empty string also falls through.
@@ -26,8 +29,8 @@ export function ignoreError(msg: string) {
 // storageState, this is a no-op (visit /library to verify auth; if 200, skip login).
 export async function login(page: Page, username = USERNAME, password = PASSWORD) {
     // Check if already authenticated by visiting a protected page.
-    await page.goto('/library', { waitUntil: 'domcontentloaded' })
-    const isAuth = page.url().includes('/library')
+    await page.goto(routes.library, { waitUntil: 'domcontentloaded' })
+    const isAuth = page.url().includes(routes.library)
     if (isAuth) {
         // Already authenticated; skip login.
         return
@@ -35,7 +38,7 @@ export async function login(page: Page, username = USERNAME, password = PASSWORD
 
     // Not authenticated; perform login via API.
     await page.context().clearCookies()
-    await page.goto('/')
+    await page.goto(routes.home)
     const ok = await page.evaluate(
         async ({ url, username, password }) => {
             const resp = await fetch(url, {
@@ -49,7 +52,7 @@ export async function login(page: Page, username = USERNAME, password = PASSWORD
         { url: `${API_BASE}/v1/auth/login`, username, password },
     )
     if (!ok) throw new Error(`Login API call failed for user: ${username}`)
-    await page.goto('/download')
+    await page.goto(routes.download)
     await expect(page).toHaveURL(/\/download/, { timeout: 10000 })
 }
 

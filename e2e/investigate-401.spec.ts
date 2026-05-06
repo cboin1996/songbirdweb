@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { login } from './helpers'
+import { routes, exploreQuery } from './routes'
 
 const failures: { url: string; status: number; method: string; page: string }[] = []
 
@@ -21,15 +22,15 @@ test('capture all 401s across the app', async ({ page }) => {
   })
 
   const pages = [
-    '/download',
-    '/download/song',
-    '/download/album',
-    '/library',
-    '/explore',
-    '/explore?window=day',
-    '/explore?window=week',
-    '/explore?window=all',
-    '/settings',
+    routes.download,
+    routes.downloadSong,
+    routes.downloadAlbum,
+    routes.library,
+    routes.explore,
+    exploreQuery('window=day'),
+    exploreQuery('window=week'),
+    exploreQuery('window=all'),
+    routes.settings,
   ]
 
   for (const route of pages) {

@@ -583,6 +583,7 @@ export interface PlayerState {
   manual_next?: string[]
   current_song_uuid?: string | null
   queue_sources?: Record<string, { id: string; label: string; href: string }>
+  updated_at?: string | null
 }
 
 export async function fetchPlayerState(): Promise<PlayerState | undefined> {
@@ -593,6 +594,27 @@ export async function savePlayerState(state: PlayerState): Promise<void> {
   try {
     const options = await buildFetchOptions('PUT', state)
     await fetch(`${API_V1}/player/state`, options)
+  } catch {}
+}
+
+export async function queueInsert(songId: string, position?: number, source?: { id: string; label: string; href: string }): Promise<void> {
+  try {
+    const options = await buildFetchOptions('POST', { song_id: songId, position: position ?? null, source: source ?? null })
+    await fetch(`${API_V1}/player/queue`, options)
+  } catch {}
+}
+
+export async function queueRemove(songId: string): Promise<void> {
+  try {
+    const options = await buildFetchOptions('DELETE')
+    await fetch(`${API_V1}/player/queue/${songId}`, options)
+  } catch {}
+}
+
+export async function queueReorder(fromPosition: number, toPosition: number): Promise<void> {
+  try {
+    const options = await buildFetchOptions('PUT', { from_position: fromPosition, to_position: toPosition })
+    await fetch(`${API_V1}/player/queue/reorder`, options)
   } catch {}
 }
 

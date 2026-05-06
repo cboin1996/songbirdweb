@@ -53,7 +53,7 @@ function sortLetterEntries<T>(entries: [string, T][]): [string, T][] {
     })
 }
 
-const AlbumCard = memo(function AlbumCard({ album, isCompact, isActive, isPlaying, onClick }: { album: LibraryAlbum; isCompact: boolean; isActive: boolean; isPlaying: boolean; onClick: () => void }) {
+const AlbumCard = memo(function AlbumCard({ album, isCompact, isActive, isPlaying, onClick, onPlay }: { album: LibraryAlbum; isCompact: boolean; isActive: boolean; isPlaying: boolean; onClick: () => void; onPlay: () => void }) {
     const firstSong = album.songs[0]
     const smallArt = songArtworkUrl(firstSong?.uuid, firstSong?.artwork_cached, album.artworkUrl100, 200)
     const largeArt = songArtworkUrl(firstSong?.uuid, firstSong?.artwork_cached, album.artworkUrl100, 600)
@@ -72,10 +72,12 @@ const AlbumCard = memo(function AlbumCard({ album, isCompact, isActive, isPlayin
                     <span className={`text-base font-medium truncate${isActive ? ' text-sky-500' : ''}`}>{album.collectionName}</span>
                     <span className="text-sm text-sky-500 truncate">{album.artistName} · {album.songs.length} songs</span>
                 </div>
-                {isActive && isPlaying
-                    ? <FaPause size={10} className="text-sky-500 shrink-0 mr-1" />
-                    : <FaPlay size={10} className="text-gray-300 dark:text-gray-600 shrink-0 mr-1" />
-                }
+                <div role="button" data-testid="album-play" onClick={e => { e.stopPropagation(); onPlay() }} className="shrink-0 mr-1 p-1">
+                    {isActive && isPlaying
+                        ? <FaPause size={10} className="text-sky-500" />
+                        : <FaPlay size={10} className="text-gray-300 dark:text-gray-600" />
+                    }
+                </div>
             </button>
         )
     }
@@ -90,7 +92,12 @@ const AlbumCard = memo(function AlbumCard({ album, isCompact, isActive, isPlayin
                     : <div className="w-full h-full rounded-lg bg-gray-100 dark:bg-gray-800 flex items-center justify-center"><FaMusic size={24} className="text-gray-400" /></div>
                 }
                 <div className={`absolute inset-0 flex items-center justify-center transition-opacity ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-                    <div className="bg-black/40 rounded-full p-3">
+                    <div
+                        role="button"
+                        data-testid="album-play"
+                        onClick={e => { e.stopPropagation(); onPlay() }}
+                        className="bg-black/40 rounded-full p-3 cursor-pointer"
+                    >
                         {isActive && isPlaying
                             ? <FaPause size={16} className="text-white" />
                             : <FaPlay size={16} className="text-white ml-0.5" />
@@ -113,7 +120,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     const router = useRouter()
     const searchParams = useSearchParams()
     const viewMode = (searchParams.get('view') as ViewMode | null) ?? 'songs'
-    const { play, current, isPlaying, playContext } = usePlayer()
+    const { play, pause, resume, current, isPlaying, playContext, onLibraryRemove } = usePlayer()
     const sectionRefs = useRef<Record<string, HTMLElement | null>>({})
     const stickyHeaderRef = useRef<HTMLDivElement | null>(null)
     const isDesktop = useIsDesktop()
@@ -143,6 +150,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     const [lastSelectedId, setLastSelectedId] = useState<string | null>(null)
     const [bulkLoading, setBulkLoading] = useState(false)
     const [bulkPlaylistPicking, setBulkPlaylistPicking] = useState(false)
+    const [albumModal, setAlbumModal] = useState<LibraryAlbum | null>(null)
     const [activeLetter, setActiveLetter] = useState<string | null>(null)
     const [scrubLetter, setScrubLetter] = useState<string | null>(null)
     const scrubbing = useRef(false)
@@ -194,7 +202,8 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
             // Sync local cache state with server; surface songs on server not yet local
             if (navigator.onLine) {
                 const serverOnly = await syncOfflineSongs([...ids])
-                if (serverOnly.length > 0) setSyncPromptIds(serverOnly)
+                const resolvable = serverOnly.filter(id => songs.some(s => s.uuid === id))
+                if (resolvable.length > 0) setSyncPromptIds(resolvable)
             }
         })
         fetchPlaylists().then(setPlaylists)
@@ -363,7 +372,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         }
         // sort songs within each album by track number
         for (const album of albumMap.values()) {
-            album.songs.sort((a, b) => (a.properties?.trackNumber ?? 0) - (b.properties?.trackNumber ?? 0))
+            album.songs.sort((a, b) => (a.properties?.discNumber ?? 1) - (b.properties?.discNumber ?? 1) || (a.properties?.trackNumber ?? 0) - (b.properties?.trackNumber ?? 0))
         }
         // sort albums alphabetically then group A-Z
         const albums = [...albumMap.values()].sort((a, b) => {
@@ -511,12 +520,13 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
             el.style.animation = 'song-highlight 1.5s ease-out forwards'
             el.dataset.animated = 'once'
             el.addEventListener('animationend', () => { el.style.animation = '' }, { once: true })
-            // Remove ?song/?album from URL so subsequent letter-rail taps don't re-fire this effect
+            // Strip ?song/?album without triggering RSC refetch (router.replace recreates DOM nodes,
+            // wiping dataset.animated). history.replaceState updates the URL in-place.
             const params = new URLSearchParams(searchParams.toString())
             params.delete('song')
             params.delete('album')
             const qs = params.toString()
-            router.replace(qs ? `?${qs}` : window.location.pathname, { scroll: false })
+            window.history.replaceState(null, '', qs ? `?${qs}` : window.location.pathname)
         }
 
         tryScroll(0)
@@ -586,10 +596,14 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     }
 
     function playAlbum(album: LibraryAlbum) {
+        const ctxId = `album:${album.collectionId}`
+        if (playContext?.id === ctxId) {
+            isPlaying ? pause() : resume()
+            return
+        }
         const first = album.songs[0]
         if (!first?.properties) return
-        // Album source = link to that album in albums view (not per-song)
-        const ctx = { label: album.collectionName, href: `${routes.library}?view=albums&album=${album.collectionId}`, id: `album:${album.collectionId}` }
+        const ctx = { label: album.collectionName, href: `${routes.library}?view=albums&album=${album.collectionId}`, id: ctxId }
         const queue = album.songs.filter(s => s.properties).map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached, source: ctx }))
         play({ uuid: first.uuid, properties: first.properties, last_position: first.last_position, last_played_at: first.last_played_at, artwork_cached: first.artwork_cached, source: ctx }, queue, ctx)
     }
@@ -720,6 +734,15 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         setBulkLoading(true)
         const ids = [...selectedIds]
         await bulkRemoveFromLibrary(ids)
+        for (const id of ids) {
+            onLibraryRemove(id)
+            if (cachedIds.has(id)) {
+                try { await uncacheSong(id) } catch {}
+                removeServerOfflineSong(id)
+            }
+        }
+        setCachedIds(prev => { const next = new Set(prev); ids.forEach(id => next.delete(id)); return next })
+        setSyncPromptIds(prev => prev.filter(x => !selectedIds.has(x)))
         setSongs(prev => prev.filter(s => !selectedIds.has(s.uuid)))
         exitSelectMode()
         setBulkLoading(false)
@@ -901,7 +924,8 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                     isCompact={!isDesktop}
                                     isActive={playContext?.id === `album:${album.collectionId}`}
                                     isPlaying={isPlaying}
-                                    onClick={() => playAlbum(album)}
+                                    onClick={() => setAlbumModal(album)}
+                                    onPlay={() => playAlbum(album)}
                                 />
                                 </div>
                             ))}
@@ -938,13 +962,19 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                         )
                                     }}
                                     inLibrary={true}
-                                    onRemove={() => setSongs(prev => prev.filter(s => s.uuid !== song.uuid))}
+                                    onRemove={() => {
+                                        setSongs(prev => prev.filter(s => s.uuid !== song.uuid))
+                                        setSyncPromptIds(prev => prev.filter(x => x !== song.uuid))
+                                    }}
                                     cachedOffline={cachedIds.has(song.uuid)}
-                                    onCacheChange={(id, cached) => setCachedIds(prev => {
-                                        const next = new Set(prev)
-                                        cached ? next.add(id) : next.delete(id)
-                                        return next
-                                    })}
+                                    onCacheChange={(id, cached) => {
+                                        setCachedIds(prev => {
+                                            const next = new Set(prev)
+                                            cached ? next.add(id) : next.delete(id)
+                                            return next
+                                        })
+                                        if (cached) setSyncPromptIds(prev => prev.filter(x => x !== id))
+                                    }}
                                     compact={!isDesktop}
 
                                     isPrivate={!!song.owner_id || !!song.parent_song_id}
@@ -990,13 +1020,19 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                         )
                                     }}
                                     inLibrary={true}
-                                    onRemove={() => setSongs(prev => prev.filter(s => s.uuid !== song.uuid))}
+                                    onRemove={() => {
+                                        setSongs(prev => prev.filter(s => s.uuid !== song.uuid))
+                                        setSyncPromptIds(prev => prev.filter(x => x !== song.uuid))
+                                    }}
                                     cachedOffline={cachedIds.has(song.uuid)}
-                                    onCacheChange={(id, cached) => setCachedIds(prev => {
-                                        const next = new Set(prev)
-                                        cached ? next.add(id) : next.delete(id)
-                                        return next
-                                    })}
+                                    onCacheChange={(id, cached) => {
+                                        setCachedIds(prev => {
+                                            const next = new Set(prev)
+                                            cached ? next.add(id) : next.delete(id)
+                                            return next
+                                        })
+                                        if (cached) setSyncPromptIds(prev => prev.filter(x => x !== id))
+                                    }}
                                     compact={!isDesktop}
 
                                     isPrivate={!!song.owner_id || !!song.parent_song_id}
@@ -1092,6 +1128,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                     )}
                     <div
                         ref={barRef}
+                        data-testid="letter-rail"
                         className="flex flex-col items-center py-2 touch-none select-none cursor-pointer"
                         onPointerDown={handleBarPointerDown}
                         onPointerMove={handleBarPointerMove}
@@ -1102,6 +1139,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                         {ALPHABET.map(letter => (
                             <span
                                 key={letter}
+                                {...(letter === (scrubLetter ?? activeLetter) ? { 'data-testid': 'letter-rail-active' } : {})}
                                 className={`w-7 h-5 md:w-8 md:h-6 flex items-center justify-center leading-none transition-colors ${
                                     letter === (scrubLetter ?? activeLetter)
                                         ? 'text-sm md:text-base font-bold text-sky-500'
@@ -1116,6 +1154,17 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                     </div>
                 </div>
             )}
+
+            {/* album modal (read-only) */}
+            <SongPickerModal
+                open={!!albumModal}
+                onClose={() => setAlbumModal(null)}
+                title={albumModal?.collectionName ?? ''}
+                titleActions={undefined}
+                songs={albumModal?.songs.map(s => ({ uuid: s.uuid, properties: s.properties, artwork_cached: s.artwork_cached })) ?? []}
+                emptyState="no songs"
+                testId="album-modal"
+            />
 
             {/* publish modal */}
             <SongPickerModal

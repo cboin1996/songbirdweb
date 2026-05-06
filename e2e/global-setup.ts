@@ -30,6 +30,8 @@ const BULK_USER = process.env.E2E_BULK_USERNAME!
 const BULK_PASS = process.env.E2E_BULK_PASSWORD!
 const IMPORT_USER = process.env.E2E_IMPORT_USERNAME!
 const IMPORT_PASS = process.env.E2E_IMPORT_PASSWORD!
+const QUEUE_USER = process.env.E2E_QUEUE_USERNAME!
+const QUEUE_PASS = process.env.E2E_QUEUE_PASSWORD!
 
 // Songs to import into the test user's library. no-tags.mp3 is intentionally
 // excluded — it's used by import.spec.ts to test the failed-import path.
@@ -132,6 +134,7 @@ async function globalSetup() {
     if (!EDITOR_USER || !EDITOR_PASS) throw new Error('E2E_EDITOR_USERNAME and E2E_EDITOR_PASSWORD must be set')
     if (!BULK_USER || !BULK_PASS) throw new Error('E2E_BULK_USERNAME and E2E_BULK_PASSWORD must be set')
     if (!IMPORT_USER || !IMPORT_PASS) throw new Error('E2E_IMPORT_USERNAME and E2E_IMPORT_PASSWORD must be set')
+    if (!QUEUE_USER || !QUEUE_PASS) throw new Error('E2E_QUEUE_USERNAME and E2E_QUEUE_PASSWORD must be set')
 
     // --- Admin: create all test users if missing ---
     const admin = await request.newContext({ baseURL: API_BASE })
@@ -150,6 +153,7 @@ async function globalSetup() {
         { username: EDITOR_USER, password: EDITOR_PASS },
         { username: BULK_USER, password: BULK_PASS },
         { username: IMPORT_USER, password: IMPORT_PASS },
+        { username: QUEUE_USER, password: QUEUE_PASS },
     ]
 
     for (const u of allTestUsers) {
@@ -177,6 +181,7 @@ async function globalSetup() {
     await seedUser(EDITOR_USER, EDITOR_PASS, 'editor-user.json')
     await seedUser(BULK_USER, BULK_PASS, 'bulk-user.json')
     await seedUser(IMPORT_USER, IMPORT_PASS, 'import-user.json')
+    await seedUser(QUEUE_USER, QUEUE_PASS, 'queue-user.json')
 }
 
 export default globalSetup

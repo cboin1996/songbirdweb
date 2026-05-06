@@ -6,6 +6,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { routes } from "../lib/routes";
 import { FaCheckCircle } from "react-icons/fa";
+import { usePlayer } from "./player";
 
 export default function DownloadViaUrl({ query }: { query: string }) {
     type Status = 'idle' | 'downloading' | 'ready' | 'saving' | 'done' | 'error'
@@ -15,6 +16,7 @@ export default function DownloadViaUrl({ query }: { query: string }) {
     const [properties, setProperties] = useState<Properties | null>(null)
     const [artworkCached, setArtworkCached] = useState(false)
     const [doneAction, setDoneAction] = useState<'library' | 'file' | null>(null)
+    const { onLibraryAdd } = usePlayer()
 
     useEffect(() => {
         if (!query) return
@@ -41,7 +43,10 @@ export default function DownloadViaUrl({ query }: { query: string }) {
         if (!songId) return
         setStatus('saving')
         const ok = await addToLibrary(songId)
-        if (ok) { setDoneAction('library'); setStatus('done') }
+        if (ok) {
+            if (properties) onLibraryAdd({ uuid: songId, properties, artwork_cached: artworkCached })
+            setDoneAction('library'); setStatus('done')
+        }
         else { setStatus('error'); setErrorMsg('could not add to library') }
     }
 

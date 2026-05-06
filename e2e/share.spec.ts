@@ -1,4 +1,4 @@
-import { routes } from './routes'
+import { routes, sharePath } from './routes'
 import { test, expect } from '@playwright/test'
 import { login, apiLogin, pickFirstLibrarySong, API_V1, ignoreError } from './helpers'
 
@@ -51,7 +51,7 @@ test.describe('share links', () => {
             const body = await res.json()
             expect(body.token).toBeTruthy()
 
-            await page.goto(`/share/${body.token}`)
+            await page.goto(sharePath(body.token))
             // The track name should appear somewhere on the share page.
             await expect(page.getByText(song!.track, { exact: false }).first()).toBeVisible({ timeout: 10000 })
 
@@ -62,7 +62,7 @@ test.describe('share links', () => {
     })
 
     test('share/[token] for invalid token shows error/empty state', async ({ page }) => {
-        await page.goto('/share/this-token-does-not-exist-' + Date.now())
+        await page.goto(sharePath('this-token-does-not-exist-' + Date.now()))
         // Either an error UI or a "not found" message — accept anything that's
         // not a hard 500 / blank page. We just check the page rendered.
         await expect(page.locator('body')).toBeVisible()

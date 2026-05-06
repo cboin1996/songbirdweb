@@ -1,6 +1,7 @@
 import { routes } from './routes'
 import { test, expect, Page } from '@playwright/test'
 import { USERNAME, PASSWORD, login, ignoreError, apiLogin, API_V1 } from './helpers'
+import { LibraryPage, PlayerBar } from './pages'
 
 
 test.describe('library page', () => {
@@ -11,106 +12,114 @@ test.describe('library page', () => {
     })
 
     test('page loads and shows song cards', async ({ page }) => {
-        await page.goto(routes.library)
-        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
+        const lib = new LibraryPage(page)
+        await lib.goto()
+        await lib.waitForSongs()
     })
 
     test('default view is songs tab (active state)', async ({ page }) => {
-        await page.goto(routes.library)
-        const songsBtn = page.getByRole('button', { name: 'songs', exact: true })
+        const lib = new LibraryPage(page)
+        await lib.goto()
+        const songsBtn = lib.tab('songs')
         await expect(songsBtn).toBeVisible({ timeout: 5000 })
         await expect(songsBtn).toHaveClass(/bg-sky-500/)
     })
 
     test('artists tab updates URL', async ({ page }) => {
-        await page.goto(routes.library)
-        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
-        await page.getByRole('button', { name: 'artists', exact: true }).click()
+        const lib = new LibraryPage(page)
+        await lib.goto()
+        await lib.waitForSongs()
+        await lib.tab('artists').click()
         await expect(page).toHaveURL(/view=artists/, { timeout: 10000 })
     })
 
     test('albums tab updates URL', async ({ page }) => {
-        await page.goto(routes.library)
-        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
-        const albumsBtn = page.getByRole('button', { name: 'albums', exact: true })
+        const lib = new LibraryPage(page)
+        await lib.goto()
+        await lib.waitForSongs()
+        const albumsBtn = lib.tab('albums')
         await expect(albumsBtn).toBeVisible({ timeout: 5000 })
         await albumsBtn.click()
         await expect(page).toHaveURL(/view=albums/, { timeout: 10000 })
     })
 
     test('genres tab updates URL', async ({ page }) => {
-        await page.goto(routes.library)
-        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
-        const genresBtn = page.getByRole('button', { name: 'genres', exact: true })
+        const lib = new LibraryPage(page)
+        await lib.goto()
+        await lib.waitForSongs()
+        const genresBtn = lib.tab('genres')
         await expect(genresBtn).toBeVisible({ timeout: 5000 })
         await genresBtn.click()
         await expect(page).toHaveURL(/view=genres/, { timeout: 10000 })
     })
 
     test('songs tab switches back and becomes active', async ({ page }) => {
+        const lib = new LibraryPage(page)
         await page.goto(routes.libraryAlbums)
         await expect(page.locator('[data-letter]').first()).toBeVisible({ timeout: 10000 })
-        const songsBtn = page.getByRole('button', { name: 'songs', exact: true })
+        const songsBtn = lib.tab('songs')
         await songsBtn.click()
         await expect(page).toHaveURL(/view=songs/)
         await expect(songsBtn).toHaveClass(/bg-sky-500/)
     })
 
     test('A-Z letter rail updates URL on click', async ({ page }) => {
-        await page.goto(routes.library)
-        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
+        const lib = new LibraryPage(page)
+        await lib.goto()
+        await lib.waitForSongs()
 
-        // The letter rail is a pointer-event div (not buttons) fixed on the right edge.
-        // Use the first data-letter section to know a present letter, then click its span in the rail.
-        const sections = page.locator('[data-letter]')
+        const sections = lib.sections()
         await expect(sections.first()).toBeVisible({ timeout: 5000 })
         const letter = await sections.first().getAttribute('data-letter')
         if (!letter) return
 
-        const rail = page.locator('div.touch-none.select-none.cursor-pointer')
-        const letterSpan = rail.locator('span.font-bold').filter({ hasText: new RegExp(`^${letter}$`) })
+        const letterSpan = lib.letterRailActive.filter({ hasText: new RegExp(`^${letter}$`) })
         await letterSpan.click()
         await expect(page).toHaveURL(new RegExp(`letter=${letter}`), { timeout: 5000 })
     })
 
     test('play all button is visible', async ({ page }) => {
-        await page.goto(routes.library)
-        await expect(page.getByRole('button', { name: 'play all', exact: true })).toBeVisible({ timeout: 5000 })
+        const lib = new LibraryPage(page)
+        await lib.goto()
+        await expect(lib.playAllBtn).toBeVisible({ timeout: 5000 })
     })
 
     test('save all offline button is visible', async ({ page }) => {
-        await page.goto(routes.library)
+        const lib = new LibraryPage(page)
+        await lib.goto()
         await expect(page.getByRole('button', { name: /save all offline/i })).toBeVisible({ timeout: 5000 })
     })
 
     test('song card: library bookmark button visible', async ({ page }) => {
-        await page.goto(routes.library)
-        const card = page.getByTestId('song-card').first()
+        const lib = new LibraryPage(page)
+        await lib.goto()
+        const card = lib.songCards.first()
         await expect(card).toBeVisible({ timeout: 10000 })
-        await expect(card.getByTestId('song-library-toggle')).toBeVisible()
+        await expect(lib.libraryToggle(card)).toBeVisible()
     })
 
     test('song card: kebab button visible on hover', async ({ page }) => {
-        await page.goto(routes.library)
-        const card = page.getByTestId('song-card').first()
+        const lib = new LibraryPage(page)
+        await lib.goto()
+        const card = lib.songCards.first()
         await expect(card).toBeVisible({ timeout: 10000 })
         await card.hover()
-        await expect(card.getByTestId('song-kebab')).toBeVisible({ timeout: 3000 })
+        await expect(lib.kebab(card)).toBeVisible({ timeout: 3000 })
     })
 
     test('kebab menu shows Download, Play next, Edit, Copy share link options', async ({ page }) => {
-        await page.goto(routes.library)
-        const card = page.getByTestId('song-card').first()
+        const lib = new LibraryPage(page)
+        await lib.goto()
+        const card = lib.songCards.first()
         await expect(card).toBeVisible({ timeout: 10000 })
         await card.hover()
-        await card.getByTestId('song-kebab').click()
-        const menu = page.getByTestId('song-kebab-menu')
+        await lib.kebab(card).click()
+        const menu = lib.kebabMenu()
         await expect(menu).toBeVisible({ timeout: 3000 })
         await expect(menu.getByRole('button', { name: 'Download' })).toBeVisible()
         await expect(menu.getByRole('button', { name: 'Play next' })).toBeVisible()
         await expect(menu.getByRole('button', { name: 'Edit' })).toBeVisible()
         await expect(menu.getByRole('button', { name: /copy share link/i })).toBeVisible()
-        // close without acting
         await page.keyboard.press('Escape')
     })
 
@@ -118,22 +127,26 @@ test.describe('library page', () => {
         const errors: string[] = []
         page.on('pageerror', err => { if (!ignoreError(err.message)) errors.push(err.message) })
 
-        await page.goto(routes.library)
-        const card = page.getByTestId('song-card').first()
+        const lib = new LibraryPage(page)
+        const player = new PlayerBar(page)
+        await lib.goto()
+        const card = lib.songCards.first()
         await expect(card).toBeVisible({ timeout: 10000 })
         await card.click()
-        await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
-        await expect(page.getByTestId('player-track-name').first()).toBeVisible({ timeout: 5000 })
+        await player.waitForBar()
+        await expect(player.trackName).toBeVisible({ timeout: 5000 })
 
         expect(errors).toHaveLength(0)
     })
 
     test('clicking song card starts player', async ({ page }) => {
-        await page.goto(routes.library)
-        const card = page.getByTestId('song-card').first()
+        const lib = new LibraryPage(page)
+        const player = new PlayerBar(page)
+        await lib.goto()
+        const card = lib.songCards.first()
         await expect(card).toBeVisible({ timeout: 10000 })
         await card.click()
-        await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
+        await player.waitForBar()
     })
 
     test('no console errors on library load', async ({ page }) => {
@@ -141,15 +154,15 @@ test.describe('library page', () => {
         page.on('console', msg => { if (msg.type() === 'error' && !ignoreError(msg.text())) errors.push(msg.text()) })
         page.on('pageerror', err => { if (!ignoreError(err.message)) errors.push(err.message) })
 
-        await page.goto(routes.library)
-        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
+        const lib = new LibraryPage(page)
+        await lib.goto()
+        await lib.waitForSongs()
         expect(errors, `Console errors: ${errors.join('\n')}`).toHaveLength(0)
     })
 
     // === Tier 1 sort/group ordering ===
 
     test('songs view: "#" group sorts last when present', async ({ page }) => {
-        // Quick API peek — only run if the user has any non-letter-leading songs.
         const api = await apiLogin()
         const res = await api.get(`${API_V1}/songs/library`)
         const songs = res.ok() ? await res.json() : []
@@ -160,11 +173,11 @@ test.describe('library page', () => {
         await api.dispose()
         test.skip(!hasHash, 'no songs starting with non-letter — # group not present')
 
-        await page.goto(routes.librarySongs)
-        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
-        // Scroll to bottom of list so the last section renders.
+        const lib = new LibraryPage(page)
+        await lib.goto('songs')
+        await lib.waitForSongs()
         await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
-        const sections = page.locator('[data-letter]')
+        const sections = lib.sections()
         const count = await sections.count()
         expect(count).toBeGreaterThan(0)
         const lastLetter = await sections.nth(count - 1).getAttribute('data-letter')
@@ -182,10 +195,11 @@ test.describe('library page', () => {
         await api.dispose()
         test.skip(!hasHash, 'no artist starting with non-letter — # group not present')
 
-        await page.goto(routes.libraryArtists)
-        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
+        const lib = new LibraryPage(page)
+        await lib.goto('artists')
+        await lib.waitForSongs()
         await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
-        const sections = page.locator('[data-letter]')
+        const sections = lib.sections()
         const count = await sections.count()
         const lastLetter = await sections.nth(count - 1).getAttribute('data-letter')
         expect(lastLetter).toBe('#')
@@ -203,7 +217,6 @@ test.describe('library page', () => {
         test.skip(!hasHash, 'no album with non-letter name — # group not present')
 
         await page.goto(routes.libraryAlbums)
-        // Wait for at least one section to render.
         await expect(page.locator('[data-letter]').first()).toBeVisible({ timeout: 10000 })
         await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
         const sections = page.locator('[data-letter]')
@@ -228,44 +241,35 @@ test.describe('library page', () => {
         await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
         const sections = page.locator('[data-letter]')
         const count = await sections.count()
-        // The visible header text inside the last section should literally read "Unknown".
         const lastSection = sections.nth(count - 1)
         await expect(lastSection.locator('text=Unknown').first()).toBeVisible()
     })
 
     test('albums view: name+artist fallback grouping (>1 album when library is non-trivial)', async ({ page }) => {
-        // Hard to assert directly on collectionId-less songs. Loose proxy:
-        // a non-trivial library should NOT collapse into a single album bucket.
         const api = await apiLogin()
         const res = await api.get(`${API_V1}/songs/library`)
         const songs = res.ok() ? await res.json() : []
         await api.dispose()
         test.skip(!Array.isArray(songs) || songs.length < 4, 'library too small to test multi-album grouping')
 
-        await page.goto(routes.libraryAlbums)
+        const lib = new LibraryPage(page)
+        await lib.goto('albums')
         await expect(page.locator('[data-letter]').first()).toBeVisible({ timeout: 10000 })
-        // Albums grid: sections contain album buttons. Count buttons inside data-letter
-        // sections only (excludes toolbar/letter-rail buttons).
         const albumButtons = page.locator('[data-letter] button')
         const albumCount = await albumButtons.count()
         expect(albumCount).toBeGreaterThan(1)
     })
 
-    // 'save all offline: beforeunload warning fires while in-flight' deleted — browsers
-    // suppress synthetic beforeunload dialogs without a real user gesture, and the
-    // in-flight save-all window is too small to deterministically catch in tests.
-    // Verified manually instead.
-
     // === Tier 2 per-song deep-linking (scroll + highlight) ===
 
-    test.fixme('?song=<uuid> scrolls to matching song card and applies highlight animation', async ({ page }) => {
-        await page.goto(routes.library)
-        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
+    test('?song=<uuid> scrolls to matching song card and applies highlight animation', async ({ page }) => {
+        const lib = new LibraryPage(page)
+        const player = new PlayerBar(page)
+        await lib.goto()
+        await lib.waitForSongs()
 
-        // Real user flow: play all → player shows "from Library" link with ?song=<uuid>
-        // → click it → client-side nav (songs already in state) → effect fires immediately.
-        await page.getByRole('button', { name: 'play all' }).click()
-        await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
+        await lib.playAllBtn.click()
+        await player.waitForBar()
 
         const contextLink = page.getByText(/from library/i)
         await expect(contextLink).toBeVisible({ timeout: 5000 })
@@ -276,7 +280,6 @@ test.describe('library page', () => {
 
         await contextLink.locator('..').click()
 
-        // Songs already in state — effect finds element immediately, animation fires.
         const targetCard = page.locator(`[data-song-id="${songId}"]`).first()
         await expect(targetCard).toBeVisible({ timeout: 5000 })
         await expect.poll(() =>
@@ -284,18 +287,15 @@ test.describe('library page', () => {
         , { timeout: 5000 }).toBe('once')
     })
 
-    // FIXME: same root cause as the song-id animation fixme above — router.replace
-    // triggers an RSC refetch that recreates the DOM node, wiping dataset.animated.
-    // Skip until library-list switches to window.history.replaceState for the param strip.
-    test.fixme('?album=<id> scrolls to matching album and applies highlight animation', async ({ page }) => {
+    test('?album=<id> scrolls to matching album and applies highlight animation', async ({ page }) => {
+        const lib = new LibraryPage(page)
+        const player = new PlayerBar(page)
         await page.goto(routes.libraryAlbums)
-        const albumLocator = page.locator('[data-album-id]').first()
+        const albumLocator = lib.albums().first()
         await expect(albumLocator).toBeVisible({ timeout: 10000 })
 
-        // Real user flow: click album to play → player shows album context link with
-        // ?view=albums&album=<id> → click it → client-side nav (songs already in state).
-        await albumLocator.click()
-        await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 5000 })
+        await lib.albumPlay(albumLocator).first().click()
+        await player.waitForBar()
 
         const contextLink = page.locator('a[href*="album="]').first()
         await expect(contextLink).toBeVisible({ timeout: 5000 })
@@ -311,7 +311,6 @@ test.describe('library page', () => {
             targetAlbum.evaluate(el => (el as HTMLElement).dataset.animated)
         , { timeout: 5000 }).toBe('once')
 
-        // Verify the jump put the album in viewport
         await expect.poll(async () => {
             return targetAlbum.evaluate((el) => {
                 const rect = el.getBoundingClientRect()
@@ -323,37 +322,26 @@ test.describe('library page', () => {
     // === Letter rail active-letter highlight ===
 
     test('letter rail highlights first present letter on initial load', async ({ page }) => {
-        await page.goto(routes.library)
-        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
+        const lib = new LibraryPage(page)
+        await lib.goto()
+        await lib.waitForSongs()
 
-        // Get the first section's letter to know what should be active
-        const firstLetter = await page.locator('[data-letter]').first().getAttribute('data-letter')
+        const firstLetter = await lib.sections().first().getAttribute('data-letter')
         expect(firstLetter).toBeTruthy()
 
-        // The active letter span has text-sky-500 + font-bold directly on it
-        // (not on a child). filter({has:...}) was looking for a descendant.
-        const rail = page.locator('div.touch-none.select-none.cursor-pointer')
-        const activeSpan = rail.locator('span.font-bold.text-sky-500')
-        const activeText = await activeSpan.textContent()
+        const activeText = await lib.letterRailActive.textContent()
         expect(activeText?.trim()).toBe(firstLetter)
 
-        // Verify the active letter has the bold+blue styling
-        await expect(activeSpan).toHaveClass(/text-sky-500/)
-        await expect(activeSpan).toHaveClass(/font-bold/)
+        await expect(lib.letterRailActive).toHaveClass(/text-sky-500/)
+        await expect(lib.letterRailActive).toHaveClass(/font-bold/)
     })
 
-    // FIXME: programmatic scrollIntoViewIfNeeded() doesn't trigger the rAF-debounced
-    // scroll handler that updates the active letter — only user wheel/touch events do.
-    // The active letter stays at "A" (initial first-letter highlight) instead of
-    // updating to the target. Selector fix is correct (was filter+has → now direct
-    // class on span) but the underlying issue is the test's scroll method.
-    // Either dispatch a wheel event or wait for letter-rail to expose a way to
-    // programmatically set the active letter.
     test.fixme('letter rail active letter updates when scrolling to a different section', async ({ page }) => {
-        await page.goto(routes.library)
-        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
+        const lib = new LibraryPage(page)
+        await lib.goto()
+        await lib.waitForSongs()
 
-        const sections = page.locator('[data-letter]')
+        const sections = lib.sections()
         const allLetters = await sections.evaluateAll(els =>
             els.map(e => e.getAttribute('data-letter')).filter(Boolean)
         )
@@ -361,52 +349,36 @@ test.describe('library page', () => {
 
         const targetLetter = allLetters[Math.floor(allLetters.length / 2)]
 
-        await page.locator(`[data-letter="${targetLetter}"]`).scrollIntoViewIfNeeded()
+        await page.evaluate((letter) => {
+            document.querySelector(`[data-letter="${letter}"]`)
+                ?.scrollIntoView({ behavior: 'instant', block: 'start' })
+        }, targetLetter)
 
-        const rail = page.locator('div.touch-none.select-none.cursor-pointer')
         await expect.poll(async () =>
-            (await rail.locator('span.font-bold.text-sky-500').textContent())?.trim()
+            (await lib.letterRailActive.textContent())?.trim()
         , { timeout: 5000 }).toBe(targetLetter)
     })
 
     test('active letter style is larger and bold blue (text-sky-500 font-bold)', async ({ page }) => {
-        await page.goto(routes.library)
-        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
+        const lib = new LibraryPage(page)
+        await lib.goto()
+        await lib.waitForSongs()
 
-        const rail = page.locator('div.touch-none.select-none.cursor-pointer')
-        const allSpans = rail.locator('span')
+        await expect(lib.letterRailActive).toHaveClass(/text-sky-500/)
+        await expect(lib.letterRailActive).toHaveClass(/font-bold/)
 
-        // Active span has text-sky-500 + font-bold directly on it (not on a
-        // child); same selector fix as the :319 sibling test.
-        const activeSpan = rail.locator('span.font-bold.text-sky-500')
-        await expect(activeSpan).toHaveClass(/text-sky-500/)
-        await expect(activeSpan).toHaveClass(/font-bold/)
-
-        // Get computed font-size of active span (should be text-xs or text-sm)
-        const activeFontSize = await activeSpan.evaluate((el) => {
+        const activeFontSize = await lib.letterRailActive.evaluate((el) => {
             return window.getComputedStyle(el).fontSize
         })
 
-        // Inactive spans have font-semibold (vs active's font-bold). The
-        // prior filter({hasNot:...}) looked for spans without a CHILD
-        // matching .text-sky-500, but classes are on the span itself —
-        // so it matched every span, picking the active one and giving
-        // identical font-sizes.
-        const inactiveSpan = rail.locator('span.font-semibold').first()
+        const inactiveSpan = lib.letterRail.locator('span.font-semibold').first()
         const inactiveFontSize = await inactiveSpan.evaluate((el) => {
             return window.getComputedStyle(el).fontSize
         })
 
-        // Active should be larger than inactive
         const activePx = parseFloat(activeFontSize)
         const inactivePx = parseFloat(inactiveFontSize)
         expect(activePx).toBeGreaterThan(inactivePx)
     })
-
-    // 'editor save → library scrolls and highlights edited song' deleted —
-    // covered by the canonical save-to-library test in e2e/editor.spec.ts
-    // ('save to library: encodes and creates new song version'), which asserts
-    // URL transitions to /library?song=<new_uuid>. The ?song= scroll+highlight
-    // is independently tested via the deep-link test above in this file.
 
 })

@@ -6,7 +6,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { FaPause, FaPlay, FaStepBackward, FaStepForward, FaRandom, FaRedo, FaList, FaTimes, FaVolumeUp, FaVolumeMute, FaBars, FaMusic } from "react-icons/fa"
 import Spinner from "./spinner"
-import { DOWNLOAD_URL, PlayableSong, artworkUrl, songArtworkUrl, fetchLibrarySongs, fetchPlayerState, fetchSongById, recordPlay, savePlayerState, updatePosition } from "../lib/data"
+import { DOWNLOAD_URL, LibrarySong, PlayableSong, PlayerState, artworkUrl, songArtworkUrl, fetchLibrarySongs, fetchPlayerState, fetchSongById, recordPlay, savePlayerState, updatePosition, queueInsert, queueRemove, queueReorder as apiQueueReorder } from "../lib/data"
 import { getSongFile, cacheArtworkUrls } from "../lib/offline"
 import Slider from "./slider"
 import { routes } from "../lib/routes"
@@ -62,6 +62,8 @@ interface PlayerContextValue {
     insertNext: (song: PlayableSong) => void
     removeFromQueue: (index: number) => void
     reorderQueue: (fromIdx: number, toIdx: number) => void
+    onLibraryAdd: (song: PlayableSong) => void
+    onLibraryRemove: (songId: string) => void
     showToast: (msg: string, error?: boolean) => void
 }
 
@@ -82,6 +84,8 @@ const PlayerContext = createContext<PlayerContextValue>({
     insertNext: () => {},
     removeFromQueue: () => {},
     reorderQueue: () => {},
+    onLibraryAdd: () => {},
+    onLibraryRemove: () => {},
     showToast: () => {},
 })
 
@@ -217,6 +221,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const [queueDropTarget, setQueueDropTarget] = useState<number | null>(null)
     const [draggedQi, setDraggedQi] = useState<number | null>(null)
     const [manualNextIds, setManualNextIds] = useState<Set<string>>(new Set())
+    const [syncPrompt, setSyncPrompt] = useState<{ serverState: PlayerState; localState: PlayerState } | null>(null)
+    const libMapRef = useRef<Map<string, LibrarySong>>(new Map())
     const shuffleSeedRef = useRef<number | null>(null)
     const playContextRef = useRef<PlayContext | null>(null)
 
@@ -254,6 +260,103 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     function applyAudioSrc(audio: HTMLAudioElement, src: string) {
         audio.src = src
         setAudioSrc(src)
+    }
+
+    async function applyPlayerState(state: PlayerState) {
+        const libMap = libMapRef.current
+        let sourceMap: Record<string, PlayContext> = state.queue_sources ?? {}
+        if (Object.keys(sourceMap).length === 0) {
+            try {
+                const raw = localStorage.getItem('playerSources')
+                if (raw) sourceMap = JSON.parse(raw)
+            } catch {}
+        }
+        const fallbackCtx = contextFromId(state.play_context ?? null)
+        const resolveUuids = async (uuids: string[]): Promise<PlayableSong[]> => {
+            const results: PlayableSong[] = []
+            for (const id of uuids) {
+                const lib = libMap.get(id)
+                if (lib?.properties) {
+                    results.push({ uuid: lib.uuid, properties: lib.properties!, last_position: lib.last_position, last_played_at: lib.last_played_at, artwork_cached: lib.artwork_cached, source: sourceMap[id] ?? fallbackCtx })
+                } else {
+                    const fetched = await fetchSongById(id)
+                    if (fetched) results.push({ ...fetched, source: sourceMap[id] ?? fallbackCtx })
+                }
+            }
+            return results
+        }
+
+        setShuffle(state.shuffle)
+        shuffleRef.current = state.shuffle
+        setRepeat(state.repeat)
+        repeatRef.current = state.repeat
+        if (state.play_context) setPlayContext(contextFromId(state.play_context))
+
+        const restoredQueue = await resolveUuids(state.queue ?? [])
+
+        if (restoredQueue.length === 0) {
+            const entries = [...libMap.values()]
+            const last = entries
+                .filter(s => s.last_played_at && s.properties)
+                .sort((a, b) => new Date(b.last_played_at!).getTime() - new Date(a.last_played_at!).getTime())[0]
+            if (last?.properties) {
+                const song: PlayableSong = { uuid: last.uuid, properties: last.properties!, last_position: last.last_position, last_played_at: last.last_played_at, artwork_cached: last.artwork_cached, source: fallbackCtx }
+                setCurrent(song)
+                setCurrentTime(last.last_position ?? 0)
+                queueRef.current = [song]
+                queueIndexRef.current = 0
+                setQueue([song])
+                const audio = audioRef.current
+                if (audio) {
+                    pendingPosition.current = last.last_position ?? 0
+                    const src = await resolveAudioSrc(last.uuid)
+                    applyAudioSrc(audio, src)
+                }
+            }
+            return
+        }
+
+        const safeIndex = Math.max(0, Math.min(state.queue_index, restoredQueue.length - 1))
+        const song = restoredQueue[safeIndex]
+        queueRef.current = restoredQueue
+        queueIndexRef.current = safeIndex
+        setQueue(restoredQueue)
+
+        const seed = state.shuffle_seed
+        const savedPos = state.shuffle_position ?? 0
+        if (state.shuffle_order && state.shuffle_order.length === restoredQueue.length) {
+            shuffleOrderRef.current = state.shuffle_order
+            if (seed != null) shuffleSeedRef.current = seed
+            shufflePosRef.current = Math.max(0, Math.min(savedPos, state.shuffle_order.length - 1))
+            setShuffleOrder([...state.shuffle_order])
+        } else if (seed != null) {
+            shuffleSeedRef.current = seed
+            const rest = seededShuffle(restoredQueue.map((_, i) => i).filter(i => i !== safeIndex), seed)
+            const order = [safeIndex, ...rest]
+            shuffleOrderRef.current = order
+            shufflePosRef.current = Math.max(0, Math.min(savedPos, order.length - 1))
+            setShuffleOrder([...order])
+        } else if (state.shuffle) {
+            generateShuffleOrder(safeIndex)
+        }
+
+        const savedManualNext = state.manual_next ?? []
+        if (savedManualNext.length > 0) {
+            manualNextRef.current = await resolveUuids(savedManualNext)
+            setManualNextIds(new Set(savedManualNext))
+        } else {
+            manualNextRef.current = []
+            setManualNextIds(new Set())
+        }
+
+        setCurrent(song)
+        setCurrentTime(song.last_position ?? 0)
+        const audio = audioRef.current
+        if (audio) {
+            pendingPosition.current = song.last_position ?? 0
+            const src = await resolveAudioSrc(song.uuid)
+            applyAudioSrc(audio, src)
+        }
     }
 
     const savePosition = useCallback((song: PlayableSong, time: number) => {
@@ -337,19 +440,19 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             setShuffleOrder([...order])
         }
         scheduleSave()
+        queueInsert(song.uuid, insertAt, song.source ?? undefined)
         const afterName = queueRef.current[queueIndexRef.current]?.properties?.trackName
         showToast(afterName ? `Playing after ${afterName}` : 'Added to queue')
     }
 
     function removeFromQueue(index: number) {
+        const songId = queueRef.current[index]?.uuid
         const q = [...queueRef.current]
         const currentIdx = queueIndexRef.current
         q.splice(index, 1)
         queueRef.current = q
         if (index <= currentIdx) queueIndexRef.current = Math.max(-1, currentIdx - 1)
         setQueue([...q])
-        // Preserve shuffle seed: drop the removed index from shuffleOrder and shift
-        // higher indices down by 1. Adjust shufflePosRef if the removal was before it.
         if (shuffleRef.current && shuffleOrderRef.current.length > 0) {
             const removedShufflePos = shuffleOrderRef.current.indexOf(index)
             const order = shuffleOrderRef.current
@@ -362,6 +465,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             setShuffleOrder([...order])
         }
         scheduleSave()
+        if (songId) queueRemove(songId)
     }
 
     // fromDpos / toDpos are *display positions* — i.e. positions in the queue panel as the
@@ -370,7 +474,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     function reorderQueue(fromDpos: number, toDpos: number) {
         if (fromDpos === toDpos || fromDpos === toDpos - 1) return
         if (shuffleRef.current) {
-            // Reorder the shuffle order array directly — preserves the seed.
             const order = [...shuffleOrderRef.current]
             const [moved] = order.splice(fromDpos, 1)
             const insertAt = toDpos > fromDpos ? toDpos - 1 : toDpos
@@ -383,9 +486,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             }
             setShuffleOrder([...order])
             scheduleSave()
+            apiQueueReorder(fromDpos, toDpos)
             return
         }
-        // Non-shuffle: dpos === queue index
         const q = [...queueRef.current]
         const [item] = q.splice(fromDpos, 1)
         const insertAt = toDpos > fromDpos ? toDpos - 1 : toDpos
@@ -399,6 +502,50 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         queueIndexRef.current = newIdx
         setQueue([...q])
         scheduleSave()
+        apiQueueReorder(fromDpos, toDpos)
+    }
+
+    function onLibraryAdd(song: PlayableSong) {
+        if (queueRef.current.length === 0) return
+        if (queueRef.current.some(s => s.uuid === song.uuid)) return
+        const q = [...queueRef.current]
+        if (shuffleRef.current) {
+            const insertAt = q.length
+            q.push(song)
+            queueRef.current = q
+            setQueue([...q])
+            if (shuffleOrderRef.current.length > 0) {
+                const remaining = shuffleOrderRef.current.length - shufflePosRef.current - 1
+                const offset = remaining > 0 ? 1 + Math.floor(Math.random() * remaining) : 1
+                const shuffleInsertAt = shufflePosRef.current + offset
+                const order = [...shuffleOrderRef.current]
+                order.splice(shuffleInsertAt, 0, insertAt)
+                shuffleOrderRef.current = order
+                setShuffleOrder([...order])
+            }
+            scheduleSave()
+            queueInsert(song.uuid, insertAt)
+        } else {
+            const trackName = song.properties?.trackName?.toLowerCase() ?? ''
+            const currentIdx = queueIndexRef.current
+            let insertAt = q.length
+            for (let i = currentIdx + 1; i < q.length; i++) {
+                const name = q[i].properties?.trackName?.toLowerCase() ?? ''
+                if (name > trackName) { insertAt = i; break }
+            }
+            q.splice(insertAt, 0, song)
+            queueRef.current = q
+            setQueue([...q])
+            scheduleSave()
+            queueInsert(song.uuid, insertAt)
+        }
+    }
+
+    function onLibraryRemove(songId: string) {
+        const idx = queueRef.current.findIndex(s => s.uuid === songId)
+        if (idx < 0) return
+        if (idx === queueIndexRef.current) return
+        removeFromQueue(idx)
     }
 
     function setMediaAction(action: MediaSessionAction, handler: MediaSessionActionHandler | null) {
@@ -544,7 +691,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 repeat: repeatRef.current,
                 queue: queueRef.current.map(s => s.uuid),
                 queue_index: queueIndexRef.current,
-                shuffle_order: null, // legacy — replaced by seed
+                shuffle_order: shuffleOrderRef.current,
                 play_context: ctx?.id ?? null,
                 shuffle_seed: shuffleSeedRef.current,
                 shuffle_position: shufflePosRef.current,
@@ -552,7 +699,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 current_song_uuid: queueRef.current[queueIndexRef.current]?.uuid ?? null,
                 queue_sources: sources,
             }
-            try { localStorage.setItem('playerState', JSON.stringify(state)) } catch {}
+            try { localStorage.setItem('playerState', JSON.stringify({ ...state, saved_at: new Date().toISOString() })) } catch {}
             savePlayerState(state)
         }, 2000)
     }
@@ -738,120 +885,35 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     useEffect(() => {
         Promise.all([fetchPlayerState(), fetchLibrarySongs()]).then(async ([serverState, libSongs]) => {
             const libMap = new Map((libSongs ?? []).map(s => [s.uuid, s]))
+            libMapRef.current = libMap
 
-            let localState: typeof serverState | undefined
+            let localState: (PlayerState & { saved_at?: string }) | undefined
             try {
                 const raw = localStorage.getItem('playerState')
                 if (raw) localState = JSON.parse(raw)
             } catch {}
-            const state = serverState ?? localState
 
-            let sourceMap: Record<string, PlayContext> = state?.queue_sources ?? {}
-            if (Object.keys(sourceMap).length === 0) {
-                // Legacy fallback — pre queue_sources rollout
-                try {
-                    const raw = localStorage.getItem('playerSources')
-                    if (raw) sourceMap = JSON.parse(raw)
-                } catch {}
-            }
+            const queuesMatch = serverState && localState
+                && serverState.current_song_uuid === localState.current_song_uuid
+                && JSON.stringify(serverState.queue) === JSON.stringify(localState.queue)
 
-            if (state) {
-                setShuffle(state.shuffle)
-                shuffleRef.current = state.shuffle
-                setRepeat(state.repeat)
-                repeatRef.current = state.repeat
-            }
-
-            if (hasUserPlayedRef.current) return
-
-            const queueUuids = state?.queue ?? []
-            const resolveUuids = async (uuids: string[]): Promise<PlayableSong[]> => {
-                const results: PlayableSong[] = []
-                for (const id of uuids) {
-                    const lib = libMap.get(id)
-                    if (lib?.properties) {
-                        results.push({ uuid: lib.uuid, properties: lib.properties!, last_position: lib.last_position, last_played_at: lib.last_played_at, artwork_cached: lib.artwork_cached, source: sourceMap[id] ?? fallbackCtx })
-                    } else {
-                        const fetched = await fetchSongById(id)
-                        if (fetched) results.push({ ...fetched, source: sourceMap[id] ?? fallbackCtx })
-                    }
-                }
-                return results
-            }
-            const fallbackCtx = contextFromId(state?.play_context ?? null)
-            const restoredQueue = await resolveUuids(queueUuids)
-            if (hasUserPlayedRef.current) return
-
-            const warmArtworkCache = (songs: PlayableSong[]) => {
-                const urls = songs.flatMap(s => [
-                    s.properties?.artworkUrl100 ? artworkUrl(s.properties.artworkUrl100, 400) : null,
-                    s.artwork_cached ? songArtworkUrl(s.uuid, true, undefined, 200) : null,
-                    s.artwork_cached ? songArtworkUrl(s.uuid, true, undefined, 400) : null,
-                ].filter((u): u is string => !!u))
-                if (urls.length) cacheArtworkUrls(urls)
-            }
-
-            if (restoredQueue.length > 0) {
-                const safeIndex = Math.max(0, Math.min(state!.queue_index, restoredQueue.length - 1))
-                const song = restoredQueue[safeIndex]
-                queueRef.current = restoredQueue
-                queueIndexRef.current = safeIndex
-                setQueue(restoredQueue)
-                warmArtworkCache(restoredQueue)
-                // Restore shuffle order whenever a seed exists, regardless of whether
-                // shuffle is currently on — so toggling on after reload doesn't reshuffle.
-                const seed = (state as { shuffle_seed?: number | null }).shuffle_seed
-                const savedPos = (state as { shuffle_position?: number }).shuffle_position ?? 0
-                if (seed != null) {
-                    shuffleSeedRef.current = seed
-                    const rest = seededShuffle(restoredQueue.map((_, i) => i).filter(i => i !== safeIndex), seed)
-                    const order = [safeIndex, ...rest]
-                    shuffleOrderRef.current = order
-                    shufflePosRef.current = Math.max(0, Math.min(savedPos, order.length - 1))
-                    setShuffleOrder([...order])
-                } else if (state?.shuffle && state.shuffle_order && state.shuffle_order.length === restoredQueue.length) {
-                    // Legacy: index array saved before seed migration
-                    shuffleOrderRef.current = state.shuffle_order
-                    shufflePosRef.current = Math.max(0, state.shuffle_order.indexOf(safeIndex))
-                    setShuffleOrder([...state.shuffle_order])
-                } else if (state?.shuffle) {
-                    generateShuffleOrder(safeIndex)
-                }
-                // Restore manual_next queue
-                const savedManualNext = (state as { manual_next?: string[] }).manual_next ?? []
-                if (savedManualNext.length > 0) {
-                    manualNextRef.current = await resolveUuids(savedManualNext)
-                    setManualNextIds(new Set(savedManualNext))
-                }
-                setCurrent(song)
-                setCurrentTime(song.last_position ?? 0)
-                const audio = audioRef.current
-                if (audio) {
-                    pendingPosition.current = song.last_position ?? 0
-                    const src = await resolveAudioSrc(song.uuid)
-                    applyAudioSrc(audio, src)
+            let state: PlayerState | undefined
+            if (serverState && localState && !queuesMatch) {
+                const serverTime = serverState.updated_at ? new Date(serverState.updated_at).getTime() : Infinity
+                const localTime = localState.saved_at ? new Date(localState.saved_at).getTime() : 0
+                if (localTime > serverTime) {
+                    setSyncPrompt({ serverState, localState })
+                    state = localState
+                } else {
+                    showToast('Player synced from another device')
+                    state = serverState
                 }
             } else {
-                // fallback: restore last played song
-                const last = (libSongs ?? [])
-                    .filter(s => s.last_played_at && s.properties)
-                    .sort((a, b) => new Date(b.last_played_at!).getTime() - new Date(a.last_played_at!).getTime())[0]
-                if (last?.properties) {
-                    const song = { uuid: last.uuid, properties: last.properties, last_position: last.last_position, last_played_at: last.last_played_at, artwork_cached: last.artwork_cached, source: sourceMap[last.uuid] ?? fallbackCtx }
-                    setCurrent(song)
-                    setCurrentTime(last.last_position ?? 0)
-                    queueRef.current = [song]
-                    queueIndexRef.current = 0
-                    setQueue([song])
-                    warmArtworkCache([song])
-                    const audio = audioRef.current
-                    if (audio) {
-                        pendingPosition.current = last.last_position ?? 0
-                        const src = await resolveAudioSrc(last.uuid)
-                        applyAudioSrc(audio, src)
-                    }
-                }
+                state = serverState ?? localState
             }
+
+            if (!state || hasUserPlayedRef.current) return
+            await applyPlayerState(state)
         }).catch(() => {})
     }, [])
 
@@ -883,9 +945,22 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const pathname = usePathname()
     const isEditorPage = /^\/songs\/[^/]+\/edit/.test(pathname)
 
+    async function handleSyncLoad() {
+        if (!syncPrompt) return
+        await applyPlayerState(syncPrompt.serverState)
+        setSyncPrompt(null)
+        showToast('Loaded player state from other device')
+    }
+
+    function handleSyncKeep() {
+        setSyncPrompt(null)
+        scheduleSave()
+        showToast('Kept local player state')
+    }
+
     const contextValue = useMemo(() => ({
         current, isPlaying, queue, shuffle, repeat, playContext,
-        play, pause, resume, skipNext, skipPrev, toggleShuffle, toggleRepeat, insertNext, removeFromQueue, reorderQueue, showToast,
+        play, pause, resume, skipNext, skipPrev, toggleShuffle, toggleRepeat, insertNext, removeFromQueue, reorderQueue, onLibraryAdd, onLibraryRemove, showToast,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }), [current, isPlaying, queue, shuffle, repeat, playContext, showToast])
 
@@ -894,8 +969,32 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             <audio ref={audioRef} src={audioSrc || undefined} preload="metadata" playsInline/>
             {children}
             {toast && (
-                <div className={`fixed bottom-24 left-1/2 -translate-x-1/2 z-[60] px-4 py-2 rounded-full text-xs font-medium shadow-lg pointer-events-none whitespace-nowrap ${toast.error ? 'bg-red-900 text-red-200' : 'bg-gray-900 text-white'}`}>
+                <div className={`fixed bottom-24 left-1/2 -translate-x-1/2 z-[60] px-4 py-2 rounded-full text-xs font-medium shadow-lg pointer-events-none whitespace-nowrap ${toast.error ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' : 'bg-gray-100 text-gray-900 dark:bg-gray-900 dark:text-white'}`}>
                     {toast.msg}
+                </div>
+            )}
+            {syncPrompt && (
+                <div data-testid="sync-prompt" className="fixed inset-0 z-[70] flex items-end justify-center bg-black/40">
+                    <div className="w-full max-w-md bg-white dark:bg-gray-900 rounded-t-2xl p-6 shadow-2xl">
+                        <p className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-1">Player out of sync</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">Your local player state differs from another device. Which would you like to keep?</p>
+                        <div className="flex gap-3">
+                            <button
+                                data-testid="sync-load-remote"
+                                onClick={handleSyncLoad}
+                                className="flex-1 px-4 py-2.5 rounded-lg bg-sky-500 text-white text-sm font-medium hover:bg-sky-600 transition-colors"
+                            >
+                                Load from other device
+                            </button>
+                            <button
+                                data-testid="sync-keep-local"
+                                onClick={handleSyncKeep}
+                                className="flex-1 px-4 py-2.5 rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm font-medium hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                            >
+                                Keep mine
+                            </button>
+                        </div>
+                    </div>
                 </div>
             )}
             {current && p && !isEditorPage && (
@@ -973,6 +1072,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                                     className={`flex items-center gap-3 px-4 border-t-2 border-b-2 transition-colors select-none ${isDropTarget ? 'border-t-sky-500' : 'border-t-transparent'} ${isDropAfter ? 'border-b-sky-500' : 'border-b-transparent'} ${isBeingDragged ? 'opacity-40' : ''} ${isActive ? 'bg-sky-50 dark:bg-sky-950/30' : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'}`}
                                                 >
                                                     <span
+                                                        data-testid="queue-drag-handle"
                                                         className="text-gray-300 dark:text-gray-600 cursor-grab active:cursor-grabbing shrink-0 touch-none select-none p-2 -m-2"
                                                         onPointerDown={e => { e.preventDefault(); dragFromRef.current = dpos; setDraggedQi(dpos); setQueueDropTarget(null) }}
                                                     >
@@ -996,7 +1096,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                                             {song.source.label}
                                                         </Link>
                                                     )}
-                                                    <button onClick={() => removeFromQueue(qi)} className="shrink-0 text-gray-300 dark:text-gray-600 hover:text-red-400 transition-colors p-1">
+                                                    <button data-testid="queue-remove" onClick={() => removeFromQueue(qi)} className="shrink-0 text-gray-300 dark:text-gray-600 hover:text-red-400 transition-colors p-1">
                                                         <FaTimes size={10} />
                                                     </button>
                                                 </div>
