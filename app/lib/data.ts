@@ -577,7 +577,9 @@ export interface AdminStats {
   disk_bytes: number
   disk_total: number
   disk_free: number
+  edit_job_count: number
   failed_job_count: number
+  error_log_count: number
   active_share_tokens: number
   import_count: number
   import_failed_count: number
@@ -595,6 +597,7 @@ export async function fetchAdminStats(): Promise<AdminStats | undefined> {
 export interface EditJobsPage {
   total: number
   jobs: EditJobSummary[]
+  status_counts?: Record<string, number>
 }
 
 export async function fetchAdminEditJobs(query = '', limit = 20, offset = 0): Promise<EditJobsPage> {
@@ -618,6 +621,7 @@ export interface ErrorLogEntry {
 export interface ErrorsPage {
   total: number
   errors: ErrorLogEntry[]
+  source_counts?: Record<string, number>
 }
 
 export async function fetchAdminErrors(query = '', limit = 50, offset = 0): Promise<ErrorsPage> {

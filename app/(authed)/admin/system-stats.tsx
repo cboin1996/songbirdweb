@@ -52,6 +52,7 @@ export default function SystemStats() {
     })
     const errors = errorData?.errors ?? []
     const errorTotal = errorData?.total ?? 0
+    const errorSourceCounts = errorData?.source_counts ?? {}
 
     const { data: jobData, error: jobsQueryError, refetch: refetchJobs, isLoading: jobsLoading, isFetching: jobsFetching } = useQuery({
         queryKey: ['admin-edit-jobs', debouncedJobFilter, jobPage],
@@ -60,6 +61,7 @@ export default function SystemStats() {
     })
     const editJobs = jobData?.jobs ?? []
     const jobTotal = jobData?.total ?? 0
+    const jobCounts = jobData?.status_counts ?? {}
 
     const { data: importData, error: importsQueryError, refetch: refetchImports, isLoading: importsLoading, isFetching: importsFetching } = useQuery({
         queryKey: ['admin-imports', debouncedImportFilter, importPage],
@@ -132,20 +134,6 @@ export default function SystemStats() {
                 )}
             </section>
 
-            {/* ── Imports ── */}
-            <section className="flex flex-col gap-4">
-                <p className="text-gray-400 text-sm font-medium uppercase tracking-wide">imports</p>
-                <div className="flex flex-wrap gap-6">
-                    <Stat value={stats.import_count} label="total" />
-                    <Stat value={importSuccessCount} label="succeeded" color="text-green-500" />
-                    <Stat value={stats.import_failed_count} label="failed" color={stats.import_failed_count > 0 ? 'text-red-500' : undefined} />
-                    <Stat value={stats.import_duplicate_count} label="duplicates skipped" color={stats.import_duplicate_count > 0 ? 'text-amber-500' : undefined} />
-                    {stats.import_count > 0 && (
-                        <Stat value={`${importErrorRate}%`} label="error rate" color={importErrorRate > 0 ? 'text-red-400' : 'text-green-500'} />
-                    )}
-                </div>
-            </section>
-
             {/* ── Activity (last 7 days) ── */}
             {stats.plays_by_day.length > 0 && (
                 <section className="flex flex-col gap-4">
@@ -170,7 +158,6 @@ export default function SystemStats() {
                             </tbody>
                         </table>
                     </div>
-                    <p className="text-gray-500 text-xs">import totals are shown in the Imports section above</p>
                 </section>
             )}
 
@@ -233,35 +220,46 @@ export default function SystemStats() {
 
             </>}
 
-            {/* ── Imports (all users) ── */}
+            {/* ── Imports ── */}
             <section className="flex flex-col gap-4">
-                <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-gray-400 text-sm font-medium uppercase tracking-wide">imports</span>
-                    {(importCounts.done ?? 0) > 0 && (
-                        <span className="text-xs px-2 py-0.5 rounded-full border bg-green-50 dark:bg-green-950/30 text-green-600 dark:text-green-400 border-green-200 dark:border-green-900">
-                            {importCounts.done} done
-                        </span>
-                    )}
-                    {(importCounts.duplicate ?? 0) > 0 && (
-                        <span className="text-xs px-2 py-0.5 rounded-full border bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-900">
-                            {importCounts.duplicate} duplicate
-                        </span>
-                    )}
-                    {(importCounts.failed ?? 0) > 0 && (
-                        <span className="text-xs px-2 py-0.5 rounded-full border bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 border-red-200 dark:border-red-900">
-                            {importCounts.failed} failed
-                        </span>
-                    )}
-                </div>
+                <p className="text-gray-400 text-sm font-medium uppercase tracking-wide">imports</p>
+                {stats && (
+                    <div className="flex flex-wrap gap-6">
+                        <Stat value={stats.import_count} label="total" />
+                        <Stat value={importSuccessCount} label="succeeded" color="text-green-500" />
+                        <Stat value={stats.import_failed_count} label="failed" color={stats.import_failed_count > 0 ? 'text-red-500' : undefined} />
+                        <Stat value={stats.import_duplicate_count} label="duplicates" color={stats.import_duplicate_count > 0 ? 'text-amber-500' : undefined} />
+                        {stats.import_count > 0 && (
+                            <Stat value={`${importErrorRate}%`} label="error rate" color={importErrorRate > 0 ? 'text-red-400' : 'text-green-500'} />
+                        )}
+                    </div>
+                )}
                 {importsLoading ? <TableSkeleton rows={5} cols={5} /> : (
                     <div className={`flex flex-col gap-2 transition-opacity ${importsFetching ? 'opacity-50' : ''}`}>
                         {importsQueryError && <QueryError error={importsQueryError} retry={refetchImports} context="imports" />}
-                        <SearchInput
-                            value={importFilter}
-                            onChange={handleImportFilterChange}
-                            placeholder="filter by name, user, status, filename…"
-                            className="w-full max-w-sm"
-                        />
+                        <div className="flex flex-wrap items-center gap-2">
+                            <SearchInput
+                                value={importFilter}
+                                onChange={handleImportFilterChange}
+                                placeholder="filter by name, user, status, filename…"
+                                className="w-full max-w-sm"
+                            />
+                            {(importCounts.done ?? 0) > 0 && (
+                                <span className="text-xs px-2 py-0.5 rounded-full border bg-green-50 dark:bg-green-950/30 text-green-600 dark:text-green-400 border-green-200 dark:border-green-900">
+                                    {importCounts.done} done
+                                </span>
+                            )}
+                            {(importCounts.duplicate ?? 0) > 0 && (
+                                <span className="text-xs px-2 py-0.5 rounded-full border bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-900">
+                                    {importCounts.duplicate} duplicate
+                                </span>
+                            )}
+                            {(importCounts.failed ?? 0) > 0 && (
+                                <span className="text-xs px-2 py-0.5 rounded-full border bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 border-red-200 dark:border-red-900">
+                                    {importCounts.failed} failed
+                                </span>
+                            )}
+                        </div>
                         <div className="overflow-x-auto">
                             <table className="text-sm w-full">
                                 <thead>
@@ -332,19 +330,32 @@ export default function SystemStats() {
                 <p className="text-gray-400 text-sm font-medium uppercase tracking-wide">edit jobs</p>
                 {stats && (
                     <div className="flex flex-wrap gap-6">
-                        <Stat value={stats.failed_job_count} label="all-time failed" color={stats.failed_job_count > 0 ? 'text-red-500' : undefined} />
+                        <Stat value={stats.edit_job_count} label="total" />
+                        <Stat value={stats.failed_job_count} label="failed" color={stats.failed_job_count > 0 ? 'text-red-500' : undefined} />
                     </div>
                 )}
 
                 {jobsLoading ? <TableSkeleton rows={5} cols={5} /> : (
                     <div className={`flex flex-col gap-2 transition-opacity ${jobsFetching ? 'opacity-50' : ''}`}>
                         {jobsQueryError && <QueryError error={jobsQueryError} retry={refetchJobs} context="edit jobs" />}
-                        <SearchInput
-                            value={jobFilter}
-                            onChange={handleJobFilterChange}
-                            placeholder="filter by status, id, user, error, date…"
-                            className="w-full max-w-sm"
-                        />
+                        <div className="flex flex-wrap items-center gap-2">
+                            <SearchInput
+                                value={jobFilter}
+                                onChange={handleJobFilterChange}
+                                placeholder="filter by status, id, user, error, date…"
+                                className="w-full max-w-sm"
+                            />
+                            {Object.entries(jobCounts).map(([status, count]) => (
+                                <span key={status} className={`text-xs px-2 py-0.5 rounded-full border ${
+                                    status === 'done' ? 'bg-green-50 dark:bg-green-950/30 text-green-600 dark:text-green-400 border-green-200 dark:border-green-900' :
+                                    status === 'failed' ? 'bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 border-red-200 dark:border-red-900' :
+                                    status === 'processing' ? 'bg-sky-50 dark:bg-sky-950/30 text-sky-600 dark:text-sky-400 border-sky-200 dark:border-sky-900' :
+                                    'bg-gray-50 dark:bg-gray-950/30 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-900'
+                                }`}>
+                                    {count} {status}
+                                </span>
+                            ))}
+                        </div>
                         <div className="overflow-x-auto">
                             <table className="text-sm w-full">
                                 <thead>
@@ -405,15 +416,34 @@ export default function SystemStats() {
             {/* ── Errors ── */}
             <section className="flex flex-col gap-4">
                 <p className="text-gray-400 text-sm font-medium uppercase tracking-wide">errors</p>
+                {stats && (
+                    <div className="flex flex-wrap gap-6">
+                        <Stat value={stats.error_log_count + stats.failed_job_count} label="total" color={(stats.error_log_count + stats.failed_job_count) > 0 ? 'text-red-500' : undefined} />
+                        <Stat value={stats.error_log_count} label="error logs" />
+                        <Stat value={stats.failed_job_count} label="failed edit jobs" />
+                    </div>
+                )}
                 {errorsLoading ? <TableSkeleton rows={5} cols={3} /> : (
                     <div className={`flex flex-col gap-2 transition-opacity ${errorsFetching ? 'opacity-50' : ''}`}>
                         {errorsQueryError && <QueryError error={errorsQueryError} retry={refetchErrors} context="errors" />}
-                        <SearchInput
-                            value={errorFilter}
-                            onChange={handleErrorFilterChange}
-                            placeholder="filter by message, path, method, status, user, date…"
-                            className="w-full max-w-sm"
-                        />
+                        <div className="flex flex-wrap items-center gap-2">
+                            <SearchInput
+                                value={errorFilter}
+                                onChange={handleErrorFilterChange}
+                                placeholder="filter by message, path, method, status, user, date…"
+                                className="w-full max-w-sm"
+                            />
+                            {(errorSourceCounts.error_log ?? 0) > 0 && (
+                                <span className="text-xs px-2 py-0.5 rounded-full border bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 border-red-200 dark:border-red-900">
+                                    {errorSourceCounts.error_log} error logs
+                                </span>
+                            )}
+                            {(errorSourceCounts.failed_edit_job ?? 0) > 0 && (
+                                <span className="text-xs px-2 py-0.5 rounded-full border bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-900">
+                                    {errorSourceCounts.failed_edit_job} failed edit jobs
+                                </span>
+                            )}
+                        </div>
                         <div className="flex flex-col gap-1">
                             {errors.length === 0 ? (
                                 <p className="text-gray-500 text-sm">no results</p>
