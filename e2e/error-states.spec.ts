@@ -9,75 +9,84 @@ test.describe('error states — page boundaries', () => {
     })
 
     test('import page shows QueryError when jobs API fails', async ({ page }) => {
+        const common = new CommonPage(page)
         await page.route('**/v1/import?*', route =>
             route.fulfill({ status: 500, body: 'Internal Server Error' })
         )
         await page.goto(routes.import)
-        await expect(page.getByRole('button', { name: 'retry' }).first()).toBeVisible({ timeout: 10000 })
+        await expect(common.queryError('import-history')).toBeVisible({ timeout: 10000 })
     })
 
     test('import page retry button recovers after error', async ({ page }) => {
+        const common = new CommonPage(page)
         let blocked = true
         await page.route('**/v1/import?*', route => {
             if (blocked) return route.fulfill({ status: 500, body: 'Internal Server Error' })
             return route.continue()
         })
         await page.goto(routes.import)
-        await expect(page.getByRole('button', { name: 'retry' }).first()).toBeVisible({ timeout: 10000 })
+        const qe = common.queryError('import-history')
+        await expect(qe).toBeVisible({ timeout: 10000 })
 
         blocked = false
-        await page.getByRole('button', { name: 'retry' }).first().click()
-        await expect(page.getByRole('button', { name: 'retry' })).not.toBeVisible({ timeout: 10000 })
+        await qe.getByRole('button', { name: 'retry' }).click()
+        await expect(qe).not.toBeVisible({ timeout: 10000 })
     })
 
     test('admin page shows QueryError when edit-jobs API fails', async ({ page }) => {
+        const common = new CommonPage(page)
         await page.route('**/v1/admin/edit-jobs*', route =>
             route.fulfill({ status: 500, body: 'Internal Server Error' })
         )
         await page.goto(routes.admin)
-        await expect(page.getByTestId('query-error-edit-jobs')).toBeVisible({ timeout: 10000 })
+        await expect(common.queryError('edit-jobs')).toBeVisible({ timeout: 10000 })
     })
 
     test('admin page shows QueryError when errors API fails', async ({ page }) => {
+        const common = new CommonPage(page)
         await page.route('**/v1/admin/errors*', route =>
             route.fulfill({ status: 500, body: 'Internal Server Error' })
         )
         await page.goto(routes.admin)
-        await expect(page.getByTestId('query-error-errors')).toBeVisible({ timeout: 10000 })
+        await expect(common.queryError('errors')).toBeVisible({ timeout: 10000 })
     })
 
     test('admin page shows QueryError when imports API fails', async ({ page }) => {
+        const common = new CommonPage(page)
         await page.route('**/v1/admin/imports*', route =>
             route.fulfill({ status: 500, body: 'Internal Server Error' })
         )
         await page.goto(routes.admin)
-        await expect(page.getByTestId('query-error-imports')).toBeVisible({ timeout: 10000 })
+        await expect(common.queryError('imports')).toBeVisible({ timeout: 10000 })
     })
 
     test('admin page shows QueryError when users API fails', async ({ page }) => {
+        const common = new CommonPage(page)
         await page.route('**/v1/admin/users*', route =>
             route.fulfill({ status: 500, body: 'Internal Server Error' })
         )
         await page.goto(routes.admin)
-        await expect(page.getByTestId('query-error-users')).toBeVisible({ timeout: 10000 })
+        await expect(common.queryError('users')).toBeVisible({ timeout: 10000 })
     })
 
     test('admin page shows QueryError when stats API fails', async ({ page }) => {
+        const common = new CommonPage(page)
         await page.route('**/v1/admin/stats*', route =>
             route.fulfill({ status: 500, body: 'Internal Server Error' })
         )
         await page.goto(routes.admin)
-        await expect(page.getByTestId('query-error-system-stats')).toBeVisible({ timeout: 10000 })
+        await expect(common.queryError('system-stats')).toBeVisible({ timeout: 10000 })
     })
 
     test('admin edit-jobs retry recovers after error', async ({ page }) => {
+        const common = new CommonPage(page)
         let blocked = true
         await page.route('**/v1/admin/edit-jobs*', route => {
             if (blocked) return route.fulfill({ status: 500, body: 'Internal Server Error' })
             return route.continue()
         })
         await page.goto(routes.admin)
-        const qe = page.getByTestId('query-error-edit-jobs')
+        const qe = common.queryError('edit-jobs')
         await expect(qe).toBeVisible({ timeout: 10000 })
 
         blocked = false
@@ -86,13 +95,14 @@ test.describe('error states — page boundaries', () => {
     })
 
     test('admin imports retry recovers after error', async ({ page }) => {
+        const common = new CommonPage(page)
         let blocked = true
         await page.route('**/v1/admin/imports*', route => {
             if (blocked) return route.fulfill({ status: 500, body: 'Internal Server Error' })
             return route.continue()
         })
         await page.goto(routes.admin)
-        const qe = page.getByTestId('query-error-imports')
+        const qe = common.queryError('imports')
         await expect(qe).toBeVisible({ timeout: 10000 })
 
         blocked = false
@@ -101,13 +111,14 @@ test.describe('error states — page boundaries', () => {
     })
 
     test('admin users retry recovers after error', async ({ page }) => {
+        const common = new CommonPage(page)
         let blocked = true
         await page.route('**/v1/admin/users*', route => {
             if (blocked) return route.fulfill({ status: 500, body: 'Internal Server Error' })
             return route.continue()
         })
         await page.goto(routes.admin)
-        const qe = page.getByTestId('query-error-users')
+        const qe = common.queryError('users')
         await expect(qe).toBeVisible({ timeout: 10000 })
 
         blocked = false
@@ -122,8 +133,10 @@ test.describe('error states — mutations', () => {
     })
 
     test('remove from library shows error on failure', async ({ page }) => {
+        const common = new CommonPage(page)
+        const library = new LibraryPage(page)
         await page.goto(routes.library)
-        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 15000 })
+        await library.waitForSongs()
 
         await page.route('**/v1/library/*', route => {
             if (route.request().method() === 'DELETE')
@@ -131,9 +144,9 @@ test.describe('error states — mutations', () => {
             return route.continue()
         })
 
-        const card = page.getByTestId('song-card').first()
-        await card.getByTestId('song-library-toggle').click()
-        await expect(page.getByTestId('toast-error')).toContainText('could not remove from library', { timeout: 5000 })
+        const card = library.songCards.first()
+        await library.libraryToggle(card).click()
+        await expect(common.toastError).toContainText('could not remove from library', { timeout: 5000 })
     })
 
     test('change password shows error on failure', async ({ page }) => {
@@ -147,10 +160,11 @@ test.describe('error states — mutations', () => {
         await page.getByPlaceholder('new password', { exact: true }).fill('newpass123')
         await page.getByPlaceholder('confirm new password').fill('newpass123')
         await page.getByRole('button', { name: /update password/i }).click()
-        await expect(page.locator('text=server unavailable')).toBeVisible({ timeout: 5000 })
+        await expect(page.getByText('server unavailable')).toBeVisible({ timeout: 5000 })
     })
 
     test('file upload shows failed status on error', async ({ page }) => {
+        const common = new CommonPage(page)
         await page.route('**/v1/import*', route => {
             if (route.request().method() === 'POST')
                 return route.fulfill({ status: 500, body: 'Internal Server Error' })
@@ -159,12 +173,12 @@ test.describe('error states — mutations', () => {
         await page.goto(routes.import)
 
         const buffer = Buffer.from('fake mp3 content for test')
-        await page.getByTestId('import-file-input').setInputFiles({
+        await common.importFileInput.setInputFiles({
             name: 'test-error.mp3',
             mimeType: 'audio/mpeg',
             buffer,
         })
-        await expect(page.locator('text=upload failed')).toBeVisible({ timeout: 10000 })
+        await expect(page.getByText('upload failed')).toBeVisible({ timeout: 10000 })
     })
 })
 
@@ -179,10 +193,9 @@ test.describe('error states — editor', () => {
         await editor.openFromLibrary()
         await editor.waitForWaveform()
 
-        await editor.audioTab.click()
-        await editor.scrubFill('trim start', '0:02')
+        await editor.normalizeCheckbox.click()
 
-        await page.route('**/v1/edit/jobs*', route => {
+        await page.route('**/v1/edit/songs/*', route => {
             if (route.request().method() === 'POST')
                 return route.fulfill({ status: 500, body: 'Internal Server Error' })
             return route.continue()
@@ -198,8 +211,7 @@ test.describe('error states — editor', () => {
         await editor.openFromLibrary()
         await editor.waitForWaveform()
 
-        await editor.audioTab.click()
-        await editor.scrubFill('trim start', '0:02')
+        await editor.normalizeCheckbox.click()
 
         await page.route('**/v1/edit/songs/*/draft', route => {
             if (route.request().method() === 'PUT')
@@ -217,8 +229,7 @@ test.describe('error states — editor', () => {
         await editor.openFromLibrary()
         await editor.waitForWaveform()
 
-        await editor.audioTab.click()
-        await editor.scrubFill('trim start', '0:02')
+        await editor.normalizeCheckbox.click()
 
         await page.route('**/v1/edit/songs/*/draft', route => {
             if (route.request().method() === 'DELETE')
@@ -235,8 +246,7 @@ test.describe('error states — editor', () => {
         await editor.openFromLibrary()
         await editor.waitForWaveform()
 
-        await editor.audioTab.click()
-        await editor.scrubFill('trim start', '0:02')
+        await editor.addCutBtn.click()
 
         await page.route('**/v1/edit/songs/*/draft', route => {
             if (route.request().method() === 'PUT')
@@ -273,7 +283,7 @@ test.describe('error states — editor', () => {
         await expect(library.songCards.first()).toBeVisible({ timeout: 10000 })
         const songId = await library.songCards.first().getAttribute('data-song-id')
 
-        await page.route('**/v1/library/songs*', route =>
+        await page.route('**/v1/songs/library*', route =>
             route.fulfill({ status: 500, body: 'Internal Server Error' })
         )
 
@@ -289,10 +299,11 @@ test.describe('error states — library', () => {
 
     test('library shows QueryError when API fails', async ({ page }) => {
         const common = new CommonPage(page)
+        const library = new LibraryPage(page)
         await page.goto(routes.library)
-        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
+        await library.waitForSongs()
 
-        await page.route('**/v1/library/songs*', route =>
+        await page.route('**/v1/songs/library*', route =>
             route.fulfill({ status: 500, body: 'Internal Server Error' })
         )
 
@@ -303,6 +314,7 @@ test.describe('error states — library', () => {
 
 test.describe('error states — login', () => {
     test('login shows server unavailable when API is down', async ({ page }) => {
+        await page.context().clearCookies()
         await page.goto(routes.home)
         await page.getByPlaceholder('username').fill('testuser')
         await page.getByPlaceholder('password').fill('testpass')
@@ -311,7 +323,8 @@ test.describe('error states — login', () => {
             route.fulfill({ status: 500, body: 'Internal Server Error' })
         )
 
-        await page.getByTestId('login-submit').click()
+        const common = new CommonPage(page)
+        await common.loginSubmit.click()
         await expect(page.getByText('server unavailable')).toBeVisible({ timeout: 5000 })
     })
 })
