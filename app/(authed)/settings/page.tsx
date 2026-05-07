@@ -116,8 +116,11 @@ export default function Page() {
             setCurrentPassword('')
             setNewPassword('')
             setConfirmPassword('')
-        } catch {
-            setError('incorrect current password')
+        } catch (err: any) {
+            const s = err?.status
+            if (s === 0 || s === undefined || s >= 500) setError('server unavailable')
+            else if (s === 401) setError('incorrect current password')
+            else setError('password change failed')
             return
         }
     }

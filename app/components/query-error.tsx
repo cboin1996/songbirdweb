@@ -14,7 +14,7 @@ export default function QueryError({ error, retry, context, message }: { error: 
     }
 
     return (
-        <div className="w-fit rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 px-4 py-3">
+        <div data-testid={context ? `query-error-${context.replace(/\s+/g, '-')}` : 'query-error'} className="w-fit rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 px-4 py-3">
             <div className="flex items-center gap-3">
                 <p className="text-sm text-red-600 dark:text-red-400 flex-1">
                     {message ?? (context ? `couldn't load ${context}` : 'something went wrong')}

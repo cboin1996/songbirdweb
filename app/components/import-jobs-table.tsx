@@ -221,8 +221,8 @@ export default function ImportJobsTable({
               </tr>
             </thead>
             <tbody>
-              {jobs.length === 0 ? (
-                <tr><td colSpan={4} className="py-2 text-gray-500">no results</td></tr>
+              {(jobs.length === 0 || jobsError) ? (
+                <tr><td colSpan={4} className="py-2 text-gray-500">{jobsError ? '' : 'no results'}</td></tr>
               ) : jobs.map(job => (
                 <tr key={job.job_id} className="border-b border-gray-100 dark:border-gray-800">
                   <td className="py-2 pr-4 text-gray-400 whitespace-nowrap text-xs">

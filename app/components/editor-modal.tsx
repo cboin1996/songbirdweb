@@ -12,7 +12,11 @@ import { uncacheSong } from '../lib/offline'
 import { FaPlay, FaPause, FaTimes, FaUndo, FaRedo, FaTrash, FaCut, FaChevronDown } from 'react-icons/fa'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
+import { useQueryClient } from '@tanstack/react-query'
+import { queryKeys } from '../lib/query-keys'
 import { usePlayer } from './player'
+import { useToast } from './toast'
+import QueryError from './query-error'
 import { routes, editSongRoute } from '../lib/routes'
 import { makeLocalId } from '../lib/uuid'
 
@@ -105,12 +109,14 @@ interface Props {
   parentSongId?: string | null
   rootSongId?: string | null
   isAdmin: boolean
+  onRetryAudio: () => void
 }
 
 export default function EditorModal({
-  songId, properties: initialProperties, artworkCached, parentSongId, rootSongId, isAdmin,
+  songId, properties: initialProperties, artworkCached, parentSongId, rootSongId, isAdmin, onRetryAudio,
 }: Props) {
   const router = useRouter()
+  const queryClient = useQueryClient()
   const modalRef = useRef<HTMLDivElement>(null)
   const [tab, setTab] = useState<Tab>('audio')
 
@@ -137,7 +143,8 @@ export default function EditorModal({
   const regionsRef = useRef<ReturnType<typeof RegionsPlugin.create> | null>(null)
   const [wsReady, setWsReady] = useState(false)
   const wsReadyRef = useRef(false)
-  const [wsLoadError, setWsLoadError] = useState(false)
+  const [wsLoadError, setWsLoadError] = useState<Error | null>(null)
+  const [origLoadError, setOrigLoadError] = useState<Error | null>(null)
   const [wfPlaying, setWfPlaying] = useState(false)
 
   const trimParamsRef = useRef({ trim_start: 0, trim_end: null as number | null })
@@ -176,6 +183,7 @@ export default function EditorModal({
   const programmaticRegionRef = useRef(false)
 
   const { pause: pausePlayer, isPlaying: playerIsPlaying } = usePlayer()
+  const { showToast } = useToast()
 
   // --- draft auto-save ---
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -220,7 +228,6 @@ export default function EditorModal({
 
   // --- job submit ---
   const [jobStatus, setJobStatus] = useState<'idle' | 'submitting' | 'polling' | 'done' | 'error'>('idle')
-  const [jobError, setJobError] = useState('')
   const [overwrite, setOverwrite] = useState(false)
 
   // --- waveform context menu ---
@@ -233,6 +240,7 @@ export default function EditorModal({
 
   // --- close guard ---
   const [closeConfirm, setCloseConfirm] = useState(false)
+  const [draftSaveFailed, setDraftSaveFailed] = useState(false)
   const [showHelp, setShowHelp] = useState(false)
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -640,7 +648,7 @@ export default function EditorModal({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ;(ws as any).renderer.renderProgress = () => {}
     ws.load(`${DOWNLOAD_URL}/${songId}`).catch((err: Error) => {
-      if (err?.name !== 'AbortError') { console.error('WaveSurfer load:', err); setWsLoadError(true) }
+      if (err?.name !== 'AbortError') { console.error('WaveSurfer load:', err); setWsLoadError(err) }
     })
     ws.on('ready', () => {
       const dur = ws.getDuration()
@@ -706,7 +714,7 @@ export default function EditorModal({
       stopWsPlayRaf()
       if (wsPreviewRef.current) { wsPreviewRef.current = false; setPreviewing(false); return }
     })
-    ws.on('error', (err: Error) => { if (err?.name !== 'AbortError') { console.error('WaveSurfer:', err); setWsLoadError(true) } })
+    ws.on('error', (err: Error) => { if (err?.name !== 'AbortError') { console.error('WaveSurfer:', err); setWsLoadError(err) } })
     regions.on('region-created', region => {
       const el = region.element as HTMLElement
       const isTrim = region.id === 'trim'
@@ -1184,7 +1192,7 @@ export default function EditorModal({
     wsOrigRef.current = ws
      
     ws.load(`${DOWNLOAD_URL}/${songId}`).catch((err: Error) => {
-      if (err?.name !== 'AbortError') console.error('WaveSurfer orig:', err)
+      if (err?.name !== 'AbortError') { console.error('WaveSurfer orig:', err); setOrigLoadError(err) }
     })
     ws.on('ready', () => {
       setOrigReady(true)
@@ -1203,7 +1211,7 @@ export default function EditorModal({
     ws.on('play', () => setOrigPlaying(true))
     ws.on('pause', () => setOrigPlaying(false))
     ws.on('finish', () => setOrigPlaying(false))
-    ws.on('error', (err: Error) => { if (err?.name !== 'AbortError') console.error('WaveSurfer orig:', err) })
+    ws.on('error', (err: Error) => { if (err?.name !== 'AbortError') { console.error('WaveSurfer orig:', err); setOrigLoadError(err) } })
     return () => { wsOrigRef.current = null; ws.destroy() }
   }, [songId])
 
@@ -1851,15 +1859,26 @@ export default function EditorModal({
       p.fades.length === 0 && p.speed === 1 && !p.normalize && p.cuts.length === 0
     if (isDefault && !overrides) return
     setDraftSaveStatus('saving')
-    await saveEditDraft(activeSongIdRef.current, { ...stripClientIds(p), properties_overrides: overrides })
-    setDraftSaveStatus('saved')
-    setTimeout(() => setDraftSaveStatus('idle'), 2000)
-    fetchSongEligibility(activeSongIdRef.current).then(e => setEligibility(e ?? null)).catch(() => {})
+    try {
+      await saveEditDraft(activeSongIdRef.current, { ...stripClientIds(p), properties_overrides: overrides })
+      setDraftSaveStatus('saved')
+      setTimeout(() => setDraftSaveStatus('idle'), 2000)
+      fetchSongEligibility(activeSongIdRef.current).then(e => setEligibility(e ?? null)).catch(() => {})
+    } catch (err) {
+      setDraftSaveStatus('idle')
+      showToast('draft save failed, try again', true)
+      throw err
+    }
   }
 
   async function handleDiscard() {
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
-    await deleteEditDraft(activeSongIdRef.current)
+    try {
+      await deleteEditDraft(activeSongIdRef.current)
+    } catch {
+      showToast('could not discard draft, try again', true)
+      return
+    }
     historyRef.current = []
     redoStackRef.current = []
     setCanUndo(false)
@@ -1898,8 +1917,8 @@ export default function EditorModal({
     uncacheSong(activeSongId).catch(() => {})
     removeServerOfflineSong(activeSongId).catch(() => {})
     await addToLibrary(restoredId)
+    await queryClient.invalidateQueries({ queryKey: queryKeys.librarySongs })
     setRestoring(false)
-    router.refresh()
     router.replace(editSongRoute(restoredId))
   }
 
@@ -1912,21 +1931,28 @@ export default function EditorModal({
     uncacheSong(activeSongId).catch(() => {})
     removeServerOfflineSong(activeSongId).catch(() => {})
     await addToLibrary(parentSongId)
+    await queryClient.invalidateQueries({ queryKey: queryKeys.librarySongs })
     setRestoring(false)
-    router.refresh()
     router.replace(editSongRoute(parentSongId))
   }
 
+
   async function handleSave() {
     setJobStatus('submitting')
-    setJobError('')
     const overrides = propsOverridesIfChanged()
     const sendOverrides = overrides && overrides.artworkUrl100?.startsWith(API_V1)
       ? { ...overrides, artworkUrl100: initialPropsRef.current.artworkUrl100 }
       : overrides
     const paramsToSend = { ...stripClientIds(paramsRef.current), properties_overrides: sendOverrides }
-    const job = await createEditJob(songId, paramsToSend, overwrite, isAdmin && publishAsOriginal)
-    if (!job) { setJobStatus('error'); setJobError('failed to start'); return }
+    let job
+    try {
+      job = await createEditJob(songId, paramsToSend, overwrite, isAdmin && publishAsOriginal)
+    } catch (err: any) {
+      setJobStatus('idle')
+      showToast(err?.status === 0 ? 'server unavailable' : 'save failed', true)
+      return
+    }
+    if (!job) { setJobStatus('idle'); showToast('failed to start save', true); return }
     setJobStatus('polling')
     if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
     let attempts = 0
@@ -1936,8 +1962,8 @@ export default function EditorModal({
       if (!result || attempts > 60) {
         clearInterval(pollIntervalRef.current!)
         pollIntervalRef.current = null
-        setJobStatus('error')
-        setJobError(result?.error ?? 'timed out')
+        setJobStatus('idle')
+        showToast(result?.error ?? 'save timed out', true)
         return
       }
       if (result.status === 'done') {
@@ -1945,14 +1971,18 @@ export default function EditorModal({
         pollIntervalRef.current = null
         setJobStatus('done')
         await deleteEditDraft(activeSongIdRef.current)
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: queryKeys.library }),
+          queryClient.invalidateQueries({ queryKey: queryKeys.librarySongs }),
+        ])
         const landId = (!overwrite && result.result_song_id) ? result.result_song_id : activeSongIdRef.current
         router.push(`${routes.library}?song=${landId}`)
       }
       if (result.status === 'failed') {
         clearInterval(pollIntervalRef.current!)
         pollIntervalRef.current = null
-        setJobStatus('error')
-        setJobError(result.error ?? 'ffmpeg failed')
+        setJobStatus('idle')
+        showToast(result.error ?? 'save failed', true)
       }
     }, 1500)
   }
@@ -1969,9 +1999,14 @@ export default function EditorModal({
     const hasOverrides = Boolean(propsOverridesIfChanged())
     if ((paramsChanged(params) || hasOverrides) && !localStorage.getItem(DRAFT_SKIP_KEY)) {
       setCloseConfirm(true)
-      await handleSaveDraft()
-      setCloseConfirm(false)
-      router.back()
+      try {
+        await handleSaveDraft()
+        setCloseConfirm(false)
+        router.back()
+      } catch {
+        setCloseConfirm(false)
+        setDraftSaveFailed(true)
+      }
     } else {
       router.back()
     }
@@ -2310,6 +2345,25 @@ export default function EditorModal({
             </div>
           </div>
         )}
+        {draftSaveFailed && (
+          <div data-testid="draft-save-failed" className="flex items-center justify-between gap-3 px-4 py-2.5 bg-red-50 dark:bg-red-950/40 border-b border-red-200 dark:border-red-900 shrink-0">
+            <p className="text-sm text-red-700 dark:text-red-400">draft couldn&apos;t be saved</p>
+            <div className="flex items-center gap-3 shrink-0">
+              <button
+                onClick={() => { setDraftSaveFailed(false); handleClose() }}
+                className="text-xs text-gray-400 hover:text-gray-300 transition-colors"
+              >
+                retry
+              </button>
+              <button
+                onClick={() => { setDraftSaveFailed(false); router.back() }}
+                className="text-xs text-red-400 hover:text-red-300 transition-colors"
+              >
+                exit without saving
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* tabs */}
         <div className="flex border-b border-gray-100 dark:border-gray-800 shrink-0">
@@ -2336,6 +2390,7 @@ export default function EditorModal({
         <div className={`p-4 flex flex-col gap-4 ${tab !== 'audio' ? 'hidden' : ''}`}>
 
             {/* original waveform */}
+            {origLoadError && <QueryError error={origLoadError} retry={onRetryAudio} context="original audio" />}
             <div
               className={`rounded-lg border transition-colors cursor-pointer ${activeWaveform === 'orig' ? 'border-sky-500/40' : activeRootSongId && activeRootSongId !== activeSongId ? 'border-amber-400/30' : 'border-gray-100 dark:border-gray-800'}`}
               onClick={() => switchToWaveform('orig')}
@@ -2378,7 +2433,7 @@ export default function EditorModal({
                       className="absolute top-0 bottom-0 pointer-events-none"
                       style={{ display: 'none', left: '0%', width: '1px', background: '#94a3b8', opacity: 0.5 }}
                     />
-                    {!origReady && (
+                    {!origReady && !origLoadError && (
                       <div className="absolute inset-0 flex items-end justify-center gap-px pb-0 pointer-events-none overflow-hidden">
                         {WAVEFORM_SKELETON.slice(0, 80).map((h, i) => (
                           <div key={i} className="flex-1 bg-gray-200 dark:bg-gray-800 rounded-sm animate-pulse"
@@ -2407,6 +2462,7 @@ export default function EditorModal({
             </div>
 
             {/* edit waveform with fade overlays */}
+            {wsLoadError && <QueryError error={wsLoadError} retry={onRetryAudio} context="edited audio" />}
             <div
               className={`rounded-lg border transition-colors ${activeWaveform === 'edit' ? 'border-sky-500/40' : 'border-gray-100 dark:border-gray-800'}`}
               onClick={() => switchToWaveform('edit')}
@@ -2460,11 +2516,6 @@ export default function EditorModal({
                           <div key={i} className="flex-1 bg-gray-200 dark:bg-gray-800 rounded-sm animate-pulse"
                             style={{ height: `${h}%`, animationDelay: `${(i % 8) * 60}ms` }} />
                         ))}
-                      </div>
-                    )}
-                    {wsLoadError && (
-                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                        <span className="text-xs text-red-400">failed to load audio</span>
                       </div>
                     )}
                   </div>
@@ -2654,7 +2705,6 @@ export default function EditorModal({
                     Revert to Last Save
                   </button>
                 )}
-                {jobStatus === 'error' && <span className="text-red-500 text-sm">{jobError}</span>}
               </div>
               {isAdmin && (
                 <label className="flex items-center gap-1.5 text-sm select-none cursor-pointer">

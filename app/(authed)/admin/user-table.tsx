@@ -128,8 +128,8 @@ export default function UserTable() {
                             </tr>
                         </thead>
                         <tbody>
-                            {users.length === 0 ? (
-                                <tr><td colSpan={8} className="py-2 text-gray-500">no results</td></tr>
+                            {(users.length === 0 || usersError) ? (
+                                <tr><td colSpan={8} className="py-2 text-gray-500">{usersError ? '' : 'no results'}</td></tr>
                             ) : users.map(user => {
                                 const s = statsMap[user.id]
                                 return (<React.Fragment key={user.id}>

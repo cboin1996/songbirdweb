@@ -9,6 +9,7 @@ import { cacheSong, uncacheSong } from "../lib/offline";
 import { FaBookmark, FaRegBookmark, FaEllipsisV, FaLock, FaCloudDownloadAlt } from "react-icons/fa";
 import Image from "next/image";
 import { usePlayer } from "./player";
+import { useToast } from "./toast";
 import { routes, editSongRoute } from "../lib/routes";
 import { useUser } from "../lib/user-context";
 import { useOnline } from "../lib/use-online";
@@ -41,8 +42,6 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
     const [inLibrary, setInLibrary] = useState(initialInLibrary)
     useEffect(() => { setInLibrary(initialInLibrary) }, [initialInLibrary])
     const [libraryPending, setLibraryPending] = useState(false)
-    const [libraryError, setLibraryError] = useState(false)
-    const [downloadError, setDownloadError] = useState(false)
     const [copied, setCopied] = useState(false)
     const [offlineCached, setOfflineCached] = useState(initialCachedOffline ?? false)
     useEffect(() => { setOfflineCached(initialCachedOffline ?? false) }, [initialCachedOffline])
@@ -54,7 +53,8 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
     const kebabRef = useRef<HTMLButtonElement>(null)
     const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
     const kebabJustClosed = useRef(false)
-    const { play, pause, resume, current, isPlaying, insertNext, onLibraryAdd, onLibraryRemove, showToast } = usePlayer()
+    const { play, pause, resume, current, isPlaying, insertNext, onLibraryAdd, onLibraryRemove } = usePlayer()
+    const { showToast } = useToast()
     const queryClient = useQueryClient()
     const pathname = usePathname()
     function pageSource() {
@@ -76,7 +76,6 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
         e.stopPropagation()
         if (!song.songId || libraryPending) return
         setLibraryPending(true)
-        setLibraryError(false)
         try {
             if (inLibrary) await removeFromLibrary(song.songId)
             else await addToLibrary(song.songId)
@@ -96,7 +95,7 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
                 onLibraryAdd({ uuid: song.songId!, properties: song.properties, artwork_cached: song.artworkCached })
             }
         } catch {
-            setLibraryError(true)
+            showToast(inLibrary ? 'could not remove from library, try again' : 'could not add to library, try again', true)
         }
         setLibraryPending(false)
     }
@@ -175,11 +174,10 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
 
     async function handleDownload() {
         if (!song.songId) return
-        setDownloadError(false)
         try {
             await downloadSongToFile(song.songId, song.properties.trackName, song.properties.artistName)
         } catch {
-            setDownloadError(true)
+            showToast('download failed, try again', true)
         }
     }
 
@@ -247,14 +245,16 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
                     className="whitespace-nowrap block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation">
                     {copied ? 'Link copied!' : 'Copy share link'}
                 </button>
-                <button onClick={() => { closeKebab(); handleOfflineToggle() }}
-                    disabled={offlinePending || (!online && !offlineCached)}
-                    className="whitespace-nowrap block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation">
-                    {offlinePending
-                        ? `Saving… ${offlineProgress > 0 ? Math.round(offlineProgress * 100) + '%' : ''}`
-                        : offlineCached ? 'Remove offline copy' : 'Save offline'}
-                </button>
-                {playlists && playlists.length > 0 && (
+                {inLibrary && (
+                    <button onClick={() => { closeKebab(); handleOfflineToggle() }}
+                        disabled={offlinePending || (!online && !offlineCached)}
+                        className="whitespace-nowrap block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation">
+                        {offlinePending
+                            ? `Saving… ${offlineProgress > 0 ? Math.round(offlineProgress * 100) + '%' : ''}`
+                            : offlineCached ? 'Remove offline copy' : 'Save offline'}
+                    </button>
+                )}
+                {inLibrary && playlists && playlists.length > 0 && (
                     <>
                         <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
                         <button
@@ -290,13 +290,15 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
                         )}
                     </>
                 )}
-                <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
-                <button onClick={() => { closeKebab(); openEditor() }}
-                    disabled={!online}
-                    className={`whitespace-nowrap flex items-center justify-between w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation ${hasDraft ? 'text-amber-500' : ''}`}>
-                    Edit
-                    {hasDraft && <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />}
-                </button>
+                {inLibrary && (<>
+                    <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
+                    <button onClick={() => { closeKebab(); openEditor() }}
+                        disabled={!online}
+                        className={`whitespace-nowrap flex items-center justify-between w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation ${hasDraft ? 'text-amber-500' : ''}`}>
+                        Edit
+                        {hasDraft && <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />}
+                    </button>
+                </>)}
             </div>
         </>,
         document.body
@@ -437,8 +439,6 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
                                 <span>·</span>
                                 <span>{song.properties.releaseDate || '—'}</span>
                             </span>
-                            {libraryError && <span className="text-red-500 text-sm">library error, try again</span>}
-                            {downloadError && <span className="text-red-500 text-sm">download failed, try again</span>}
                         </div>
                     </div>
                     {!selectMode && (

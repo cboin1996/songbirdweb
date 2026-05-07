@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from "react"
+import React, { useState } from "react"
 import { useQuery, keepPreviousData } from "@tanstack/react-query"
 import { fetchAdminStats, fetchAdminEditJobs, fetchAdminErrors, fetchAdminImports } from "../../lib/data"
 import { queryKeys } from "../../lib/query-keys"
@@ -272,8 +272,8 @@ export default function SystemStats() {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {imports.length === 0 ? (
-                                        <tr><td colSpan={5} className="py-2 text-gray-500">no results</td></tr>
+                                    {(imports.length === 0 || importsQueryError) ? (
+                                        <tr><td colSpan={5} className="py-2 text-gray-500">{importsQueryError ? '' : 'no results'}</td></tr>
                                     ) : imports.map(job => (
                                         <tr key={job.job_id} className="border-t border-gray-200 dark:border-gray-800">
                                             <td className="pr-4 py-1 font-mono text-xs text-gray-500">
@@ -368,8 +368,8 @@ export default function SystemStats() {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {editJobs.length === 0 ? (
-                                        <tr><td colSpan={5} className="py-2 text-gray-500">no results</td></tr>
+                                    {(editJobs.length === 0 || jobsQueryError) ? (
+                                        <tr><td colSpan={5} className="py-2 text-gray-500">{jobsQueryError ? '' : 'no results'}</td></tr>
                                     ) : editJobs.map(job => (
                                         <tr key={job.job_id} className="border-t border-gray-200 dark:border-gray-800">
                                             <td className="pr-4 py-1 font-mono text-xs text-gray-500">{fmt(job.created_at)}</td>
@@ -444,39 +444,52 @@ export default function SystemStats() {
                                 </span>
                             )}
                         </div>
-                        <div className="flex flex-col gap-1">
-                            {errors.length === 0 ? (
-                                <p className="text-gray-500 text-sm">no results</p>
-                            ) : errors.map(e => (
-                                <div key={e.id} className="rounded-lg border border-gray-200 dark:border-gray-800 text-sm">
-                                    <button
-                                        className="w-full flex items-center gap-4 p-2 text-left hover:bg-gray-100 dark:hover:bg-gray-900 rounded-lg"
-                                        onClick={() => setExpandedError(expandedError === e.id ? null : e.id)}
-                                    >
-                                        <span className="font-mono text-xs text-gray-500 shrink-0">{fmt(e.timestamp)}</span>
-                                        {e.method && e.path && (
-                                            <span className="text-gray-400 text-xs shrink-0">{e.method} {e.path}</span>
-                                        )}
-                                        {e.status_code != null && (
-                                            <span className="text-red-500 text-xs shrink-0">{e.status_code}</span>
-                                        )}
-                                        <span className="truncate text-xs">{e.message}</span>
-                                    </button>
-                                    {expandedError === e.id && (
-                                        <div className="border-t border-gray-200 dark:border-gray-800 p-2 flex flex-col gap-1">
-                                            {e.user_id && (
-                                                <p className="text-xs text-gray-400">user: <span className="font-mono">{e.user_id}</span></p>
+                        <div className="overflow-x-auto">
+                            <table className="text-sm w-full">
+                                <thead>
+                                    <tr className="text-gray-400 text-left">
+                                        <th className="pr-4 font-normal pb-1">date</th>
+                                        <th className="pr-4 font-normal pb-1">route</th>
+                                        <th className="pr-4 font-normal pb-1">status</th>
+                                        <th className="font-normal pb-1">message</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {(errors.length === 0 || errorsQueryError) ? (
+                                        <tr><td colSpan={4} className="py-2 text-gray-500">{errorsQueryError ? '' : 'no results'}</td></tr>
+                                    ) : errors.map(e => (
+                                        <React.Fragment key={e.id}>
+                                            <tr
+                                                className="border-t border-gray-200 dark:border-gray-800 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-900/50"
+                                                onClick={() => setExpandedError(expandedError === e.id ? null : e.id)}
+                                            >
+                                                <td className="pr-4 py-1 font-mono text-xs text-gray-500 whitespace-nowrap">{fmt(e.timestamp)}</td>
+                                                <td className="pr-4 py-1 text-xs text-gray-400 whitespace-nowrap">
+                                                    {e.method && e.path ? `${e.method} ${e.path}` : '—'}
+                                                </td>
+                                                <td className="pr-4 py-1 text-xs text-red-500">{e.status_code ?? '—'}</td>
+                                                <td className="py-1 text-xs truncate max-w-xs">{e.message}</td>
+                                            </tr>
+                                            {expandedError === e.id && (
+                                                <tr className="bg-gray-50 dark:bg-gray-900/30">
+                                                    <td colSpan={4} className="px-4 py-2">
+                                                        <div className="flex flex-col gap-1">
+                                                            {e.user_id && (
+                                                                <p className="text-xs text-gray-400">user: <span className="font-mono">{e.user_id}</span></p>
+                                                            )}
+                                                            {e.detail ? (
+                                                                <pre className="text-xs text-gray-400 overflow-x-auto whitespace-pre-wrap break-all">{e.detail}</pre>
+                                                            ) : !e.user_id && (
+                                                                <p className="text-xs text-gray-500">no additional detail</p>
+                                                            )}
+                                                        </div>
+                                                    </td>
+                                                </tr>
                                             )}
-                                            {e.detail && (
-                                                <pre className="text-xs text-gray-400 overflow-x-auto whitespace-pre-wrap break-all">{e.detail}</pre>
-                                            )}
-                                            {!e.detail && !e.user_id && (
-                                                <p className="text-xs text-gray-500">no additional detail</p>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
-                            ))}
+                                        </React.Fragment>
+                                    ))}
+                                </tbody>
+                            </table>
                         </div>
                         {totalPages > 1 && (
                             <div className="flex items-center gap-3 text-sm">

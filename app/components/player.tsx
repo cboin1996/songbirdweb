@@ -1,5 +1,6 @@
 'use client'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
+import { useToast } from "./toast"
 import { useVirtualList } from "../lib/use-virtual-list"
 import Image from "next/image"
 import Link from "next/link"
@@ -64,7 +65,6 @@ interface PlayerContextValue {
     reorderQueue: (fromIdx: number, toIdx: number) => void
     onLibraryAdd: (song: PlayableSong) => void
     onLibraryRemove: (songId: string) => void
-    showToast: (msg: string, error?: boolean) => void
 }
 
 const PlayerContext = createContext<PlayerContextValue>({
@@ -86,8 +86,8 @@ const PlayerContext = createContext<PlayerContextValue>({
     reorderQueue: () => {},
     onLibraryAdd: () => {},
     onLibraryRemove: () => {},
-    showToast: () => {},
 })
+
 
 export function usePlayer() {
     return useContext(PlayerContext)
@@ -214,8 +214,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const shuffleOrderRef = useRef<number[]>([])
     const shufflePosRef = useRef(0)
     const [audioSrc, setAudioSrc] = useState('')
-    const [toast, setToast] = useState<{ msg: string; error?: boolean } | null>(null)
-    const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const dragFromRef = useRef<number | null>(null)
     const queueContainerRef = useRef<HTMLDivElement>(null)
     const [queueDropTarget, setQueueDropTarget] = useState<number | null>(null)
@@ -226,11 +224,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const shuffleSeedRef = useRef<number | null>(null)
     const playContextRef = useRef<PlayContext | null>(null)
 
-    const showToast = useCallback((msg: string, error?: boolean) => {
-        if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
-        setToast({ msg, error })
-        toastTimerRef.current = setTimeout(() => setToast(null), 2500)
-    }, [])
+    const { showToast } = useToast()
 
     function generateShuffleOrder(currentIdx = queueIndexRef.current, existingSeed?: number) {
         const seed = existingSeed ?? (Math.random() * 0xFFFFFFFF | 0)
@@ -960,19 +954,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     const contextValue = useMemo(() => ({
         current, isPlaying, queue, shuffle, repeat, playContext,
-        play, pause, resume, skipNext, skipPrev, toggleShuffle, toggleRepeat, insertNext, removeFromQueue, reorderQueue, onLibraryAdd, onLibraryRemove, showToast,
+        play, pause, resume, skipNext, skipPrev, toggleShuffle, toggleRepeat, insertNext, removeFromQueue, reorderQueue, onLibraryAdd, onLibraryRemove,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }), [current, isPlaying, queue, shuffle, repeat, playContext, showToast])
+    }), [current, isPlaying, queue, shuffle, repeat, playContext])
 
     return (
         <PlayerContext.Provider value={contextValue}>
             <audio ref={audioRef} src={audioSrc || undefined} preload="metadata" playsInline/>
             {children}
-            {toast && (
-                <div className={`fixed bottom-24 left-1/2 -translate-x-1/2 z-[60] px-4 py-2 rounded-full text-xs font-medium shadow-lg pointer-events-none whitespace-nowrap ${toast.error ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' : 'bg-gray-100 text-gray-900 dark:bg-gray-900 dark:text-white'}`}>
-                    {toast.msg}
-                </div>
-            )}
             {syncPrompt && (
                 <div data-testid="sync-prompt" className="fixed inset-0 z-[70] flex items-end justify-center bg-black/40">
                     <div className="w-full max-w-md bg-white dark:bg-gray-900 rounded-t-2xl p-6 shadow-2xl">

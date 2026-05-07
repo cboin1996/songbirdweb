@@ -1,6 +1,7 @@
-import { routes } from './routes'
+import { routes, editSongRoute } from './routes'
 import { test, expect } from '@playwright/test'
 import { login } from './helpers'
+import { EditorPage, CommonPage, LibraryPage } from './pages'
 
 test.describe('error states — page boundaries', () => {
     test.beforeEach(async ({ page }) => {
@@ -34,7 +35,7 @@ test.describe('error states — page boundaries', () => {
             route.fulfill({ status: 500, body: 'Internal Server Error' })
         )
         await page.goto(routes.admin)
-        await expect(page.getByRole('button', { name: 'retry' }).first()).toBeVisible({ timeout: 10000 })
+        await expect(page.getByTestId('query-error-edit-jobs')).toBeVisible({ timeout: 10000 })
     })
 
     test('admin page shows QueryError when errors API fails', async ({ page }) => {
@@ -42,7 +43,76 @@ test.describe('error states — page boundaries', () => {
             route.fulfill({ status: 500, body: 'Internal Server Error' })
         )
         await page.goto(routes.admin)
-        await expect(page.getByRole('button', { name: 'retry' }).first()).toBeVisible({ timeout: 10000 })
+        await expect(page.getByTestId('query-error-errors')).toBeVisible({ timeout: 10000 })
+    })
+
+    test('admin page shows QueryError when imports API fails', async ({ page }) => {
+        await page.route('**/v1/admin/imports*', route =>
+            route.fulfill({ status: 500, body: 'Internal Server Error' })
+        )
+        await page.goto(routes.admin)
+        await expect(page.getByTestId('query-error-imports')).toBeVisible({ timeout: 10000 })
+    })
+
+    test('admin page shows QueryError when users API fails', async ({ page }) => {
+        await page.route('**/v1/admin/users*', route =>
+            route.fulfill({ status: 500, body: 'Internal Server Error' })
+        )
+        await page.goto(routes.admin)
+        await expect(page.getByTestId('query-error-users')).toBeVisible({ timeout: 10000 })
+    })
+
+    test('admin page shows QueryError when stats API fails', async ({ page }) => {
+        await page.route('**/v1/admin/stats*', route =>
+            route.fulfill({ status: 500, body: 'Internal Server Error' })
+        )
+        await page.goto(routes.admin)
+        await expect(page.getByTestId('query-error-system-stats')).toBeVisible({ timeout: 10000 })
+    })
+
+    test('admin edit-jobs retry recovers after error', async ({ page }) => {
+        let blocked = true
+        await page.route('**/v1/admin/edit-jobs*', route => {
+            if (blocked) return route.fulfill({ status: 500, body: 'Internal Server Error' })
+            return route.continue()
+        })
+        await page.goto(routes.admin)
+        const qe = page.getByTestId('query-error-edit-jobs')
+        await expect(qe).toBeVisible({ timeout: 10000 })
+
+        blocked = false
+        await qe.getByRole('button', { name: 'retry' }).click()
+        await expect(qe).not.toBeVisible({ timeout: 10000 })
+    })
+
+    test('admin imports retry recovers after error', async ({ page }) => {
+        let blocked = true
+        await page.route('**/v1/admin/imports*', route => {
+            if (blocked) return route.fulfill({ status: 500, body: 'Internal Server Error' })
+            return route.continue()
+        })
+        await page.goto(routes.admin)
+        const qe = page.getByTestId('query-error-imports')
+        await expect(qe).toBeVisible({ timeout: 10000 })
+
+        blocked = false
+        await qe.getByRole('button', { name: 'retry' }).click()
+        await expect(qe).not.toBeVisible({ timeout: 10000 })
+    })
+
+    test('admin users retry recovers after error', async ({ page }) => {
+        let blocked = true
+        await page.route('**/v1/admin/users*', route => {
+            if (blocked) return route.fulfill({ status: 500, body: 'Internal Server Error' })
+            return route.continue()
+        })
+        await page.goto(routes.admin)
+        const qe = page.getByTestId('query-error-users')
+        await expect(qe).toBeVisible({ timeout: 10000 })
+
+        blocked = false
+        await qe.getByRole('button', { name: 'retry' }).click()
+        await expect(qe).not.toBeVisible({ timeout: 10000 })
     })
 })
 
@@ -63,7 +133,7 @@ test.describe('error states — mutations', () => {
 
         const card = page.getByTestId('song-card').first()
         await card.getByTestId('song-library-toggle').click()
-        await expect(page.locator('text=library error, try again')).toBeVisible({ timeout: 5000 })
+        await expect(page.getByTestId('toast-error')).toContainText('could not remove from library', { timeout: 5000 })
     })
 
     test('change password shows error on failure', async ({ page }) => {
@@ -77,7 +147,7 @@ test.describe('error states — mutations', () => {
         await page.getByPlaceholder('new password', { exact: true }).fill('newpass123')
         await page.getByPlaceholder('confirm new password').fill('newpass123')
         await page.getByRole('button', { name: /update password/i }).click()
-        await expect(page.locator('text=incorrect current password')).toBeVisible({ timeout: 5000 })
+        await expect(page.locator('text=server unavailable')).toBeVisible({ timeout: 5000 })
     })
 
     test('file upload shows failed status on error', async ({ page }) => {
@@ -95,5 +165,153 @@ test.describe('error states — mutations', () => {
             buffer,
         })
         await expect(page.locator('text=upload failed')).toBeVisible({ timeout: 10000 })
+    })
+})
+
+test.describe('error states — editor', () => {
+    test.beforeEach(async ({ page }) => {
+        await login(page)
+    })
+
+    test('save to library shows toast on failure', async ({ page }) => {
+        const editor = new EditorPage(page)
+        const common = new CommonPage(page)
+        await editor.openFromLibrary()
+        await editor.waitForWaveform()
+
+        await editor.audioTab.click()
+        await editor.scrubFill('trim start', '0:02')
+
+        await page.route('**/v1/edit/jobs*', route => {
+            if (route.request().method() === 'POST')
+                return route.fulfill({ status: 500, body: 'Internal Server Error' })
+            return route.continue()
+        })
+
+        await editor.saveToLibraryBtn.click()
+        await expect(common.toastError).toBeVisible({ timeout: 5000 })
+    })
+
+    test('save draft shows toast on failure', async ({ page }) => {
+        const editor = new EditorPage(page)
+        const common = new CommonPage(page)
+        await editor.openFromLibrary()
+        await editor.waitForWaveform()
+
+        await editor.audioTab.click()
+        await editor.scrubFill('trim start', '0:02')
+
+        await page.route('**/v1/edit/songs/*/draft', route => {
+            if (route.request().method() === 'PUT')
+                return route.fulfill({ status: 500, body: 'Internal Server Error' })
+            return route.continue()
+        })
+
+        await editor.saveDraftBtn.click()
+        await expect(common.toastError).toContainText('draft save failed', { timeout: 5000 })
+    })
+
+    test('discard shows toast on failure', async ({ page }) => {
+        const editor = new EditorPage(page)
+        const common = new CommonPage(page)
+        await editor.openFromLibrary()
+        await editor.waitForWaveform()
+
+        await editor.audioTab.click()
+        await editor.scrubFill('trim start', '0:02')
+
+        await page.route('**/v1/edit/songs/*/draft', route => {
+            if (route.request().method() === 'DELETE')
+                return route.fulfill({ status: 500, body: 'Internal Server Error' })
+            return route.continue()
+        })
+
+        await editor.discardBtn.click()
+        await expect(common.toastError).toContainText('could not discard draft', { timeout: 5000 })
+    })
+
+    test('close with draft save failure shows banner', async ({ page }) => {
+        const editor = new EditorPage(page)
+        await editor.openFromLibrary()
+        await editor.waitForWaveform()
+
+        await editor.audioTab.click()
+        await editor.scrubFill('trim start', '0:02')
+
+        await page.route('**/v1/edit/songs/*/draft', route => {
+            if (route.request().method() === 'PUT')
+                return route.fulfill({ status: 500, body: 'Internal Server Error' })
+            return route.continue()
+        })
+
+        await editor.closeBtn.click()
+        await expect(editor.draftSaveFailedBanner).toBeVisible({ timeout: 5000 })
+        await expect(editor.draftSaveFailedBanner.getByText('exit without saving')).toBeVisible()
+    })
+
+    test('waveform load error shows QueryError above each waveform', async ({ page }) => {
+        const common = new CommonPage(page)
+        const library = new LibraryPage(page)
+        await page.goto(routes.library)
+        await expect(library.songCards.first()).toBeVisible({ timeout: 10000 })
+
+        const songId = await library.songCards.first().getAttribute('data-song-id')
+
+        await page.route('**/v1/download/*', route =>
+            route.fulfill({ status: 500, body: 'Internal Server Error' })
+        )
+
+        await page.goto(editSongRoute(songId!))
+        await expect(common.queryError('original-audio')).toBeVisible({ timeout: 15000 })
+        await expect(common.queryError('edited-audio')).toBeVisible({ timeout: 5000 })
+    })
+
+    test('editor page shows QueryError when song data fails to load', async ({ page }) => {
+        const common = new CommonPage(page)
+        const library = new LibraryPage(page)
+        await page.goto(routes.library)
+        await expect(library.songCards.first()).toBeVisible({ timeout: 10000 })
+        const songId = await library.songCards.first().getAttribute('data-song-id')
+
+        await page.route('**/v1/library/songs*', route =>
+            route.fulfill({ status: 500, body: 'Internal Server Error' })
+        )
+
+        await page.goto(editSongRoute(songId!))
+        await expect(common.queryError('song-editor')).toBeVisible({ timeout: 10000 })
+    })
+})
+
+test.describe('error states — library', () => {
+    test.beforeEach(async ({ page }) => {
+        await login(page)
+    })
+
+    test('library shows QueryError when API fails', async ({ page }) => {
+        const common = new CommonPage(page)
+        await page.goto(routes.library)
+        await expect(page.getByTestId('song-card').first()).toBeVisible({ timeout: 10000 })
+
+        await page.route('**/v1/library/songs*', route =>
+            route.fulfill({ status: 500, body: 'Internal Server Error' })
+        )
+
+        await page.reload()
+        await expect(common.queryError('your-library')).toBeVisible({ timeout: 10000 })
+    })
+})
+
+test.describe('error states — login', () => {
+    test('login shows server unavailable when API is down', async ({ page }) => {
+        await page.goto(routes.home)
+        await page.getByPlaceholder('username').fill('testuser')
+        await page.getByPlaceholder('password').fill('testpass')
+
+        await page.route('**/v1/auth/login', route =>
+            route.fulfill({ status: 500, body: 'Internal Server Error' })
+        )
+
+        await page.getByTestId('login-submit').click()
+        await expect(page.getByText('server unavailable')).toBeVisible({ timeout: 5000 })
     })
 })

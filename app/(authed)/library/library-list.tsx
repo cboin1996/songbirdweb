@@ -919,7 +919,7 @@ export default function LibraryList() {
             </div>
             </div>{/* end sticky header */}
 
-            {songsError && songs.length === 0 && (
+            {songsError && (
                 <div className="my-4">
                     <QueryError error={songsError} retry={refetchSongs} context="your library" />
                 </div>
