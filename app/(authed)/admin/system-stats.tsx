@@ -360,11 +360,11 @@ export default function SystemStats() {
                             <table className="text-sm w-full">
                                 <thead>
                                     <tr className="text-gray-400 text-left">
-                                        <th className="pr-4 font-normal pb-1">job id</th>
-                                        <th className="pr-4 font-normal pb-1">created</th>
+                                        <th className="pr-4 font-normal pb-1">date</th>
                                         <th className="pr-4 font-normal pb-1">user</th>
                                         <th className="pr-4 font-normal pb-1">status</th>
-                                        <th className="font-normal pb-1">error</th>
+                                        <th className="pr-4 font-normal pb-1">error</th>
+                                        <th className="font-normal pb-1">job id</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -372,8 +372,7 @@ export default function SystemStats() {
                                         <tr><td colSpan={5} className="py-2 text-gray-500">no results</td></tr>
                                     ) : editJobs.map(job => (
                                         <tr key={job.job_id} className="border-t border-gray-200 dark:border-gray-800">
-                                            <td className="pr-4 py-1 font-mono text-xs text-gray-500">{job.job_id}</td>
-                                            <td className="pr-4 py-1 font-mono text-xs">{fmt(job.created_at)}</td>
+                                            <td className="pr-4 py-1 font-mono text-xs text-gray-500">{fmt(job.created_at)}</td>
                                             <td className="pr-4 py-1 text-xs text-gray-400">{job.username}</td>
                                             <td className="pr-4 py-1">
                                                 <span className={
@@ -383,7 +382,8 @@ export default function SystemStats() {
                                                     'text-gray-400'
                                                 }>{job.status}</span>
                                             </td>
-                                            <td className="py-1 text-red-400 text-xs truncate max-w-xs">{job.error ?? '—'}</td>
+                                            <td className="pr-4 py-1 text-red-400 text-xs truncate max-w-xs">{job.error ?? '—'}</td>
+                                            <td className="py-1 font-mono text-xs text-gray-500">{job.job_id}</td>
                                         </tr>
                                     ))}
                                 </tbody>
