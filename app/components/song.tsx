@@ -397,9 +397,14 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
                         </span>
                         <span className="text-sm text-sky-500 truncate">{song.properties.artistName || 'Unknown artist'} · {song.properties.collectionName || 'Unknown album'}</span>
                     </div>
-                    {!selectMode && (
+                    {!selectMode ? (
                         <div className="shrink-0" onClick={e => e.stopPropagation()}>
                             {actions}
+                        </div>
+                    ) : (inLibrary || offlineCached) && (
+                        <div className="flex items-center gap-1.5 shrink-0">
+                            {inLibrary && <FaBookmark size={10} className="text-sky-500" />}
+                            {offlineCached && <FaCloudDownloadAlt size={10} className="text-sky-400" />}
                         </div>
                     )}
                 </div>
@@ -447,9 +452,14 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
                             </span>
                         </div>
                     </div>
-                    {!selectMode && (
+                    {!selectMode ? (
                         <div className="flex flex-col items-center justify-start shrink-0 ml-2" onClick={e => e.stopPropagation()}>
                             {actions}
+                        </div>
+                    ) : (inLibrary || offlineCached) && (
+                        <div className="flex flex-col items-center justify-center gap-1.5 shrink-0 ml-2">
+                            {inLibrary && <FaBookmark size={12} className="text-sky-500" />}
+                            {offlineCached && <FaCloudDownloadAlt size={12} className="text-sky-400" />}
                         </div>
                     )}
                 </div>

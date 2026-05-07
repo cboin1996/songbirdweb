@@ -243,11 +243,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             URL.revokeObjectURL(blobUrlRef.current)
             blobUrlRef.current = null
         }
-        const cached = await getSongFile(songUuid)
-        if (cached) {
-            blobUrlRef.current = URL.createObjectURL(cached)
-            return blobUrlRef.current
-        }
+        try {
+            const cached = await getSongFile(songUuid)
+            if (cached) {
+                blobUrlRef.current = URL.createObjectURL(cached)
+                return blobUrlRef.current
+            }
+        } catch {}
         return `${DOWNLOAD_URL}/${songUuid}`
     }
 
@@ -273,8 +275,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 if (lib?.properties) {
                     results.push({ uuid: lib.uuid, properties: lib.properties!, last_position: lib.last_position, last_played_at: lib.last_played_at, artwork_cached: lib.artwork_cached, source: sourceMap[id] ?? fallbackCtx })
                 } else {
-                    const fetched = await fetchSongById(id)
-                    if (fetched) results.push({ ...fetched, source: sourceMap[id] ?? fallbackCtx })
+                    try {
+                        const fetched = await fetchSongById(id)
+                        if (fetched) results.push({ ...fetched, source: sourceMap[id] ?? fallbackCtx })
+                    } catch {}
                 }
             }
             return results
@@ -496,7 +500,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         queueIndexRef.current = newIdx
         setQueue([...q])
         scheduleSave()
-        apiQueueReorder(fromDpos, toDpos)
+        apiQueueReorder(fromDpos, toDpos).catch(() => {})
     }
 
     function onLibraryAdd(song: PlayableSong) {
@@ -599,10 +603,16 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     }, [savePosition])
 
     const resume = useCallback(() => {
-        audioRef.current?.play().catch(() => {})
+        const audio = audioRef.current
+        const song = currentRef.current
+        if (!audio || !song) return
+        if (audio.error) {
+            loadSong(song)
+            return
+        }
+        audio.play().catch(() => {})
         setIsPlaying(true)
         if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing'
-        const song = currentRef.current
         if (song) syncMediaSession(song)
     }, [])
 
@@ -780,6 +790,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             updatePositionState()
         }
         function onDurationChange() { setDuration(audio!.duration); updatePositionState() }
+        function onError() {
+            setIsBuffering(false)
+            setIsPlaying(false)
+            showToast('playback failed, try again', true)
+        }
         audio.addEventListener('play', onPlay)
         audio.addEventListener('pause', onPause)
         audio.addEventListener('loadstart', onLoadStart)
@@ -788,6 +803,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         audio.addEventListener('canplay', onCanPlay)
         audio.addEventListener('timeupdate', onTimeUpdate)
         audio.addEventListener('durationchange', onDurationChange)
+        audio.addEventListener('error', onError)
         return () => {
             audio.removeEventListener('play', onPlay)
             audio.removeEventListener('pause', onPause)
@@ -797,6 +813,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             audio.removeEventListener('canplay', onCanPlay)
             audio.removeEventListener('timeupdate', onTimeUpdate)
             audio.removeEventListener('durationchange', onDurationChange)
+            audio.removeEventListener('error', onError)
         }
 
     }, [])

@@ -1,7 +1,7 @@
 import { routes, editSongRoute, downloadSongQuery, downloadAlbumQuery } from './routes'
 import { test, expect } from '@playwright/test'
 import { login, apiLoginAs, API_V1, USERNAME, PASSWORD } from './helpers'
-import { EditorPage, CommonPage, LibraryPage, DownloadPage } from './pages'
+import { EditorPage, CommonPage, LibraryPage, DownloadPage, PlayerBar } from './pages'
 
 test.describe('error states — page boundaries', () => {
     test.beforeEach(async ({ page }) => {
@@ -628,6 +628,48 @@ test.describe('error states — admin mutations', () => {
         await page.getByPlaceholder('confirm password').first().fill('different')
         await page.getByRole('button', { name: 'invite' }).click()
         await expect(page.getByText('passwords do not match')).toBeVisible({ timeout: 5000 })
+    })
+})
+
+test.describe('error states — player', () => {
+    test.beforeEach(async ({ page }) => {
+        await login(page)
+    })
+
+    test('audio playback failure shows toast', async ({ page }) => {
+        const common = new CommonPage(page)
+        const library = new LibraryPage(page)
+        await page.goto(routes.library)
+        await library.waitForSongs()
+
+        await page.route('**/v1/download/*', route =>
+            route.fulfill({ status: 404, body: 'Not Found' })
+        )
+
+        await library.songCards.first().click()
+        await expect(common.toastError).toContainText('playback failed', { timeout: 10000 })
+    })
+
+    test('play button retries after playback error', async ({ page }) => {
+        const common = new CommonPage(page)
+        const library = new LibraryPage(page)
+        const player = new PlayerBar(page)
+        await page.goto(routes.library)
+        await library.waitForSongs()
+
+        let blocked = true
+        await page.route('**/v1/download/*', route => {
+            if (blocked) return route.fulfill({ status: 404, body: 'Not Found' })
+            return route.continue()
+        })
+
+        await library.songCards.first().click()
+        await expect(common.toastError).toContainText('playback failed', { timeout: 10000 })
+
+        blocked = false
+        await player.waitForBar()
+        await player.playPause.click()
+        await expect(common.toastError).not.toBeVisible({ timeout: 5000 })
     })
 })
 
