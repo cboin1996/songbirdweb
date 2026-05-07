@@ -374,7 +374,7 @@ export default function SystemStats() {
                                         <tr key={job.job_id} className="border-t border-gray-200 dark:border-gray-800">
                                             <td className="pr-4 py-1 font-mono text-xs text-gray-500">{job.job_id}</td>
                                             <td className="pr-4 py-1 font-mono text-xs">{fmt(job.created_at)}</td>
-                                            <td className="pr-4 py-1 font-mono text-xs text-gray-400">{job.user_id}</td>
+                                            <td className="pr-4 py-1 text-xs text-gray-400">{job.username}</td>
                                             <td className="pr-4 py-1">
                                                 <span className={
                                                     job.status === 'done' ? 'text-green-500' :

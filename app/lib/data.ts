@@ -542,6 +542,7 @@ export interface EditJobSummary {
   job_id: string
   source_song_id: string
   user_id: string
+  username: string
   status: string
   result_song_id: string | null
   error: string | null
