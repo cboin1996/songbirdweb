@@ -1,4 +1,6 @@
 'use client'
 import PageError from '../../components/page-error'
 
-export default PageError
+export default function Error(props: { error: Error & { digest?: string }; reset: () => void }) {
+    return <PageError {...props} context="settings" />
+}

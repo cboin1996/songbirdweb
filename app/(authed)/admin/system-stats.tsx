@@ -1,10 +1,11 @@
 'use client'
 
 import { useState } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, keepPreviousData } from "@tanstack/react-query"
 import { AdminStats, fetchAdminEditJobs, fetchAdminErrors } from "../../lib/data"
 import SearchInput from "../../components/search-input"
 import QueryError from "../../components/query-error"
+import TableSkeleton from "../../components/table-skeleton"
 
 function formatBytes(bytes: number): string {
     if (bytes < 1024) return `${bytes} B`
@@ -17,9 +18,10 @@ function fmt(ts: string) {
     return new Date(ts).toISOString().slice(0, 16).replace('T', ' ')
 }
 
-const ERROR_PAGE_SIZE = 50
-const JOB_PAGE_SIZE = 20
+const ERROR_PAGE_SIZE = 10
+const JOB_PAGE_SIZE = 10
 const TOP_SONGS_PAGE_SIZE = 10
+
 
 export default function SystemStats({ stats }: { stats: AdminStats | undefined }) {
     const [expandedError, setExpandedError] = useState<string | null>(null)
@@ -30,16 +32,18 @@ export default function SystemStats({ stats }: { stats: AdminStats | undefined }
     const [topSongsFilter, setTopSongsFilter] = useState('')
     const [topSongsPage, setTopSongsPage] = useState(0)
 
-    const { data: errorData, error: errorsQueryError, refetch: refetchErrors } = useQuery({
+    const { data: errorData, error: errorsQueryError, refetch: refetchErrors, isLoading: errorsLoading, isFetching: errorsFetching } = useQuery({
         queryKey: ['admin-errors', errorPage],
         queryFn: () => fetchAdminErrors(ERROR_PAGE_SIZE, errorPage * ERROR_PAGE_SIZE),
+        placeholderData: keepPreviousData,
     })
     const errors = errorData?.errors ?? []
     const errorTotal = errorData?.total ?? 0
 
-    const { data: jobData, error: jobsQueryError, refetch: refetchJobs } = useQuery({
+    const { data: jobData, error: jobsQueryError, refetch: refetchJobs, isLoading: jobsLoading, isFetching: jobsFetching } = useQuery({
         queryKey: ['admin-edit-jobs', jobPage],
         queryFn: () => fetchAdminEditJobs(JOB_PAGE_SIZE, jobPage * JOB_PAGE_SIZE),
+        placeholderData: keepPreviousData,
     })
     const editJobs = jobData?.jobs ?? []
     const jobTotal = jobData?.total ?? 0
@@ -227,8 +231,9 @@ export default function SystemStats({ stats }: { stats: AdminStats | undefined }
                 </div>
 
                 {jobsQueryError && <QueryError error={jobsQueryError} retry={refetchJobs} />}
-                {jobTotal > 0 && (
-                    <div className="flex flex-col gap-2">
+                {jobsLoading && <TableSkeleton rows={5} cols={5} />}
+                {!jobsLoading && jobTotal > 0 && (
+                    <div className={`flex flex-col gap-2 transition-opacity ${jobsFetching ? 'opacity-50' : ''}`}>
                         <SearchInput
                             value={jobFilter}
                             onChange={setJobFilter}
@@ -294,8 +299,9 @@ export default function SystemStats({ stats }: { stats: AdminStats | undefined }
 
             {/* ── Errors ── */}
             {errorsQueryError && <QueryError error={errorsQueryError} retry={refetchErrors} />}
-            {errorTotal > 0 && (
-                <section className="flex flex-col gap-4">
+            {errorsLoading && <TableSkeleton rows={5} cols={3} />}
+            {!errorsLoading && errorTotal > 0 && (
+                <section className={`flex flex-col gap-4 transition-opacity ${errorsFetching ? 'opacity-50' : ''}`}>
                     <p className="text-gray-400 text-sm font-medium uppercase tracking-wide">errors</p>
                     <SearchInput
                         value={errorFilter}

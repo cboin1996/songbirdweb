@@ -2,12 +2,13 @@
 import { useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { FaDove } from 'react-icons/fa6'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { ImportJobResult, ImportJobsPage, listImportJobs, pollImportJob } from '../lib/data'
 import { routes } from '../lib/routes'
 import SearchInput from './search-input'
 import Spinner from './spinner'
 import QueryError from './query-error'
+import TableSkeleton from './table-skeleton'
 
 const PAGE_SIZE = 20
 const POLL_INTERVAL_MS = 3000
@@ -30,9 +31,10 @@ export default function ImportJobsTable({
   const inFlight = activeIds.size
   const hasInFlight = inFlight > 0
 
-  const { data: pageData, isFetching, error: jobsError, refetch: refetchJobs } = useQuery({
+  const { data: pageData, isFetching, isLoading, error: jobsError, refetch: refetchJobs } = useQuery({
     queryKey: ['import-jobs', page],
     queryFn: () => listImportJobs(PAGE_SIZE, page * PAGE_SIZE),
+    placeholderData: keepPreviousData,
   })
   const jobs = pageData?.jobs ?? []
   const total = pageData?.total ?? 0
@@ -215,11 +217,13 @@ export default function ImportJobsTable({
         </div>
       )}
 
-      {jobs.length === 0 && !isFetching && (
+      {isLoading && <TableSkeleton rows={5} cols={3} />}
+
+      {!isLoading && jobs.length === 0 && !isFetching && (
         <p className="text-gray-500 text-sm py-2">no file imports yet — drag & drop files above to import</p>
       )}
 
-      {jobs.length > 0 && (
+      {!isLoading && jobs.length > 0 && (
         <div className={`overflow-x-auto ${isFetching ? 'opacity-50' : ''}`}>
           <table className="w-full text-sm border-collapse">
             <thead>

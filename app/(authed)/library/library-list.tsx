@@ -208,15 +208,19 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         getCachedSongIds().then(async ids => {
             setCachedIds(ids)
             if (!online || songs.length === 0) {
-                const cached = await fetchLibrarySongs()
-                const playable = cached.filter(s => ids.has(s.uuid))
-                if (playable.length > 0) queryClient.setQueryData(queryKeys.librarySongs, playable)
+                try {
+                    const cached = await fetchLibrarySongs()
+                    const playable = cached.filter(s => ids.has(s.uuid))
+                    if (playable.length > 0) queryClient.setQueryData(queryKeys.librarySongs, playable)
+                } catch {}
             }
             setOfflineReady(true)
             if (navigator.onLine) {
-                const serverOnly = await syncOfflineSongs([...ids])
-                const resolvable = serverOnly.filter(id => songs.some(s => s.uuid === id))
-                if (resolvable.length > 0) setSyncPromptIds(resolvable)
+                try {
+                    const serverOnly = await syncOfflineSongs([...ids])
+                    const resolvable = serverOnly.filter(id => songs.some(s => s.uuid === id))
+                    if (resolvable.length > 0) setSyncPromptIds(resolvable)
+                } catch {}
             }
         })
         function onDraftChanged(e: Event) {
