@@ -1,5 +1,9 @@
+'use client'
 import Link from 'next/link'
+import { useQuery } from '@tanstack/react-query'
 import { fetchVersion } from '../../lib/data'
+import { queryKeys } from '../../lib/query-keys'
+import QueryError from '../../components/query-error'
 
 const repos = {
   songbirdweb: 'https://github.com/cboin1996/songbirdweb',
@@ -18,9 +22,20 @@ function VersionCard({ name, version, repo }: { name: string; version: string; r
   )
 }
 
-export default async function Page() {
-  const versions = await fetchVersion()
+export default function Page() {
+  const { data: versions, error, refetch, isLoading } = useQuery({
+    queryKey: queryKeys.version,
+    queryFn: fetchVersion,
+    retry: false,
+  })
   const webVersion = process.env.NEXT_PUBLIC_APP_VERSION ?? 'unknown'
+
+  if (isLoading) return null
+  if (error) return (
+    <main className="p-4">
+      <QueryError error={error} retry={refetch} context="app info" />
+    </main>
+  )
 
   return (
     <main className="p-4">

@@ -117,14 +117,13 @@ const AlbumCard = memo(function AlbumCard({ album, isCompact, isActive, isPlayin
     )
 })
 
-export default function LibraryList({ initialSongs }: { initialSongs: LibrarySong[] }) {
+export default function LibraryList() {
     const online = useOnline()
     const queryClient = useQueryClient()
-    const { data: songs = [], error: songsError, refetch: refetchSongs } = useQuery({
+    const { data: songs = [], error: songsError, refetch: refetchSongs, isLoading: songsLoading } = useQuery({
         queryKey: queryKeys.librarySongs,
         queryFn: fetchLibrarySongs,
-        initialData: initialSongs,
-        initialDataUpdatedAt: Date.now(),
+        retry: false,
     })
     const { data: playlists = [] } = useQuery({
         queryKey: queryKeys.playlists,
@@ -809,7 +808,14 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         setBulkLoading(false)
     }
 
-    if (!offlineReady && displaySongs.length === 0) return null
+    if (songsLoading && displaySongs.length === 0) return null
+    if (displaySongs.length === 0 && songsError) {
+        return (
+            <div className="py-4">
+                <QueryError error={songsError} retry={refetchSongs} context="your library" />
+            </div>
+        )
+    }
     if (displaySongs.length === 0 && !online) {
         return <p className="text-gray-400 text-sm py-4">no songs saved offline — save songs while online to listen offline</p>
     }
@@ -915,7 +921,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
 
             {songsError && songs.length === 0 && (
                 <div className="my-4">
-                    <QueryError error={songsError} retry={refetchSongs} />
+                    <QueryError error={songsError} retry={refetchSongs} context="your library" />
                 </div>
             )}
 

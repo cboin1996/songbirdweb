@@ -1,4 +1,5 @@
+import AppLayout from "../../components/app-layout";
 import OfflineGuard from "../../components/offline-guard";
 export default function Layout({ children }: { children: React.ReactNode }) {
-    return <OfflineGuard feature="info">{children}</OfflineGuard>
+    return <AppLayout><OfflineGuard feature="info">{children}</OfflineGuard></AppLayout>
 }

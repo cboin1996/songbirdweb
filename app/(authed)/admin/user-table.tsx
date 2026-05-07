@@ -1,21 +1,44 @@
 'use client'
-import { useState } from "react";
-import { UserInfo, PerUser, updateUser, deleteUser, registerUser } from "../../lib/data";
+import React, { useState } from "react";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
+import { UserInfo, UsersPage, PerUser, updateUser, deleteUser, registerUser, fetchUsers, fetchAdminStats } from "../../lib/data";
+import { queryKeys } from "../../lib/query-keys";
+import { useDebouncedValue } from "../../lib/use-debounce";
 import Button from "../../components/button";
 import Input from "../../components/input";
 import SearchInput from "../../components/search-input";
+import QueryError from "../../components/query-error";
 
-const USER_PAGE_SIZE = 20
+const USER_PAGE_SIZE = 10
 
-interface Props {
-    initialUsers: UserInfo[]
-    perUser: PerUser[]
-}
-
-export default function UserTable({ initialUsers, perUser }: Props) {
-    const [users, setUsers] = useState<UserInfo[]>(initialUsers)
+export default function UserTable() {
     const [search, setSearch] = useState('')
     const [userPage, setUserPage] = useState(0)
+    const debouncedSearch = useDebouncedValue(search)
+
+    const { data: usersPage, error: usersError, refetch: refetchUsers, isLoading: usersLoading, isFetching: usersFetching } = useQuery({
+        queryKey: ['admin-users', debouncedSearch, userPage],
+        queryFn: () => fetchUsers(debouncedSearch, USER_PAGE_SIZE, userPage * USER_PAGE_SIZE),
+        placeholderData: keepPreviousData,
+        retry: false,
+    })
+    const usersData = usersPage?.users ?? []
+    const usersTotal = usersPage?.total ?? 0
+    const { data: statsData } = useQuery({
+        queryKey: queryKeys.adminStats,
+        queryFn: fetchAdminStats,
+        retry: false,
+    })
+    const perUser = statsData?.per_user ?? []
+    const [localUsers, setLocalUsers] = useState<UserInfo[] | null>(null)
+    const users = localUsers ?? usersData
+
+    function setUsers(updater: (prev: UserInfo[]) => UserInfo[]) {
+        setLocalUsers(prev => updater(prev ?? usersData))
+    }
+    const [deleteTarget, setDeleteTarget] = useState<UserInfo | null>(null)
+    const [deletePassword, setDeletePassword] = useState('')
+    const [deleteError, setDeleteError] = useState('')
     const [username, setUsername] = useState('')
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
@@ -24,14 +47,9 @@ export default function UserTable({ initialUsers, perUser }: Props) {
 
     const statsMap = Object.fromEntries(perUser.map(p => [p.user_id, p]))
 
-    const filtered = users.filter(u => {
-        const q = search.toLowerCase()
-        return !q || u.username.toLowerCase().includes(q) || u.email.toLowerCase().includes(q) || u.role.toLowerCase().includes(q)
-    })
-    const userTotalPages = Math.ceil(filtered.length / USER_PAGE_SIZE)
-    const pagedUsers = filtered.slice(userPage * USER_PAGE_SIZE, (userPage + 1) * USER_PAGE_SIZE)
+    const userTotalPages = Math.max(1, Math.ceil(usersTotal / USER_PAGE_SIZE))
 
-    function handleSearchChange(v: string) { setSearch(v); setUserPage(0) }
+    function handleSearchChange(v: string) { setSearch(v); setUserPage(0); setLocalUsers(null) }
 
     async function handleToggleActive(user: UserInfo) {
         try {
@@ -48,11 +66,17 @@ export default function UserTable({ initialUsers, perUser }: Props) {
         } catch {}
     }
 
-    async function handleDelete(user: UserInfo) {
+    async function handleDeleteConfirm() {
+        if (!deleteTarget) return
+        setDeleteError('')
         try {
-            await deleteUser(user.id)
-            setUsers(prev => prev.filter(u => u.id !== user.id))
-        } catch {}
+            await deleteUser(deleteTarget.id, deletePassword)
+            setUsers(prev => prev.filter(u => u.id !== deleteTarget.id))
+            setDeleteTarget(null)
+            setDeletePassword('')
+        } catch {
+            setDeleteError('incorrect password or delete failed')
+        }
     }
 
     async function handleInvite(e: React.FormEvent) {
@@ -74,19 +98,22 @@ export default function UserTable({ initialUsers, perUser }: Props) {
         }
     }
 
+    if (usersLoading) return null
+
     return (
         <div className="flex flex-col gap-10">
 
             {/* ── Users ── */}
             <section className="flex flex-col gap-4">
                 <p className="text-gray-400 text-sm font-medium uppercase tracking-wide">users</p>
+                {usersError && <QueryError error={usersError} retry={refetchUsers} context="users" />}
                 <SearchInput
                     value={search}
                     onChange={handleSearchChange}
                     placeholder="filter by username, email, role…"
                     className="w-full max-w-sm"
                 />
-                <div className="overflow-x-auto">
+                <div className={`overflow-x-auto transition-opacity ${usersFetching ? 'opacity-50' : ''}`}>
                     <table className="text-sm w-full">
                         <thead>
                             <tr className="text-gray-400 text-left">
@@ -101,12 +128,12 @@ export default function UserTable({ initialUsers, perUser }: Props) {
                             </tr>
                         </thead>
                         <tbody>
-                            {pagedUsers.length === 0 ? (
+                            {users.length === 0 ? (
                                 <tr><td colSpan={8} className="py-2 text-gray-500">no results</td></tr>
-                            ) : pagedUsers.map(user => {
+                            ) : users.map(user => {
                                 const s = statsMap[user.id]
-                                return (
-                                    <tr key={user.id} className="border-t border-gray-200 dark:border-gray-800 align-middle">
+                                return (<React.Fragment key={user.id}>
+                                    <tr className="border-t border-gray-200 dark:border-gray-800 align-middle">
                                         <td className="pr-4 py-2">
                                             <div className="flex flex-col">
                                                 <span className="font-medium">{user.username}</span>
@@ -133,11 +160,29 @@ export default function UserTable({ initialUsers, perUser }: Props) {
                                             <div className="flex flex-row gap-1 flex-wrap">
                                                 <Button text={user.role === 'admin' ? 'make user' : 'make admin'} onClick={() => handleToggleRole(user)} />
                                                 <Button text={user.is_active ? 'deactivate' : 'activate'} onClick={() => handleToggleActive(user)} />
-                                                <Button text="delete" onClick={() => handleDelete(user)} />
+                                                <Button text="delete" onClick={() => { setDeleteTarget(user); setDeletePassword(''); setDeleteError('') }} />
                                             </div>
                                         </td>
                                     </tr>
-                                )
+                                    {deleteTarget?.id === user.id && (
+                                        <tr className="bg-red-50 dark:bg-red-950/20">
+                                            <td colSpan={8} className="py-2 px-4">
+                                                <form onSubmit={e => { e.preventDefault(); handleDeleteConfirm() }} className="flex items-center gap-2 flex-wrap">
+                                                    <span className="text-sm text-red-600 dark:text-red-400">delete {user.username}?</span>
+                                                    <Input
+                                                        placeholder="your password"
+                                                        type="password"
+                                                        value={deletePassword}
+                                                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDeletePassword(e.target.value)}
+                                                    />
+                                                    <Button text="confirm delete" type="submit" disabled={!deletePassword} />
+                                                    <Button text="cancel" onClick={() => setDeleteTarget(null)} />
+                                                    {deleteError && <span className="text-red-500 text-xs">{deleteError}</span>}
+                                                </form>
+                                            </td>
+                                        </tr>
+                                    )}
+                                </React.Fragment>)
                             })}
                         </tbody>
                     </table>
@@ -151,7 +196,7 @@ export default function UserTable({ initialUsers, perUser }: Props) {
                         >
                             prev
                         </button>
-                        <span className="text-gray-400">page {userPage + 1} / {userTotalPages} · {filtered.length} total</span>
+                        <span className="text-gray-400">{userPage + 1} / {userTotalPages}</span>
                         <button
                             onClick={() => setUserPage(p => Math.min(userTotalPages - 1, p + 1))}
                             disabled={userPage >= userTotalPages - 1}
@@ -159,6 +204,7 @@ export default function UserTable({ initialUsers, perUser }: Props) {
                         >
                             next
                         </button>
+                        <span className="text-gray-500 text-xs">{usersTotal} total</span>
                     </div>
                 )}
             </section>

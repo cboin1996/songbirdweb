@@ -5,9 +5,9 @@ import { fetchCurrentUser } from "../../lib/data";
 import { UserProvider } from "../../lib/user-context";
 import OfflineGuard from "../../components/offline-guard";
 export default async function Layout({ children }: { children: React.ReactNode }) {
-    const user = await fetchCurrentUser()
+    const user = await fetchCurrentUser().catch(() => undefined)
     return (
-        <UserProvider isAdmin={user?.role === 'admin'} username={user?.username ?? ''}>
+        <UserProvider isAdmin={user?.role === 'admin'} username={user?.username ?? ''} userLoaded={user !== undefined}>
             <NavBar />
             <OfflineGuard feature="download">
                 <div className="sticky top-11 z-40 bg-[var(--background)]/90 backdrop-blur-md border-b border-gray-100 dark:border-gray-800 px-2">

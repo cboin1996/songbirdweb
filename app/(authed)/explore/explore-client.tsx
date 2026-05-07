@@ -3,7 +3,8 @@ import { useEffect, useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useQuery } from "@tanstack/react-query"
 import SearchInput from "../../components/search-input"
-import { ExploreData, ExploreWindow, SongWithCount, RecentlyPlayedSong, RecentlySavedSong, fetchLibrary, toSongCard, toPlayableSong } from "../../lib/data"
+import { ExploreData, ExploreWindow, SongWithCount, RecentlyPlayedSong, RecentlySavedSong, fetchLibrary, fetchExplore, toSongCard, toPlayableSong } from "../../lib/data"
+import QueryError from "../../components/query-error"
 import { queryKeys } from "../../lib/query-keys"
 import { routes } from "../../lib/routes"
 import { usePlayer } from "../../components/player"
@@ -118,14 +119,21 @@ function SongGrid({ songs, libraryIds, sortBy, viewFilter, window, showSource }:
     )
 }
 
-export default function ExploreClient({ data, window: timeWindow }: { data: ExploreData | undefined; window: ExploreWindow }) {
+export default function ExploreClient() {
     const router = useRouter()
     const searchParams = useSearchParams()
+    const timeWindow = (searchParams.get('window') ?? 'week') as ExploreWindow
     const initialSort = (searchParams.get('sort') as SortBy | null) ?? 'plays'
     const initialView = (searchParams.get('view') as ViewFilter | null) ?? 'everyone'
     const [sortBy, setSortBy] = useState<SortBy>(initialSort)
     const [viewFilter, setViewFilter] = useState<ViewFilter>(initialView)
     const [search, setSearch] = useState(searchParams.get('q') ?? '')
+
+    const { data, error: exploreError, refetch: refetchExplore, isLoading: exploreLoading } = useQuery({
+        queryKey: [...queryKeys.explore, timeWindow],
+        queryFn: () => fetchExplore(timeWindow),
+        retry: false,
+    })
 
     const { data: libraryEntries = [] } = useQuery({
         queryKey: queryKeys.library,
@@ -205,6 +213,9 @@ export default function ExploreClient({ data, window: timeWindow }: { data: Expl
 
     const windowLabel = WINDOWS.find(w => w.value === timeWindow)?.label
     const sortLabel = SORTS.find(s => s.value === sortBy)?.label
+
+    if (exploreLoading) return null
+    if (exploreError) return <QueryError error={exploreError} retry={refetchExplore} context="explore" />
 
     return (
         <div className="flex flex-col gap-6">

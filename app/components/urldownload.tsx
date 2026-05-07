@@ -7,11 +7,13 @@ import Link from "next/link";
 import { routes } from "../lib/routes";
 import { FaCheckCircle } from "react-icons/fa";
 import { usePlayer } from "./player";
+import QueryError from "./query-error";
 
 export default function DownloadViaUrl({ query }: { query: string }) {
     type Status = 'idle' | 'downloading' | 'ready' | 'saving' | 'done' | 'error'
     const [status, setStatus] = useState<Status>('idle')
     const [errorMsg, setErrorMsg] = useState('')
+    const [lastError, setLastError] = useState<Error | null>(null)
     const [songId, setSongId] = useState<string | null>(null)
     const [properties, setProperties] = useState<Properties | null>(null)
     const [artworkCached, setArtworkCached] = useState(false)
@@ -30,14 +32,14 @@ export default function DownloadViaUrl({ query }: { query: string }) {
         try {
             const result = await downloadSongViaUrl(query, true)
             if (!result || result.song_ids.length === 0) {
-                setStatus('error'); setErrorMsg('download failed'); return
+                setStatus('error'); setErrorMsg('download failed'); setLastError(new Error('empty response')); return
             }
             setSongId(result.song_ids[0])
             setProperties(result.properties ?? null)
             setArtworkCached(result.artwork_cached ?? false)
             setStatus('ready')
-        } catch {
-            setStatus('error'); setErrorMsg('download failed')
+        } catch (e) {
+            setStatus('error'); setErrorMsg('download failed'); setLastError(e instanceof Error ? e : new Error(String(e)))
         }
     }
 
@@ -48,8 +50,8 @@ export default function DownloadViaUrl({ query }: { query: string }) {
             await addToLibrary(songId)
             if (properties) onLibraryAdd({ uuid: songId, properties, artwork_cached: artworkCached })
             setDoneAction('library'); setStatus('done')
-        } catch {
-            setStatus('error'); setErrorMsg('could not add to library')
+        } catch (e) {
+            setStatus('error'); setErrorMsg('could not add to library'); setLastError(e instanceof Error ? e : new Error(String(e)))
         }
     }
 
@@ -59,8 +61,8 @@ export default function DownloadViaUrl({ query }: { query: string }) {
         try {
             await downloadSongToFile(songId, properties?.trackName ?? songId, properties?.artistName ?? '')
             setDoneAction('file'); setStatus('done')
-        } catch {
-            setStatus('error'); setErrorMsg('file download failed')
+        } catch (e) {
+            setStatus('error'); setErrorMsg('file download failed'); setLastError(e instanceof Error ? e : new Error(String(e)))
         }
     }
 
@@ -112,17 +114,7 @@ export default function DownloadViaUrl({ query }: { query: string }) {
     }
 
     if (status === 'error') {
-        return (
-            <div className="flex items-center gap-3">
-                <p className="text-sm text-red-500">{errorMsg}</p>
-                <button
-                    onClick={startDownload}
-                    className="text-xs px-3 py-1.5 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
-                >
-                    retry
-                </button>
-            </div>
-        )
+        return <QueryError error={lastError ?? new Error(errorMsg)} retry={startDownload} message={errorMsg} />
     }
 
     return (

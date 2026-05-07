@@ -1,10 +1,11 @@
 'use client'
-import { useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import { useEffect, useImperativeHandle, useRef, useState } from 'react'
 import Link from 'next/link'
 import { FaDove } from 'react-icons/fa6'
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { ImportJobResult, ImportJobsPage, listImportJobs, pollImportJob } from '../lib/data'
 import { routes } from '../lib/routes'
+import { useDebouncedValue } from '../lib/use-debounce'
 import SearchInput from './search-input'
 import Spinner from './spinner'
 import QueryError from './query-error'
@@ -25,6 +26,7 @@ export default function ImportJobsTable({
   const queryClient = useQueryClient()
   const [filter, setFilter] = useState('')
   const [page, setPage] = useState(0)
+  const debouncedFilter = useDebouncedValue(filter)
   const [activeIds, setActiveIds] = useState<Set<string>>(new Set())
   const activeIdsRef = useRef<Set<string>>(new Set())
   const [sessionFinished, setSessionFinished] = useState(0)
@@ -32,8 +34,8 @@ export default function ImportJobsTable({
   const hasInFlight = inFlight > 0
 
   const { data: pageData, isFetching, isLoading, error: jobsError, refetch: refetchJobs } = useQuery({
-    queryKey: ['import-jobs', page],
-    queryFn: () => listImportJobs(PAGE_SIZE, page * PAGE_SIZE),
+    queryKey: ['import-jobs', debouncedFilter, page],
+    queryFn: () => listImportJobs(debouncedFilter, PAGE_SIZE, page * PAGE_SIZE),
     placeholderData: keepPreviousData,
   })
   const jobs = pageData?.jobs ?? []
@@ -65,7 +67,7 @@ export default function ImportJobsTable({
   useImperativeHandle(tableRef, () => ({
     addJob(job: ImportJobResult, replaceId?: string) {
       trackJob(job, replaceId)
-      queryClient.setQueryData<ImportJobsPage>(['import-jobs', page], prev => {
+      queryClient.setQueryData<ImportJobsPage>(['import-jobs', debouncedFilter, page], prev => {
         const prevJobs = prev?.jobs ?? []
         if (replaceId) {
           const idx = prevJobs.findIndex(j => j.job_id === replaceId)
@@ -85,7 +87,7 @@ export default function ImportJobsTable({
     if (!hasInFlight) return
     const tick = async () => {
       try {
-        const data = await listImportJobs(PAGE_SIZE, 0)
+        const data = await listImportJobs('', PAGE_SIZE, 0)
         if (!data) return
         const byId = new Map((data.jobs ?? []).map(j => [j.job_id, j]))
         const missing = [...activeIdsRef.current].filter(id => !byId.has(id))
@@ -109,7 +111,7 @@ export default function ImportJobsTable({
           activeIdsRef.current = next
           return next
         })
-        queryClient.setQueryData<ImportJobsPage>(['import-jobs', page], prev => {
+        queryClient.setQueryData<ImportJobsPage>(['import-jobs', debouncedFilter, page], prev => {
           if (!prev) return prev
           return {
             ...prev,
@@ -124,16 +126,6 @@ export default function ImportJobsTable({
     return () => clearInterval(interval)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasInFlight, page])
-
-  const filtered = useMemo(() => {
-    if (!filter.trim()) return jobs
-    const q = filter.trim().toLowerCase()
-    return jobs.filter(j =>
-      (j.track_name ?? '').toLowerCase().includes(q) ||
-      (j.filename ?? '').toLowerCase().includes(q) ||
-      j.status.toLowerCase().includes(q)
-    )
-  }, [jobs, filter])
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
@@ -198,13 +190,13 @@ export default function ImportJobsTable({
         </div>
         <SearchInput
           value={filter}
-          onChange={setFilter}
+          onChange={v => { setFilter(v); setPage(0) }}
           placeholder="filter by name or status"
           className="w-48"
         />
       </div>
 
-      {jobsError && <QueryError error={jobsError} retry={refetchJobs} />}
+      {jobsError && <QueryError error={jobsError} retry={refetchJobs} context="import history" />}
 
       {hasInFlight && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-sky-50 dark:bg-sky-950/30 border border-sky-200 dark:border-sky-900 text-sm">
@@ -217,13 +209,7 @@ export default function ImportJobsTable({
         </div>
       )}
 
-      {isLoading && <TableSkeleton rows={5} cols={3} />}
-
-      {!isLoading && jobs.length === 0 && !isFetching && (
-        <p className="text-gray-500 text-sm py-2">no file imports yet — drag & drop files above to import</p>
-      )}
-
-      {!isLoading && jobs.length > 0 && (
+      {isLoading ? <TableSkeleton rows={5} cols={3} /> : (
         <div className={`overflow-x-auto ${isFetching ? 'opacity-50' : ''}`}>
           <table className="w-full text-sm border-collapse">
             <thead>
@@ -235,7 +221,9 @@ export default function ImportJobsTable({
               </tr>
             </thead>
             <tbody>
-              {filtered.map(job => (
+              {jobs.length === 0 ? (
+                <tr><td colSpan={4} className="py-2 text-gray-500">no results</td></tr>
+              ) : jobs.map(job => (
                 <tr key={job.job_id} className="border-b border-gray-100 dark:border-gray-800">
                   <td className="py-2 pr-4 text-gray-400 whitespace-nowrap text-xs">
                     {job.created_at ? new Date(job.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}

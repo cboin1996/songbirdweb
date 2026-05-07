@@ -91,7 +91,12 @@ async function fetchData<T>(args: {
   } else {
     options = await buildFetchOptions(args.method, args.body);
   }
-  const response = await fetch(args.url, options);
+  let response: Response;
+  try {
+    response = await fetch(args.url, options);
+  } catch {
+    throw new FetchError(`server unavailable: ${args.method} ${args.url}`, 0);
+  }
   if (!response.ok) {
     const silent = args.silentStatuses ?? []
     if (response.status === 401 && typeof window !== 'undefined' && !SKIP_REFRESH_URLS.has(args.url)) {
@@ -106,7 +111,13 @@ async function fetchData<T>(args: {
         }
         const retryResponse = await fetch(args.url, retryOptions)
         if (retryResponse.ok) {
-          if (responseType === ResponseTypes.json) return await retryResponse.json() as T;
+          if (responseType === ResponseTypes.json) {
+            try {
+              return await retryResponse.json() as T;
+            } catch {
+              throw new FetchError(`server returned invalid response for ${args.method} ${args.url}`, retryResponse.status);
+            }
+          }
           if (responseType === ResponseTypes.bytes) return await retryResponse.bytes() as T;
           if (responseType === ResponseTypes.blob) return await retryResponse.blob() as T;
           return undefined;
@@ -120,7 +131,13 @@ async function fetchData<T>(args: {
     if (silent.includes(response.status)) return undefined;
     throw new FetchError(`${response.status} ${args.method} ${args.url}`, response.status);
   }
-  if (responseType === ResponseTypes.json) return response.json() as T;
+  if (responseType === ResponseTypes.json) {
+    try {
+      return await response.json() as T;
+    } catch {
+      throw new FetchError(`server returned invalid response for ${args.method} ${args.url}`, response.status);
+    }
+  }
   if (responseType === ResponseTypes.bytes) return response.bytes() as T;
   if (responseType === ResponseTypes.blob) return response.blob() as T;
 }
@@ -475,8 +492,15 @@ export interface UserInfo {
   created_at: string
 }
 
-export async function fetchUsers(): Promise<UserInfo[]> {
-  return await fetchData<UserInfo[]>({ url: `${API_V1}/admin/users`, method: 'GET' }) ?? []
+export interface UsersPage {
+  total: number
+  users: UserInfo[]
+}
+
+export async function fetchUsers(query = '', limit = 20, offset = 0): Promise<UsersPage> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+  if (query) params.set('query', query)
+  return await fetchData<UsersPage>({ url: `${API_V1}/admin/users?${params}`, method: 'GET' }) ?? { total: 0, users: [] }
 }
 
 export async function updateUser(id: string, body: { role?: string; is_active?: boolean }): Promise<UserInfo> {
@@ -485,8 +509,33 @@ export async function updateUser(id: string, body: { role?: string; is_active?: 
   return result
 }
 
-export async function deleteUser(id: string): Promise<void> {
-  await fetchData({ url: `${API_V1}/admin/users/${id}`, method: 'DELETE', responseType: ResponseTypes.none })
+export async function deleteUser(id: string, password: string): Promise<void> {
+  await fetchData({ url: `${API_V1}/admin/users/${id}`, method: 'DELETE', body: { password }, responseType: ResponseTypes.none })
+}
+
+export interface AdminImportJob {
+  job_id: string
+  user_id: string
+  username: string
+  status: string
+  song_id: string | null
+  track_name: string | null
+  error: string | null
+  duplicate_of: string | null
+  filename: string | null
+  created_at: string | null
+}
+
+export interface AdminImportJobsPage {
+  total: number
+  jobs: AdminImportJob[]
+  status_counts?: Record<string, number>
+}
+
+export async function fetchAdminImports(query = '', limit = 20, offset = 0): Promise<AdminImportJobsPage> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+  if (query) params.set('query', query)
+  return await fetchData<AdminImportJobsPage>({ url: `${API_V1}/admin/imports?${params}`, method: 'GET' }) ?? { total: 0, jobs: [] }
 }
 
 export interface EditJobSummary {
@@ -548,8 +597,10 @@ export interface EditJobsPage {
   jobs: EditJobSummary[]
 }
 
-export async function fetchAdminEditJobs(limit = 20, offset = 0): Promise<EditJobsPage> {
-  return await fetchData<EditJobsPage>({ url: `${API_V1}/admin/edit-jobs?limit=${limit}&offset=${offset}`, method: 'GET' }) ?? { total: 0, jobs: [] }
+export async function fetchAdminEditJobs(query = '', limit = 20, offset = 0): Promise<EditJobsPage> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+  if (query) params.set('query', query)
+  return await fetchData<EditJobsPage>({ url: `${API_V1}/admin/edit-jobs?${params}`, method: 'GET' }) ?? { total: 0, jobs: [] }
 }
 
 export interface ErrorLogEntry {
@@ -569,8 +620,10 @@ export interface ErrorsPage {
   errors: ErrorLogEntry[]
 }
 
-export async function fetchAdminErrors(limit = 50, offset = 0): Promise<ErrorsPage> {
-  return await fetchData<ErrorsPage>({ url: `${API_V1}/admin/errors?limit=${limit}&offset=${offset}`, method: 'GET' }) ?? { total: 0, errors: [] }
+export async function fetchAdminErrors(query = '', limit = 50, offset = 0): Promise<ErrorsPage> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+  if (query) params.set('query', query)
+  return await fetchData<ErrorsPage>({ url: `${API_V1}/admin/errors?${params}`, method: 'GET' }) ?? { total: 0, errors: [] }
 }
 
 export interface PlayerState {
@@ -675,8 +728,10 @@ export interface ImportJobsPage {
   status_counts?: Record<string, number>
 }
 
-export async function listImportJobs(limit = 20, offset = 0): Promise<ImportJobsPage> {
-  return await fetchData<ImportJobsPage>({ url: `${API_V1}/import?limit=${limit}&offset=${offset}`, method: 'GET' }) ?? { total: 0, jobs: [], status_counts: {} }
+export async function listImportJobs(query = '', limit = 20, offset = 0): Promise<ImportJobsPage> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+  if (query) params.set('query', query)
+  return await fetchData<ImportJobsPage>({ url: `${API_V1}/import?${params}`, method: 'GET' }) ?? { total: 0, jobs: [], status_counts: {} }
 }
 
 export async function pollImportJob(jobId: string): Promise<ImportJobResult | undefined> {

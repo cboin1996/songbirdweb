@@ -5,10 +5,12 @@ import { usePathname } from "next/navigation";
 import { FaBars, FaTimes } from "react-icons/fa";
 import { routes } from "../lib/routes";
 import { useOnline } from "../lib/use-online";
+import { useUser } from "../lib/user-context";
 
 const OFFLINE_SUPPORTED = new Set<string>([routes.library, routes.settings])
 
-export default function NavLinks({ isAdmin }: { isAdmin: boolean }) {
+export default function NavLinks() {
+    const { isAdmin } = useUser()
     const [open, setOpen] = useState(false)
     const pathname = usePathname()
     const online = useOnline()
