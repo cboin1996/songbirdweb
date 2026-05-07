@@ -145,8 +145,9 @@ async function globalSetup() {
 
     // Fetch users once; create any that are missing.
     const usersRes = await admin.get(`${API_V1}/admin/users`)
-    const users: any[] = usersRes.ok() ? await usersRes.json() : []
-    const usernames = new Set(Array.isArray(users) ? users.map((u: any) => u.username) : [])
+    const usersRaw = usersRes.ok() ? await usersRes.json() : []
+    const users: any[] = Array.isArray(usersRaw) ? usersRaw : usersRaw.users ?? []
+    const usernames = new Set(users.map((u: any) => u.username))
 
     const allTestUsers = [
         { username: TEST_USER, password: TEST_PASS },
@@ -167,7 +168,8 @@ async function globalSetup() {
     }
 
     // Ensure main test user has admin role (needed for admin.spec.ts).
-    const usersAfter = (await (await admin.get(`${API_V1}/admin/users`)).json()) as any[]
+    const usersBody = (await (await admin.get(`${API_V1}/admin/users`)).json()) as any
+    const usersAfter = Array.isArray(usersBody) ? usersBody : usersBody.users
     const testUserRecord = usersAfter.find((u: any) => u.username === TEST_USER)
     if (testUserRecord && testUserRecord.role !== 'admin') {
         await admin.patch(`${API_V1}/admin/users/${testUserRecord.id}`, { data: { role: 'admin' } })

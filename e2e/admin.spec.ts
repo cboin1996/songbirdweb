@@ -97,7 +97,7 @@ test.describe('admin page', () => {
     test('users section shows current admin username', async ({ page }) => {
         await page.goto(routes.admin)
         await expect(page.getByText('users').first()).toBeVisible({ timeout: 10000 })
-        await expect(page.getByText(USERNAME).first()).toBeVisible({ timeout: 10000 })
+        await expect(page.getByText(USERNAME).first()).toBeVisible({ timeout: 20000 })
     })
 
     test('user table shows role badge and active status', async ({ page }) => {

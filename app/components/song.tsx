@@ -87,7 +87,6 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
                 onLibraryRemove(song.songId!)
                 if (offlineCached) {
                     uncacheSong(song.songId).catch(() => {})
-                    removeServerOfflineSong(song.songId).catch(() => {})
                     setOfflineCached(false)
                     onCacheChange?.(song.songId, false)
                 }
@@ -142,18 +141,25 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
         setOfflineProgress(0)
         try {
             if (offlineCached) {
+                await removeServerOfflineSong(song.songId)
                 await uncacheSong(song.songId)
                 setOfflineCached(false)
                 onCacheChange?.(song.songId, false)
-                removeServerOfflineSong(song.songId).catch(() => {})
             } else {
                 await cacheSong(song.songId, (pct) => setOfflineProgress(pct))
+                try {
+                    await addServerOfflineSong(song.songId)
+                } catch {
+                    await uncacheSong(song.songId)
+                    showToast('could not save offline, try again', true)
+                    setOfflinePending(false)
+                    return
+                }
                 setOfflineCached(true)
                 onCacheChange?.(song.songId, true)
-                addServerOfflineSong(song.songId).catch(() => {})
             }
         } catch {
-            // silently fail — user sees no change since state wasn't updated
+            showToast(offlineCached ? 'could not remove offline, try again' : 'could not save offline, try again', true)
         }
         setOfflinePending(false)
     }

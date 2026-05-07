@@ -13,6 +13,7 @@ import { usePlayer } from "../../components/player"
 import { routes } from "../../lib/routes"
 import { EVENTS } from "../../lib/events"
 import { FaPlay, FaPause, FaCloudDownloadAlt, FaMusic } from "react-icons/fa"
+import { useToast } from "../../components/toast"
 import PlaylistsView from "./playlists-view"
 import EditsBanner from "./edits-banner"
 import QueryError from "../../components/query-error"
@@ -119,6 +120,7 @@ const AlbumCard = memo(function AlbumCard({ album, isCompact, isActive, isPlayin
 
 export default function LibraryList() {
     const online = useOnline()
+    const { showToast } = useToast()
     const queryClient = useQueryClient()
     const { data: songs = [], error: songsError, refetch: refetchSongs, isLoading: songsLoading } = useQuery({
         queryKey: queryKeys.librarySongs,
@@ -269,8 +271,15 @@ export default function LibraryList() {
         for (const song of songList) {
             try {
                 await cacheSong(song.uuid)
+                try {
+                    await addServerOfflineSong(song.uuid)
+                } catch {
+                    await uncacheSong(song.uuid).catch(() => {})
+                    failed.add(song.uuid)
+                    setSaveAllProgress(p => ({ ...p, done: p.done + 1 }))
+                    continue
+                }
                 setCachedIds(prev => new Set([...prev, song.uuid]))
-                addServerOfflineSong(song.uuid).catch(() => {})
                 if (song.properties) {
                     const artUrls = [
                         artworkUrl(song.properties.artworkUrl100, 400),
@@ -288,6 +297,7 @@ export default function LibraryList() {
         }
         setSavingAll(false)
         setFailedIds(failed)
+        if (failed.size > 0) showToast(`${failed.size} song${failed.size > 1 ? 's' : ''} failed to save offline`, true)
     }
 
     async function saveAllOffline() {
@@ -740,12 +750,11 @@ export default function LibraryList() {
     async function handleBulkRemoveFromLibrary() {
         setBulkLoading(true)
         const ids = [...selectedIds]
-        try { await bulkRemoveFromLibrary(ids) } catch { setBulkLoading(false); return }
+        try { await bulkRemoveFromLibrary(ids) } catch { showToast('could not remove from library, try again', true); setBulkLoading(false); return }
         for (const id of ids) {
             onLibraryRemove(id)
             if (cachedIds.has(id)) {
                 try { await uncacheSong(id) } catch {}
-                removeServerOfflineSong(id).catch(() => {})
             }
         }
         setCachedIds(prev => { const next = new Set(prev); ids.forEach(id => next.delete(id)); return next })
@@ -759,41 +768,67 @@ export default function LibraryList() {
 
     async function bulkSaveOffline() {
         setBulkLoading(true)
+        const failed = new Set<string>()
         for (const id of selectedIds) {
             if (!cachedIds.has(id)) {
                 try {
                     await cacheSong(id)
+                    try {
+                        await addServerOfflineSong(id)
+                    } catch {
+                        await uncacheSong(id).catch(() => {})
+                        failed.add(id)
+                        continue
+                    }
                     setCachedIds(prev => new Set([...prev, id]))
-                    addServerOfflineSong(id).catch(() => {})
-                } catch {}
+                } catch { failed.add(id) }
             }
         }
-        exitSelectMode()
+        if (failed.size > 0) {
+            setSelectedIds(failed)
+            showToast(`${failed.size} song${failed.size > 1 ? 's' : ''} failed to save offline`, true)
+        } else {
+            exitSelectMode()
+        }
         setBulkLoading(false)
     }
 
     async function bulkDownload() {
         setBulkLoading(true)
+        const failedIds = new Set<string>()
         for (const id of selectedIds) {
             const song = songs.find(s => s.uuid === id)
             if (song?.properties) {
-                try { await downloadSongToFile(id, song.properties.trackName, song.properties.artistName) } catch {}
+                try { await downloadSongToFile(id, song.properties.trackName, song.properties.artistName) } catch { failedIds.add(id) }
             }
         }
-        exitSelectMode()
+        if (failedIds.size > 0) {
+            setSelectedIds(failedIds)
+            showToast(`${failedIds.size} download${failedIds.size > 1 ? 's' : ''} failed`, true)
+        } else {
+            exitSelectMode()
+        }
         setBulkLoading(false)
     }
 
     async function bulkRemoveOffline() {
         setBulkLoading(true)
+        const failed = new Set<string>()
         for (const id of selectedIds) {
             if (cachedIds.has(id)) {
-                try { await uncacheSong(id) } catch {}
-                setCachedIds(prev => { const next = new Set(prev); next.delete(id); return next })
-                removeServerOfflineSong(id).catch(() => {})
+                try {
+                    await removeServerOfflineSong(id)
+                    await uncacheSong(id)
+                    setCachedIds(prev => { const next = new Set(prev); next.delete(id); return next })
+                } catch { failed.add(id) }
             }
         }
-        exitSelectMode()
+        if (failed.size > 0) {
+            setSelectedIds(failed)
+            showToast(`${failed.size} song${failed.size > 1 ? 's' : ''} failed to remove offline`, true)
+        } else {
+            exitSelectMode()
+        }
         setBulkLoading(false)
     }
 
@@ -803,7 +838,9 @@ export default function LibraryList() {
         try {
             await bulkAddSongsToPlaylist(playlistId, [...selectedIds])
             await refreshPlaylists()
-        } catch {}
+        } catch {
+            showToast('failed to add to playlist', true)
+        }
         exitSelectMode()
         setBulkLoading(false)
     }

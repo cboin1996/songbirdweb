@@ -1,7 +1,7 @@
-import { routes, editSongRoute } from './routes'
+import { routes, editSongRoute, downloadSongQuery, downloadAlbumQuery } from './routes'
 import { test, expect } from '@playwright/test'
-import { login } from './helpers'
-import { EditorPage, CommonPage, LibraryPage } from './pages'
+import { login, apiLoginAs, API_V1, USERNAME, PASSWORD } from './helpers'
+import { EditorPage, CommonPage, LibraryPage, DownloadPage } from './pages'
 
 test.describe('error states — page boundaries', () => {
     test.beforeEach(async ({ page }) => {
@@ -171,6 +171,7 @@ test.describe('error states — mutations', () => {
             return route.continue()
         })
         await page.goto(routes.import)
+        await expect(common.importFileInput).toBeAttached({ timeout: 10000 })
 
         const buffer = Buffer.from('fake mp3 content for test')
         await common.importFileInput.setInputFiles({
@@ -309,6 +310,324 @@ test.describe('error states — library', () => {
 
         await page.reload()
         await expect(common.queryError('your-library')).toBeVisible({ timeout: 10000 })
+    })
+})
+
+test.describe('error states — explore', () => {
+    test.beforeEach(async ({ page }) => {
+        await login(page)
+    })
+
+    test('explore shows QueryError when API fails', async ({ page }) => {
+        const common = new CommonPage(page)
+        await page.route('**/v1/songs/explore*', route =>
+            route.fulfill({ status: 500, body: 'Internal Server Error' })
+        )
+        await page.goto(routes.explore)
+        await expect(common.queryError('explore')).toBeVisible({ timeout: 10000 })
+    })
+})
+
+test.describe('error states — info', () => {
+    test.beforeEach(async ({ page }) => {
+        await login(page)
+    })
+
+    test('info page shows QueryError when version API fails', async ({ page }) => {
+        const common = new CommonPage(page)
+        await page.route('**/v1/version*', route =>
+            route.fulfill({ status: 500, body: 'Internal Server Error' })
+        )
+        await page.goto(routes.info)
+        await expect(common.queryError('app-info')).toBeVisible({ timeout: 10000 })
+    })
+})
+
+test.describe('error states — download', () => {
+    test.beforeEach(async ({ page }) => {
+        await login(page)
+    })
+
+    test('song search shows QueryError when API fails', async ({ page }) => {
+        const common = new CommonPage(page)
+        await page.route('**/v1/properties/itunes*', route =>
+            route.fulfill({ status: 500, body: 'Internal Server Error' })
+        )
+        await page.goto(downloadSongQuery('test'))
+        await expect(common.queryError('search-results')).toBeVisible({ timeout: 10000 })
+    })
+
+    test('album search shows QueryError when API fails', async ({ page }) => {
+        const common = new CommonPage(page)
+        await page.route('**/v1/properties/itunes*', route =>
+            route.fulfill({ status: 500, body: 'Internal Server Error' })
+        )
+        await page.goto(downloadAlbumQuery('test'))
+        await expect(common.queryError('search-results')).toBeVisible({ timeout: 10000 })
+    })
+
+    test('URL download shows error on failure', async ({ page }) => {
+        await page.route('**/v1/download', route => {
+            if (route.request().method() === 'POST')
+                return route.fulfill({ status: 500, body: 'Internal Server Error' })
+            return route.continue()
+        })
+        const download = new DownloadPage(page)
+        await download.gotoUrlDownload('https://example.com/song.mp3')
+        await expect(page.getByText('download failed')).toBeVisible({ timeout: 15000 })
+    })
+})
+
+test.describe('error states — song card actions', () => {
+    test.beforeEach(async ({ page }) => {
+        await login(page)
+    })
+
+    test('share link shows toast on failure', async ({ page }) => {
+        const common = new CommonPage(page)
+        const library = new LibraryPage(page)
+        await page.goto(routes.library)
+        await library.waitForSongs()
+
+        await page.route('**/v1/share/songs/*', route =>
+            route.fulfill({ status: 500, body: 'Internal Server Error' })
+        )
+
+        const card = library.songCards.first()
+        await library.kebab(card).click()
+        await library.kebabMenu().getByText('Copy share link').click()
+        await expect(common.toastError).toContainText('failed to create share link', { timeout: 5000 })
+    })
+
+    test('download file shows toast on failure', async ({ page }) => {
+        const common = new CommonPage(page)
+        const library = new LibraryPage(page)
+        await page.goto(routes.library)
+        await library.waitForSongs()
+
+        await page.route('**/v1/download/*', route =>
+            route.fulfill({ status: 500, body: 'Internal Server Error' })
+        )
+
+        const card = library.songCards.first()
+        await library.kebab(card).click()
+        await library.kebabMenu().getByText('Download').click()
+        await expect(common.toastError).toContainText('download failed', { timeout: 5000 })
+    })
+
+    test('save offline shows toast when cache fails', async ({ page }) => {
+        const common = new CommonPage(page)
+        const library = new LibraryPage(page)
+        await page.goto(routes.library)
+        await library.waitForSongs()
+
+        await page.route('**/v1/download/*', route =>
+            route.fulfill({ status: 500, body: 'Internal Server Error' })
+        )
+
+        const card = library.songCards.first()
+        await library.kebab(card).click()
+        await library.kebabMenu().getByText('Save offline').click()
+        await expect(common.toastError).toContainText('could not save offline', { timeout: 5000 })
+    })
+
+    test('save offline shows toast when server sync fails', async ({ page }) => {
+        const common = new CommonPage(page)
+        const library = new LibraryPage(page)
+        await page.goto(routes.library)
+        await library.waitForSongs()
+
+        await page.route('**/v1/library/offline/*', route => {
+            if (route.request().method() === 'POST')
+                return route.fulfill({ status: 500, body: 'Internal Server Error' })
+            return route.continue()
+        })
+
+        const card = library.songCards.first()
+        await library.kebab(card).click()
+        await library.kebabMenu().getByText('Save offline').click()
+        await expect(common.toastError).toContainText('could not save offline', { timeout: 15000 })
+    })
+
+    test('remove offline shows toast when server sync fails', async ({ page }) => {
+        const common = new CommonPage(page)
+        const library = new LibraryPage(page)
+        await page.goto(routes.library)
+        await library.waitForSongs()
+
+        // First save a song offline successfully
+        const card = library.songCards.first()
+        await library.kebab(card).click()
+        await library.kebabMenu().getByText('Save offline').click()
+        await expect(card.getByTitle('Remove offline copy')).toBeVisible({ timeout: 15000 })
+
+        // Now block server DELETE and try to remove
+        await page.route('**/v1/library/offline/*', route => {
+            if (route.request().method() === 'DELETE')
+                return route.fulfill({ status: 500, body: 'Internal Server Error' })
+            return route.continue()
+        })
+
+        await library.kebab(card).click()
+        await library.kebabMenu().getByText('Remove offline copy').click()
+        await expect(common.toastError).toContainText('could not remove offline', { timeout: 5000 })
+    })
+
+    test('add to playlist shows toast on failure', async ({ page }) => {
+        const common = new CommonPage(page)
+        const library = new LibraryPage(page)
+        const api = await apiLoginAs(USERNAME, PASSWORD)
+        try {
+            const created = await api.post(`${API_V1}/playlists`, { data: { name: 'e2e-err-pl', icon: 'music' } })
+            const pl = await created.json()
+
+            await page.goto(routes.library)
+            await library.waitForSongs()
+
+            await page.route('**/v1/playlists/*/songs', route => {
+                if (route.request().method() === 'POST')
+                    return route.fulfill({ status: 500, body: 'Internal Server Error' })
+                return route.continue()
+            })
+
+            const card = library.songCards.first()
+            await library.kebab(card).click()
+            await library.kebabMenu().getByText('Add to playlist').click()
+            await page.getByText('e2e-err-pl').click()
+            await expect(common.toastError).toContainText('failed to add to playlist', { timeout: 5000 })
+
+            await api.delete(`${API_V1}/playlists/${pl.id}`)
+        } finally {
+            await api.dispose()
+        }
+    })
+})
+
+test.describe('error states — bulk operations', () => {
+    test.beforeEach(async ({ page }) => {
+        await login(page)
+    })
+
+    test('bulk remove from library shows toast on failure', async ({ page }) => {
+        const common = new CommonPage(page)
+        const library = new LibraryPage(page)
+        await page.goto(routes.library)
+        await library.waitForSongs()
+
+        await page.route('**/v1/library/bulk', route => {
+            if (route.request().method() === 'DELETE')
+                return route.fulfill({ status: 500, body: 'Internal Server Error' })
+            return route.continue()
+        })
+
+        await library.enterSelectMode()
+        await expect(library.cancelBtn).toBeVisible({ timeout: 3000 })
+        await library.songCards.first().click()
+        await expect(library.selectedCount()).toBeVisible({ timeout: 3000 })
+        await library.bulkRemoveBtn.click()
+        await expect(common.toastError).toContainText('could not remove from library', { timeout: 5000 })
+    })
+
+    test('bulk save offline shows toast on failure and keeps failed selected', async ({ page }) => {
+        const common = new CommonPage(page)
+        const library = new LibraryPage(page)
+        await page.goto(routes.library)
+        await library.waitForSongs()
+
+        await page.route('**/v1/download/*', route =>
+            route.fulfill({ status: 500, body: 'Internal Server Error' })
+        )
+
+        await library.enterSelectMode()
+        await expect(library.cancelBtn).toBeVisible({ timeout: 3000 })
+        await library.songCards.first().click()
+        await expect(library.selectedCount()).toBeVisible({ timeout: 3000 })
+        await library.bulkSaveOfflineBtn.click()
+        await expect(common.toastError).toContainText('failed to save offline', { timeout: 15000 })
+        await expect(library.selectedCount()).toBeVisible()
+    })
+
+    test('bulk download shows toast on failure and keeps failed selected', async ({ page }) => {
+        const common = new CommonPage(page)
+        const library = new LibraryPage(page)
+        await page.goto(routes.library)
+        await library.waitForSongs()
+
+        await page.route('**/v1/download/*', route =>
+            route.fulfill({ status: 500, body: 'Internal Server Error' })
+        )
+
+        await library.enterSelectMode()
+        await expect(library.cancelBtn).toBeVisible({ timeout: 3000 })
+        await library.songCards.first().click()
+        await expect(library.selectedCount()).toBeVisible({ timeout: 3000 })
+        await library.bulkDownloadBtn.click()
+        await expect(common.toastError).toContainText('download', { timeout: 5000 })
+        await expect(library.selectedCount()).toBeVisible()
+    })
+
+    test('bulk add to playlist shows toast on failure', async ({ page }) => {
+        const common = new CommonPage(page)
+        const library = new LibraryPage(page)
+        const api = await apiLoginAs(USERNAME, PASSWORD)
+        try {
+            const created = await api.post(`${API_V1}/playlists`, { data: { name: 'e2e-bulk-err', icon: 'music' } })
+            const pl = await created.json()
+
+            await page.goto(routes.library)
+            await library.waitForSongs()
+
+            await page.route('**/v1/playlists/*/songs/bulk', route => {
+                if (route.request().method() === 'POST')
+                    return route.fulfill({ status: 500, body: 'Internal Server Error' })
+                return route.continue()
+            })
+
+            await library.enterSelectMode()
+            await expect(library.cancelBtn).toBeVisible({ timeout: 3000 })
+            await library.songCards.first().click()
+            await expect(library.selectedCount()).toBeVisible({ timeout: 3000 })
+            await library.bulkPlaylistBtn.click()
+            await page.getByText('e2e-bulk-err').click()
+            await expect(common.toastError).toContainText('failed to add to playlist', { timeout: 5000 })
+
+            await api.delete(`${API_V1}/playlists/${pl.id}`)
+        } finally {
+            await api.dispose()
+        }
+    })
+})
+
+test.describe('error states — admin mutations', () => {
+    test.beforeEach(async ({ page }) => {
+        await login(page)
+    })
+
+    test('invite user shows error on failure', async ({ page }) => {
+        await page.route('**/v1/auth/register', route =>
+            route.fulfill({ status: 500, body: 'Internal Server Error' })
+        )
+        await page.goto(routes.admin)
+        await expect(page.getByText('invite user').first()).toBeVisible({ timeout: 10000 })
+
+        await page.getByPlaceholder('username', { exact: true }).first().fill('failuser')
+        await page.getByPlaceholder('email', { exact: true }).first().fill('fail@test.com')
+        await page.getByPlaceholder('password', { exact: true }).first().fill('pass123')
+        await page.getByPlaceholder('confirm password').first().fill('pass123')
+        await page.getByRole('button', { name: 'invite' }).click()
+        await expect(page.getByText('invite failed')).toBeVisible({ timeout: 5000 })
+    })
+
+    test('invite user shows passwords do not match', async ({ page }) => {
+        await page.goto(routes.admin)
+        await expect(page.getByText('invite user').first()).toBeVisible({ timeout: 10000 })
+
+        await page.getByPlaceholder('username', { exact: true }).first().fill('failuser')
+        await page.getByPlaceholder('email', { exact: true }).first().fill('fail@test.com')
+        await page.getByPlaceholder('password', { exact: true }).first().fill('pass123')
+        await page.getByPlaceholder('confirm password').first().fill('different')
+        await page.getByRole('button', { name: 'invite' }).click()
+        await expect(page.getByText('passwords do not match')).toBeVisible({ timeout: 5000 })
     })
 })
 

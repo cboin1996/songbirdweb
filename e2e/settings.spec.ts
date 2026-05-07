@@ -38,7 +38,8 @@ test.describe('settings - change password', () => {
         })
         // Clean up any leftover from a previous run
         const usersRes = await request.get(`${API_BASE}/admin/users`)
-        const users = await usersRes.json()
+        const usersBody = await usersRes.json()
+        const users = Array.isArray(usersBody) ? usersBody : usersBody.users
         const leftover = users.find((u: any) => u.username === TEST_USER)
         if (leftover) await request.delete(`${API_BASE}/admin/users/${leftover.id}`)
 

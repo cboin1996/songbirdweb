@@ -33,6 +33,7 @@ test.describe('library bulk select', () => {
         await lib.waitForSongs()
 
         await lib.enterSelectMode()
+        await expect(lib.cancelBtn).toBeVisible({ timeout: 3000 })
         await lib.songCards.first().click()
         await expect(lib.selectedCount()).toBeVisible({ timeout: 3000 })
 
