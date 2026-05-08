@@ -2,5 +2,5 @@
 import PageError from '../../components/page-error'
 
 export default function Error(props: { error: Error & { digest?: string }; reset: () => void }) {
-    return <PageError {...props} context="shared song" />
+    return <PageError {...props} context="downloads" />
 }

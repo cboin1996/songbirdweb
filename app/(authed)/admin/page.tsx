@@ -1,18 +1,18 @@
-import { redirect } from "next/navigation";
-import { fetchCurrentUser, fetchUsers, fetchAdminStats } from "../../lib/data";
-import UserTable from "./user-table";
-import SystemStats from "./system-stats";
-import { routes } from "../../lib/routes";
-export default async function Page() {
-    const user = await fetchCurrentUser()
-    if (user?.role !== 'admin') redirect(routes.download)
+'use client'
+import { useRouter } from "next/navigation"
+import { useEffect } from "react"
+import { useUser } from "../../lib/user-context"
+import { routes } from "../../lib/routes"
+import AdminContent from "./admin-content"
 
-    const [users, stats] = await Promise.all([fetchUsers(), fetchAdminStats()])
+export default function Page() {
+    const { isAdmin, userLoaded } = useUser()
+    const router = useRouter()
 
-    return (
-        <main className="p-4 flex flex-col gap-10">
-            <SystemStats stats={stats} />
-            <UserTable initialUsers={users} perUser={stats?.per_user ?? []} />
-        </main>
-    )
+    useEffect(() => {
+        if (userLoaded && !isAdmin) router.replace(routes.download)
+    }, [isAdmin, userLoaded, router])
+
+    if (userLoaded && !isAdmin) return null
+    return <AdminContent />
 }

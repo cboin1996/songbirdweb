@@ -22,8 +22,10 @@ export default function ShareActions({
     async function handleLibrary() {
         if (libraryPending || inLibrary) return
         setLibraryPending(true)
-        const ok = await addToLibrary(songId)
-        if (ok) setInLibrary(true)
+        try {
+            await addToLibrary(songId)
+            setInLibrary(true)
+        } catch {}
         setLibraryPending(false)
     }
 

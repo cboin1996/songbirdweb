@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 function useIsDesktop() {
     const [isDesktop, setIsDesktop] = useState(false)
@@ -12,7 +12,9 @@ function useIsDesktop() {
     }, [])
     return isDesktop
 }
-import { DownloadedSong, downloadSongViaUrl, downloadSongToFile, addToLibrary, fetchLibrary, tagSong, toPlayableSong } from "../lib/data";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { DownloadedSong, LibraryEntry, downloadSongViaUrl, downloadSongToFile, addToLibrary, fetchLibrary, tagSong, toPlayableSong } from "../lib/data";
+import { queryKeys } from "../lib/query-keys";
 import { usePlayer } from "./player";
 import { routes } from "../lib/routes";
 import Song from "./song";
@@ -23,7 +25,6 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
     const isDesktop = useIsDesktop()
     const noActiveIndex = -1
     const [songs, setSongs] = useState<DownloadedSong[]>(initialSongs)
-    const [libraryIds, setLibraryIds] = useState<Set<string>>(new Set())
     const [activeIndex, setActiveIndex] = useState(noActiveIndex)
     const [text, setText] = useState('')
     const [status, setStatus] = useState<'idle' | 'downloading' | 'tagging' | 'ready' | 'saving' | 'error'>('idle')
@@ -31,9 +32,12 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
     const [readySong, setReadySong] = useState<DownloadedSong | null>(null)
     const inputRef = useRef<HTMLInputElement>(null)
     const { play, current, onLibraryAdd } = usePlayer()
-    useEffect(() => {
-        fetchLibrary().then(entries => setLibraryIds(new Set(entries.map(e => e.song_id))))
-    }, [])
+    const queryClient = useQueryClient()
+    const { data: libraryEntries = [] } = useQuery({
+        queryKey: queryKeys.library,
+        queryFn: fetchLibrary,
+    })
+    const libraryIds = useMemo(() => new Set(libraryEntries.map(e => e.song_id)), [libraryEntries])
 
     useEffect(() => {
         if (activeIndex !== noActiveIndex && status === 'idle') {
@@ -57,12 +61,14 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
     async function handleAddToLibrary() {
         if (!readySong?.songId) return
         setStatus('saving')
-        const ok = await addToLibrary(readySong.songId)
-        if (ok) {
-            setLibraryIds(prev => new Set([...prev, readySong.songId!]))
+        try {
+            await addToLibrary(readySong.songId)
+            queryClient.setQueryData<LibraryEntry[]>(queryKeys.library, prev =>
+                [...(prev ?? []), { song_id: readySong.songId!, added_at: new Date().toISOString(), last_position: 0, last_played_at: null }]
+            )
             onLibraryAdd({ uuid: readySong.songId!, properties: readySong.properties })
             dismiss()
-        } else {
+        } catch {
             setStatus('error')
             setErrorMsg('could not add to library')
         }
@@ -71,9 +77,12 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
     async function handleDeviceDownload() {
         if (!readySong?.songId) return
         setStatus('saving')
-        const ok = await downloadSongToFile(readySong.songId, readySong.properties.trackName, readySong.properties.artistName)
-        if (ok) dismiss()
-        else { setStatus('error'); setErrorMsg('file download failed') }
+        try {
+            await downloadSongToFile(readySong.songId, readySong.properties.trackName, readySong.properties.artistName)
+            dismiss()
+        } catch {
+            setStatus('error'); setErrorMsg('file download failed')
+        }
     }
 
     async function handleSongDownload(e: React.FormEvent) {
@@ -82,24 +91,28 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
         if (!song || !text.trim()) return
         setStatus('downloading')
         setErrorMsg('')
-        const result = await downloadSongViaUrl(text)
-        if (!result || result.song_ids.length === 0) {
-            setStatus('error'); setErrorMsg('download failed'); return
-        }
-        const songId = result.song_ids[0]
-        if (result.cached) {
-            const existing = songs.find(s => s.songId === songId) ?? { ...song, songId }
-            setReadySong(existing)
+        try {
+            const result = await downloadSongViaUrl(text)
+            if (!result || result.song_ids.length === 0) {
+                setStatus('error'); setErrorMsg('download failed'); return
+            }
+            const songId = result.song_ids[0]
+            if (result.cached) {
+                const existing = songs.find(s => s.songId === songId) ?? { ...song, songId }
+                setReadySong(existing)
+                setStatus('ready')
+                return
+            }
+            setStatus('tagging')
+            const tagged = await tagSong(songId, song.properties)
+            if (!tagged) { setStatus('error'); setErrorMsg('tagging failed'); return }
+            const updated = { ...song, songId }
+            setSongs(prev => prev.map((s, i) => i === activeIndex ? updated : s))
+            setReadySong(updated)
             setStatus('ready')
-            return
+        } catch {
+            setStatus('error'); setErrorMsg('download failed')
         }
-        setStatus('tagging')
-        const tagged = await tagSong(songId, song.properties)
-        if (!tagged) { setStatus('error'); setErrorMsg('tagging failed'); return }
-        const updated = { ...song, songId }
-        setSongs(prev => prev.map((s, i) => i === activeIndex ? updated : s))
-        setReadySong(updated)
-        setStatus('ready')
     }
 
     function renderSection(sectionSongs: DownloadedSong[], label: string) {

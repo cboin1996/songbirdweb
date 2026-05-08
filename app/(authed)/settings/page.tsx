@@ -110,16 +110,19 @@ export default function Page() {
         setError('')
         setSuccess(false)
 
-        const ok = await changePassword(currentPassword, newPassword)
-        if (!ok) {
-            setError('incorrect current password')
+        try {
+            await changePassword(currentPassword, newPassword)
+            setSuccess(true)
+            setCurrentPassword('')
+            setNewPassword('')
+            setConfirmPassword('')
+        } catch (err: any) {
+            const s = err?.status
+            if (s === 0 || s === undefined || s >= 500) setError('server unavailable')
+            else if (s === 401) setError('incorrect current password')
+            else setError('password change failed')
             return
         }
-
-        setSuccess(true)
-        setCurrentPassword('')
-        setNewPassword('')
-        setConfirmPassword('')
     }
 
     return (

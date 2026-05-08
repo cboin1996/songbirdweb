@@ -15,7 +15,7 @@ export default function Login() {
         idle: "",
         sending: "signing in…",
         unauthorized: "invalid credentials",
-        error: "error occurred",
+        error: "server unavailable",
     }
     const [username, setUsername] = useState('')
     const [password, setPassword] = useState('')
@@ -60,7 +60,7 @@ export default function Login() {
                             >
                                 <FaDove size="20" className="hover:text-sky-600" />
                             </button>
-                            {status && <p>{status}</p>}
+                            {status && <p className={status === statuses.sending ? 'text-gray-400' : 'text-red-500'}>{status}</p>}
                         </div>
                     </div>
                 </form>

@@ -1,13 +1,8 @@
-import { Suspense } from "react";
-import { fetchLibrarySongs } from "../../lib/data";
 import LibraryList from "./library-list";
-export default async function Page() {
-    const songs = await fetchLibrarySongs()
+export default function Page() {
     return (
         <main className="p-4">
-            <Suspense>
-                <LibraryList initialSongs={songs} />
-            </Suspense>
+            <LibraryList />
         </main>
     )
 }

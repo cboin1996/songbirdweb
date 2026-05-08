@@ -195,6 +195,16 @@ test-e2e-local-mobile: e2e-api-up e2e-next-up
 .PHONY: e2e-down
 e2e-down: e2e-next-down e2e-api-down
 
+E2E_API_LOCAL_SRC=$(HOME)/proj/cboin1996/songbirdapi
+
+.PHONY: e2e-api-build
+e2e-api-build:
+	docker build -t cboin/songbirdapi:e2e-local $(E2E_API_LOCAL_SRC)
+
+.PHONY: test-e2e-local-dev
+test-e2e-local-dev: e2e-api-build
+	$(MAKE) test-e2e-local E2E_API_IMAGE=cboin/songbirdapi:e2e-local
+
 local-run-songbirdweb:
 	npm run dev
 

@@ -1,13 +1,17 @@
 'use client'
-import { useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import { useEffect, useImperativeHandle, useRef, useState } from 'react'
 import Link from 'next/link'
 import { FaDove } from 'react-icons/fa6'
-import { ImportJobResult, listImportJobs, pollImportJob } from '../lib/data'
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
+import { ImportJobResult, ImportJobsPage, listImportJobs, pollImportJob } from '../lib/data'
 import { routes } from '../lib/routes'
+import { useDebouncedValue } from '../lib/use-debounce'
 import SearchInput from './search-input'
 import Spinner from './spinner'
+import QueryError from './query-error'
+import TableSkeleton from './table-skeleton'
 
-const PAGE_SIZE = 20
+const PAGE_SIZE = 10
 const POLL_INTERVAL_MS = 3000
 
 export interface ImportJobsTableHandle {
@@ -15,54 +19,39 @@ export interface ImportJobsTableHandle {
 }
 
 export default function ImportJobsTable({
-  initialJobs,
-  total: initialTotal,
-  initialCounts,
   tableRef,
 }: {
-  initialJobs: ImportJobResult[]
-  total: number
-  initialCounts?: Record<string, number>
   tableRef?: React.RefObject<ImportJobsTableHandle | null>
 }) {
-  const [jobs, setJobs] = useState<ImportJobResult[]>(initialJobs)
-  const [total, setTotal] = useState(initialTotal)
-  const [counts, setCounts] = useState<Record<string, number>>(initialCounts ?? {})
+  const queryClient = useQueryClient()
   const [filter, setFilter] = useState('')
   const [page, setPage] = useState(0)
-  const [loading, setLoading] = useState(false)
-  // Session in-flight tracking — survives pagination/filter changes.
+  const debouncedFilter = useDebouncedValue(filter)
   const [activeIds, setActiveIds] = useState<Set<string>>(new Set())
   const activeIdsRef = useRef<Set<string>>(new Set())
-  const [sessionFinished, setSessionFinished] = useState(0)
   const inFlight = activeIds.size
   const hasInFlight = inFlight > 0
 
+  const { data: pageData, isFetching, isLoading, error: jobsError, refetch: refetchJobs } = useQuery({
+    queryKey: ['import-jobs', debouncedFilter, page],
+    queryFn: () => listImportJobs(debouncedFilter, PAGE_SIZE, page * PAGE_SIZE),
+    placeholderData: keepPreviousData,
+  })
+  const jobs = pageData?.jobs ?? []
+  const total = pageData?.total ?? 0
+  const counts = pageData?.status_counts ?? {}
+
   const isPending = (s: string) => s === 'pending' || s === 'processing'
 
-  useEffect(() => {
-    if (activeIds.size > 0) return
-    setJobs(initialJobs)
-    setTotal(initialTotal)
-    if (initialCounts) setCounts(initialCounts)
-  }, [initialJobs, initialTotal, initialCounts]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Reset session counter when there's a fresh wave (no active → some active).
   function trackJob(job: ImportJobResult, replaceId?: string) {
     setActiveIds(prev => {
       const next = new Set(prev)
-      let finishedDelta = 0
-      if (replaceId) {
-        if (next.delete(replaceId) && !isPending(job.status)) finishedDelta = 1
-      }
+      if (replaceId) next.delete(replaceId)
       if (isPending(job.status)) {
-        if (prev.size === 0 && next.size === 0) setSessionFinished(0)
         next.add(job.job_id)
-      } else if (next.has(job.job_id)) {
+      } else {
         next.delete(job.job_id)
-        finishedDelta = 1
       }
-      if (finishedDelta) setSessionFinished(d => d + finishedDelta)
       activeIdsRef.current = next
       return next
     })
@@ -71,81 +60,60 @@ export default function ImportJobsTable({
   useImperativeHandle(tableRef, () => ({
     addJob(job: ImportJobResult, replaceId?: string) {
       trackJob(job, replaceId)
-      setJobs(prev => {
+      queryClient.setQueryData<ImportJobsPage>(['import-jobs', debouncedFilter, page], prev => {
+        const prevJobs = prev?.jobs ?? []
         if (replaceId) {
-          const idx = prev.findIndex(j => j.job_id === replaceId)
+          const idx = prevJobs.findIndex(j => j.job_id === replaceId)
           if (idx !== -1) {
-            const next = [...prev]
+            const next = [...prevJobs]
             next[idx] = job
-            return next
+            return { ...prev!, jobs: next }
           }
         }
-        if (prev.some(j => j.job_id === job.job_id)) return prev
-        return [job, ...prev]
+        if (prevJobs.some(j => j.job_id === job.job_id)) return prev!
+        return { total: (prev?.total ?? 0) + 1, jobs: [job, ...prevJobs], status_counts: prev?.status_counts }
       })
     },
   }))
 
-  // Single shared poller — refreshes recent jobs while any active exist.
   useEffect(() => {
     if (!hasInFlight) return
     const tick = async () => {
-      const data = await listImportJobs(PAGE_SIZE, 0)
-      if (!data) return
-      const byId = new Map((data.jobs ?? []).map(j => [j.job_id, j]))
-      // Fetch any active jobs not on page 1 individually.
-      // Use ref to avoid stale closure over activeIds state.
-      const missing = [...activeIdsRef.current].filter(id => !byId.has(id))
-      if (missing.length > 0) {
-        await Promise.all(missing.map(async id => {
-          const job = await pollImportJob(id)
-          if (job) byId.set(id, job)
-        }))
-      }
-      // update in-flight tracker
-      setActiveIds(prev => {
-        let finishedDelta = 0
-        const next = new Set(prev)
-        for (const id of prev) {
-          const updated = byId.get(id)
-          if (updated && !isPending(updated.status)) {
-            next.delete(id)
-            finishedDelta++
-          }
+      try {
+        const data = await listImportJobs('', PAGE_SIZE, 0)
+        if (!data) return
+        const byId = new Map((data.jobs ?? []).map(j => [j.job_id, j]))
+        const missing = [...activeIdsRef.current].filter(id => !byId.has(id))
+        if (missing.length > 0) {
+          await Promise.all(missing.map(async id => {
+            const job = await pollImportJob(id)
+            if (job) byId.set(id, job)
+          }))
         }
-        if (finishedDelta) setSessionFinished(d => d + finishedDelta)
-        activeIdsRef.current = next
-        return next
-      })
-      // update visible page
-      setJobs(prev => prev.map(j => byId.get(j.job_id) ?? j))
-      if (data.total) setTotal(data.total)
-      if (data.status_counts) setCounts(data.status_counts)
+        setActiveIds(prev => {
+          const next = new Set(prev)
+          for (const id of prev) {
+            const updated = byId.get(id)
+            if (updated && !isPending(updated.status)) next.delete(id)
+          }
+          activeIdsRef.current = next
+          return next
+        })
+        queryClient.setQueryData<ImportJobsPage>(['import-jobs', debouncedFilter, page], prev => {
+          if (!prev) return prev
+          return {
+            ...prev,
+            jobs: prev.jobs.map(j => byId.get(j.job_id) ?? j),
+            total: data.total ?? prev.total,
+            status_counts: data.status_counts ?? prev.status_counts,
+          }
+        })
+      } catch {}
     }
     const interval = setInterval(tick, POLL_INTERVAL_MS)
     return () => clearInterval(interval)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasInFlight])
-
-  async function goToPage(p: number) {
-    setLoading(true)
-    const data = await listImportJobs(PAGE_SIZE, p * PAGE_SIZE)
-    setJobs(data.jobs)
-    setTotal(data.total)
-    if (data.status_counts) setCounts(data.status_counts)
-    setPage(p)
-    setLoading(false)
-  }
-
-  const filtered = useMemo(() => {
-    if (!filter.trim()) return jobs
-    const q = filter.trim().toLowerCase()
-    return jobs.filter(j =>
-      (j.track_name ?? '').toLowerCase().includes(q) ||
-      (j.filename ?? '').toLowerCase().includes(q) ||
-      j.status.toLowerCase().includes(q)
-    )
-  }, [jobs, filter])
+  }, [hasInFlight, page])
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
@@ -210,11 +178,13 @@ export default function ImportJobsTable({
         </div>
         <SearchInput
           value={filter}
-          onChange={setFilter}
+          onChange={v => { setFilter(v); setPage(0) }}
           placeholder="filter by name or status"
           className="w-48"
         />
       </div>
+
+      {jobsError && <QueryError error={jobsError} retry={refetchJobs} context="import history" />}
 
       {hasInFlight && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-sky-50 dark:bg-sky-950/30 border border-sky-200 dark:border-sky-900 text-sm">
@@ -222,17 +192,11 @@ export default function ImportJobsTable({
           <span className="text-sky-600 dark:text-sky-400 font-medium">
             {inFlight} importing
           </span>
-          <span className="text-gray-400">·</span>
-          <span className="text-gray-500">{sessionFinished} finished</span>
         </div>
       )}
 
-      {jobs.length === 0 && (
-        <p className="text-gray-500 text-sm py-2">no file imports yet — drag & drop files above to import</p>
-      )}
-
-      {jobs.length > 0 && (
-        <div className={`overflow-x-auto ${loading ? 'opacity-50' : ''}`}>
+      {isLoading ? <TableSkeleton rows={5} cols={3} /> : (
+        <div className={`overflow-x-auto ${isFetching ? 'opacity-50' : ''}`}>
           <table className="w-full text-sm border-collapse">
             <thead>
               <tr className="text-left text-gray-400 border-b border-gray-200 dark:border-gray-700">
@@ -243,7 +207,9 @@ export default function ImportJobsTable({
               </tr>
             </thead>
             <tbody>
-              {filtered.map(job => (
+              {(jobs.length === 0 || jobsError) ? (
+                <tr><td colSpan={4} className="py-2 text-gray-500">{jobsError ? '' : 'no results'}</td></tr>
+              ) : jobs.map(job => (
                 <tr key={job.job_id} className="border-b border-gray-100 dark:border-gray-800">
                   <td className="py-2 pr-4 text-gray-400 whitespace-nowrap text-xs">
                     {job.created_at ? new Date(job.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
@@ -264,16 +230,16 @@ export default function ImportJobsTable({
       {totalPages > 1 && (
         <div className="flex items-center gap-2 self-end text-sm">
           <button
-            onClick={() => goToPage(Math.max(0, page - 1))}
-            disabled={page === 0 || loading}
+            onClick={() => setPage(Math.max(0, page - 1))}
+            disabled={page === 0 || isFetching}
             className="px-3 py-1 rounded-md border border-gray-200 dark:border-gray-700 text-gray-400 disabled:opacity-30 hover:border-sky-500"
           >
             prev
           </button>
           <span className="text-gray-400">{page + 1} / {totalPages}</span>
           <button
-            onClick={() => goToPage(Math.min(totalPages - 1, page + 1))}
-            disabled={page >= totalPages - 1 || loading}
+            onClick={() => setPage(Math.min(totalPages - 1, page + 1))}
+            disabled={page >= totalPages - 1 || isFetching}
             className="px-3 py-1 rounded-md border border-gray-200 dark:border-gray-700 text-gray-400 disabled:opacity-30 hover:border-sky-500"
           >
             next

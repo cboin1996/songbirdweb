@@ -1,7 +1,9 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { DraftSummary, deleteEditDraft, fetchDrafts } from '../../lib/data'
+import { queryKeys } from '../../lib/query-keys'
 import { editSongRoute } from '../../lib/routes'
 import { EVENTS } from '../../lib/events'
 import { FaChevronDown, FaTimes } from 'react-icons/fa'
@@ -19,17 +21,20 @@ function daysLeft(updatedAt: string): number {
 }
 
 export default function EditsBanner() {
-  const [drafts, setDrafts] = useState<DraftSummary[]>([])
+  const queryClient = useQueryClient()
+  const { data: drafts = [] } = useQuery({
+    queryKey: queryKeys.drafts,
+    queryFn: fetchDrafts,
+  })
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const router = useRouter()
 
   useEffect(() => {
-    fetchDrafts().then(setDrafts)
-    function onDraftChanged() { fetchDrafts().then(setDrafts) }
+    function onDraftChanged() { queryClient.invalidateQueries({ queryKey: queryKeys.drafts }) }
     window.addEventListener(EVENTS.draftChanged, onDraftChanged)
     return () => window.removeEventListener(EVENTS.draftChanged, onDraftChanged)
-  }, [])
+  }, [queryClient])
 
   useEffect(() => {
     if (!open) return
@@ -46,7 +51,9 @@ export default function EditsBanner() {
 
   async function handleDelete(songId: string) {
     await deleteEditDraft(songId)
-    setDrafts(prev => prev.filter(d => d.song_id !== songId))
+    queryClient.setQueryData<DraftSummary[]>(queryKeys.drafts, prev =>
+      (prev ?? []).filter(d => d.song_id !== songId)
+    )
     window.dispatchEvent(new CustomEvent(EVENTS.draftChanged, { detail: { deleted: songId } }))
   }
 

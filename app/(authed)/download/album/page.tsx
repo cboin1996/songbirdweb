@@ -1,28 +1,28 @@
-import { fetchAlbumFromItunes, AlbumProps } from "../../../lib/data"
-import React from "react"
-import Albums from "@/app/components/albums";
+'use client'
+import { useSearchParams } from "next/navigation"
+import { useQuery } from "@tanstack/react-query"
+import { fetchAlbumFromItunes } from "../../../lib/data"
+import Albums from "@/app/components/albums"
+import QueryError from "../../../components/query-error"
 
-export default async function Page(props: {
-    searchParams?: Promise<{
-        query?: string,
-        mode?: string,
-    }>;
-}) {
-    const searchParams = await props.searchParams
-    const query = searchParams?.query || ''
+export default function Page() {
+    const searchParams = useSearchParams()
+    const query = searchParams.get('query') || ''
 
-    async function getAlbumProperties(query: string) {
-        if (query === '') return []
-        return fetchAlbumFromItunes(query, false)
-    }
+    const { data: albums, error, refetch, isLoading } = useQuery({
+        queryKey: ['album-search', query],
+        queryFn: () => fetchAlbumFromItunes(query, false),
+        enabled: query !== '',
+        retry: false,
+    })
 
-    const searchMatches = await getAlbumProperties(query)
+    if (!query) return null
+    if (isLoading) return <main className="p-4"><p className="text-gray-400 text-sm">searching…</p></main>
+    if (error) return <main className="p-4"><QueryError error={error} retry={refetch} context="search results" /></main>
 
     return (
         <main>
-            {searchMatches !== undefined
-                ? <Albums albums={searchMatches} />
-                : <p>cannot fetch albums, error occured.</p>}
+            <Albums albums={albums ?? []} />
         </main>
     )
 }

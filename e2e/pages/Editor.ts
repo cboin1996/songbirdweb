@@ -21,6 +21,8 @@ export class EditorPage {
     readonly saveToLibraryBtn: Locator
     readonly restoreOriginalBtn: Locator
     readonly discardBtn: Locator
+    readonly draftSaveFailedBanner: Locator
+    readonly saveDraftBtn: Locator
 
     constructor(page: Page) {
         this.page = page
@@ -42,6 +44,8 @@ export class EditorPage {
         this.saveToLibraryBtn = this.modal.getByRole('button', { name: /^Save to Library$/i })
         this.restoreOriginalBtn = this.modal.getByRole('button', { name: 'Restore Original' })
         this.discardBtn = this.modal.getByRole('button', { name: /discard/i })
+        this.draftSaveFailedBanner = page.getByTestId('draft-save-failed')
+        this.saveDraftBtn = this.modal.getByRole('button', { name: /save draft/i })
     }
 
     async waitForWaveform(timeout = 30000) {

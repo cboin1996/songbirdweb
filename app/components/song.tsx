@@ -2,11 +2,14 @@
 import { memo, useRef, useState, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { createPortal } from "react-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { addToLibrary, removeFromLibrary, downloadSongToFile, createShareToken, DownloadedSong, songArtworkUrl, artworkUrl, addSongToPlaylist, addServerOfflineSong, removeServerOfflineSong } from "../lib/data";
+import { queryKeys } from "../lib/query-keys";
 import { cacheSong, uncacheSong } from "../lib/offline";
 import { FaBookmark, FaRegBookmark, FaEllipsisV, FaLock, FaCloudDownloadAlt } from "react-icons/fa";
 import Image from "next/image";
 import { usePlayer } from "./player";
+import { useToast } from "./toast";
 import { routes, editSongRoute } from "../lib/routes";
 import { useUser } from "../lib/user-context";
 import { useOnline } from "../lib/use-online";
@@ -39,8 +42,6 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
     const [inLibrary, setInLibrary] = useState(initialInLibrary)
     useEffect(() => { setInLibrary(initialInLibrary) }, [initialInLibrary])
     const [libraryPending, setLibraryPending] = useState(false)
-    const [libraryError, setLibraryError] = useState(false)
-    const [downloadError, setDownloadError] = useState(false)
     const [copied, setCopied] = useState(false)
     const [offlineCached, setOfflineCached] = useState(initialCachedOffline ?? false)
     useEffect(() => { setOfflineCached(initialCachedOffline ?? false) }, [initialCachedOffline])
@@ -52,7 +53,9 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
     const kebabRef = useRef<HTMLButtonElement>(null)
     const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
     const kebabJustClosed = useRef(false)
-    const { play, pause, resume, current, isPlaying, insertNext, onLibraryAdd, onLibraryRemove, showToast } = usePlayer()
+    const { play, pause, resume, current, isPlaying, insertNext, onLibraryAdd, onLibraryRemove } = usePlayer()
+    const { showToast } = useToast()
+    const queryClient = useQueryClient()
     const pathname = usePathname()
     function pageSource() {
         const href = typeof window !== 'undefined' ? window.location.pathname + window.location.search : pathname
@@ -73,26 +76,25 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
         e.stopPropagation()
         if (!song.songId || libraryPending) return
         setLibraryPending(true)
-        setLibraryError(false)
-        const ok = inLibrary
-            ? await removeFromLibrary(song.songId)
-            : await addToLibrary(song.songId)
-        if (ok) {
+        try {
+            if (inLibrary) await removeFromLibrary(song.songId)
+            else await addToLibrary(song.songId)
             setInLibrary(prev => !prev)
+            queryClient.invalidateQueries({ queryKey: queryKeys.library })
+            queryClient.invalidateQueries({ queryKey: queryKeys.librarySongs })
             if (inLibrary) {
                 onRemove?.()
                 onLibraryRemove(song.songId!)
                 if (offlineCached) {
                     uncacheSong(song.songId).catch(() => {})
-                    removeServerOfflineSong(song.songId)
                     setOfflineCached(false)
                     onCacheChange?.(song.songId, false)
                 }
             } else {
                 onLibraryAdd({ uuid: song.songId!, properties: song.properties, artwork_cached: song.artworkCached })
             }
-        } else {
-            setLibraryError(true)
+        } catch {
+            showToast(inLibrary ? 'could not remove from library, try again' : 'could not add to library, try again', true)
         }
         setLibraryPending(false)
     }
@@ -139,41 +141,50 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
         setOfflineProgress(0)
         try {
             if (offlineCached) {
+                await removeServerOfflineSong(song.songId)
                 await uncacheSong(song.songId)
                 setOfflineCached(false)
                 onCacheChange?.(song.songId, false)
-                removeServerOfflineSong(song.songId)
             } else {
                 await cacheSong(song.songId, (pct) => setOfflineProgress(pct))
+                try {
+                    await addServerOfflineSong(song.songId)
+                } catch {
+                    await uncacheSong(song.songId)
+                    showToast('could not save offline, try again', true)
+                    setOfflinePending(false)
+                    return
+                }
                 setOfflineCached(true)
                 onCacheChange?.(song.songId, true)
-                addServerOfflineSong(song.songId)
             }
         } catch {
-            // silently fail — user sees no change since state wasn't updated
+            showToast(offlineCached ? 'could not remove offline, try again' : 'could not save offline, try again', true)
         }
         setOfflinePending(false)
     }
 
     async function handleShare() {
         if (!song.songId) return
-        const result = await createShareToken(song.songId)
-        if (!result) return
-        // Clipboard can throw in headless / restricted contexts (no permission,
-        // insecure context). Token is still created — surface the success
-        // state so the user sees feedback. They can copy from the share page.
         try {
-            await navigator.clipboard.writeText(`${window.location.origin}/share/${result.token}`)
-        } catch { /* swallow — UI feedback below */ }
-        setCopied(true)
-        setTimeout(() => setCopied(false), 2000)
+            const result = await createShareToken(song.songId)
+            try {
+                await navigator.clipboard.writeText(`${window.location.origin}/share/${result.token}`)
+            } catch { /* clipboard can fail in restricted contexts */ }
+            setCopied(true)
+            setTimeout(() => setCopied(false), 2000)
+        } catch {
+            showToast('failed to create share link', true)
+        }
     }
 
     async function handleDownload() {
         if (!song.songId) return
-        setDownloadError(false)
-        const ok = await downloadSongToFile(song.songId, song.properties.trackName, song.properties.artistName)
-        if (!ok) setDownloadError(true)
+        try {
+            await downloadSongToFile(song.songId, song.properties.trackName, song.properties.artistName)
+        } catch {
+            showToast('download failed, try again', true)
+        }
     }
 
     function openEditor() {
@@ -240,14 +251,16 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
                     className="whitespace-nowrap block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation">
                     {copied ? 'Link copied!' : 'Copy share link'}
                 </button>
-                <button onClick={() => { closeKebab(); handleOfflineToggle() }}
-                    disabled={offlinePending || (!online && !offlineCached)}
-                    className="whitespace-nowrap block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation">
-                    {offlinePending
-                        ? `Saving… ${offlineProgress > 0 ? Math.round(offlineProgress * 100) + '%' : ''}`
-                        : offlineCached ? 'Remove offline copy' : 'Save offline'}
-                </button>
-                {playlists && playlists.length > 0 && (
+                {inLibrary && (
+                    <button onClick={() => { closeKebab(); handleOfflineToggle() }}
+                        disabled={offlinePending || (!online && !offlineCached)}
+                        className="whitespace-nowrap block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation">
+                        {offlinePending
+                            ? `Saving… ${offlineProgress > 0 ? Math.round(offlineProgress * 100) + '%' : ''}`
+                            : offlineCached ? 'Remove offline copy' : 'Save offline'}
+                    </button>
+                )}
+                {inLibrary && playlists && playlists.length > 0 && (
                     <>
                         <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
                         <button
@@ -264,9 +277,13 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
                                         key={pl.id}
                                         onClick={async () => {
                                             if (!song.songId) return
-                                            const result = await addSongToPlaylist(pl.id, song.songId)
-                                            if (result === 'duplicate') showToast(`cannot add duplicate to playlist '${pl.name}'`, true)
-                                            else if (result) { showToast(`added to ${pl.name}`); onPlaylistAdd?.() }
+                                            try {
+                                                const result = await addSongToPlaylist(pl.id, song.songId)
+                                                if (result === 'duplicate') showToast(`cannot add duplicate to playlist '${pl.name}'`, true)
+                                                else { showToast(`added to ${pl.name}`); onPlaylistAdd?.() }
+                                            } catch {
+                                                showToast('failed to add to playlist', true)
+                                            }
                                             setPlaylistPickerOpen(false)
                                             closeKebab()
                                         }}
@@ -279,13 +296,15 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
                         )}
                     </>
                 )}
-                <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
-                <button onClick={() => { closeKebab(); openEditor() }}
-                    disabled={!online}
-                    className={`whitespace-nowrap flex items-center justify-between w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation ${hasDraft ? 'text-amber-500' : ''}`}>
-                    Edit
-                    {hasDraft && <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />}
-                </button>
+                {inLibrary && (<>
+                    <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
+                    <button onClick={() => { closeKebab(); openEditor() }}
+                        disabled={!online}
+                        className={`whitespace-nowrap flex items-center justify-between w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation ${hasDraft ? 'text-amber-500' : ''}`}>
+                        Edit
+                        {hasDraft && <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />}
+                    </button>
+                </>)}
             </div>
         </>,
         document.body
@@ -378,9 +397,14 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
                         </span>
                         <span className="text-sm text-sky-500 truncate">{song.properties.artistName || 'Unknown artist'} · {song.properties.collectionName || 'Unknown album'}</span>
                     </div>
-                    {!selectMode && (
+                    {!selectMode ? (
                         <div className="shrink-0" onClick={e => e.stopPropagation()}>
                             {actions}
+                        </div>
+                    ) : (inLibrary || offlineCached) && (
+                        <div className="flex items-center gap-1.5 shrink-0">
+                            {inLibrary && <FaBookmark size={10} className="text-sky-500" />}
+                            {offlineCached && <FaCloudDownloadAlt size={10} className="text-sky-400" />}
                         </div>
                     )}
                 </div>
@@ -426,13 +450,16 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
                                 <span>·</span>
                                 <span>{song.properties.releaseDate || '—'}</span>
                             </span>
-                            {libraryError && <span className="text-red-500 text-sm">library error, try again</span>}
-                            {downloadError && <span className="text-red-500 text-sm">download failed, try again</span>}
                         </div>
                     </div>
-                    {!selectMode && (
+                    {!selectMode ? (
                         <div className="flex flex-col items-center justify-start shrink-0 ml-2" onClick={e => e.stopPropagation()}>
                             {actions}
+                        </div>
+                    ) : (inLibrary || offlineCached) && (
+                        <div className="flex flex-col items-center justify-center gap-1.5 shrink-0 ml-2">
+                            {inLibrary && <FaBookmark size={12} className="text-sky-500" />}
+                            {offlineCached && <FaCloudDownloadAlt size={12} className="text-sky-400" />}
                         </div>
                     )}
                 </div>

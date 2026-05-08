@@ -105,11 +105,13 @@ export default function PlaylistsView({
         e.preventDefault()
         const name = newName.trim()
         if (!name) return
-        await createPlaylist(name, newIcon)
-        setNewName('')
-        setNewIcon('music')
-        setCreating(false)
-        onRefresh()
+        try {
+            await createPlaylist(name, newIcon)
+            setNewName('')
+            setNewIcon('music')
+            setCreating(false)
+            onRefresh()
+        } catch {}
     }
 
     async function handleRename(e: React.FormEvent) {
@@ -117,18 +119,22 @@ export default function PlaylistsView({
         if (!modalPlaylist) return
         const name = renameValue.trim()
         if (!name) return
-        const updated = await renamePlaylist(modalPlaylist.id, name, renameIcon)
-        if (updated) setModalPlaylist(updated)
-        setRenaming(false)
-        onRefresh()
+        try {
+            const updated = await renamePlaylist(modalPlaylist.id, name, renameIcon)
+            setModalPlaylist(updated)
+            setRenaming(false)
+            onRefresh()
+        } catch {}
     }
 
     async function handleDelete() {
         if (!modalPlaylist) return
         if (!confirm(`Delete "${modalPlaylist.name}"?`)) return
-        await deletePlaylist(modalPlaylist.id)
-        closeModal()
-        onRefresh()
+        try {
+            await deletePlaylist(modalPlaylist.id)
+            closeModal()
+            onRefresh()
+        } catch {}
     }
 
     function openContextMenu(pl: Playlist, e: React.MouseEvent) {
@@ -153,23 +159,24 @@ export default function PlaylistsView({
     async function deleteFromMenu(pl: Playlist) {
         setMenuPl(null)
         if (!confirm(`Delete "${pl.name}"?`)) return
-        await deletePlaylist(pl.id)
-        onRefresh()
+        try { await deletePlaylist(pl.id); onRefresh() } catch {}
     }
 
     async function handleRemove(idsToRemove: string[]) {
         if (!modalPlaylist || !idsToRemove.length) return
         setModalLoading(true)
-        await bulkRemoveSongsFromPlaylist(modalPlaylist.id, idsToRemove)
-        setModalSongs(prev => prev.filter(s => !idsToRemove.includes(s.uuid)))
+        try {
+            await bulkRemoveSongsFromPlaylist(modalPlaylist.id, idsToRemove)
+            setModalSongs(prev => prev.filter(s => !idsToRemove.includes(s.uuid)))
+            onRefresh()
+        } catch {}
         setModalLoading(false)
-        onRefresh()
     }
 
     async function handleReorder(reordered: PickerSong[]) {
         if (!modalPlaylist) return
         setModalSongs(reordered)
-        await reorderPlaylistSongs(modalPlaylist.id, reordered.map(s => s.uuid))
+        try { await reorderPlaylistSongs(modalPlaylist.id, reordered.map(s => s.uuid)) } catch {}
     }
 
     function playAll(songs: PlaylistSong[], pl: Playlist) {

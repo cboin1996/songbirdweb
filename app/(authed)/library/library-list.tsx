@@ -2,17 +2,22 @@
 import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import Image from "next/image"
 import { useRouter, useSearchParams } from "next/navigation"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { LibrarySong, Playlist, EligibleSong, artworkUrl, songArtworkUrl, fetchLibrarySongs, fetchPlaylists, fetchPlaylistSongs, fetchEligibleSongs, fetchDrafts, publishSongs, removeFromLibrary, downloadSongToFile, addSongToPlaylist, bulkRemoveFromLibrary, bulkAddSongsToPlaylist, syncOfflineSongs, addServerOfflineSong, removeServerOfflineSong, clearServerOfflineSongs } from "../../lib/data"
+import { queryKeys } from "../../lib/query-keys"
 import SongPickerModal, { PickerSong } from "../../components/song-picker-modal"
-import { cacheSong, uncacheSong, getCachedSongIds, cacheArtworkUrls } from "../../lib/offline"
+import { cacheSong, uncacheSong, cacheArtworkUrls } from "../../lib/offline"
+import { useOfflineSave } from "../../lib/offline-save-context"
 import { useOnline } from "../../lib/use-online"
 import Song from "../../components/song"
 import { usePlayer } from "../../components/player"
 import { routes } from "../../lib/routes"
 import { EVENTS } from "../../lib/events"
 import { FaPlay, FaPause, FaCloudDownloadAlt, FaMusic } from "react-icons/fa"
+import { useToast } from "../../components/toast"
 import PlaylistsView from "./playlists-view"
 import EditsBanner from "./edits-banner"
+import QueryError from "../../components/query-error"
 
 type ViewMode = 'songs' | 'artists' | 'albums' | 'genres' | 'playlists'
 
@@ -114,9 +119,29 @@ const AlbumCard = memo(function AlbumCard({ album, isCompact, isActive, isPlayin
     )
 })
 
-export default function LibraryList({ initialSongs }: { initialSongs: LibrarySong[] }) {
+export default function LibraryList() {
     const online = useOnline()
-    const [songs, setSongs] = useState(initialSongs)
+    const { showToast } = useToast()
+    const queryClient = useQueryClient()
+    const { data: songs = [], error: songsError, refetch: refetchSongs, isLoading: songsLoading } = useQuery({
+        queryKey: queryKeys.librarySongs,
+        queryFn: fetchLibrarySongs,
+        retry: false,
+    })
+    const { data: playlists = [] } = useQuery({
+        queryKey: queryKeys.playlists,
+        queryFn: fetchPlaylists,
+    })
+    const { data: drafts = [] } = useQuery({
+        queryKey: queryKeys.drafts,
+        queryFn: fetchDrafts,
+    })
+    const draftIds = useMemo(() => new Set(drafts.map(x => x.song_id)), [drafts])
+    const { data: eligibleSongs = [] } = useQuery({
+        queryKey: queryKeys.eligibleSongs,
+        queryFn: fetchEligibleSongs,
+        enabled: online,
+    })
     const router = useRouter()
     const searchParams = useSearchParams()
     const viewMode = (searchParams.get('view') as ViewMode | null) ?? 'songs'
@@ -124,24 +149,11 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     const sectionRefs = useRef<Record<string, HTMLElement | null>>({})
     const stickyHeaderRef = useRef<HTMLDivElement | null>(null)
     const isDesktop = useIsDesktop()
-    const [cachedIds, setCachedIds] = useState<Set<string>>(new Set())
+    const { savingAll, progress: saveAllProgress, failedIds, clearFailedIds, cachedIds, setCachedIds, cacheSongsById, refreshCachedIds } = useOfflineSave()
     const [offlineReady, setOfflineReady] = useState(false)
-    const [savingAll, setSavingAll] = useState(false)
-    const [saveAllProgress, setSaveAllProgress] = useState({ done: 0, total: 0 })
-
-    // Warn before unloading while a save-all is in progress.
-    useEffect(() => {
-        if (!savingAll) return
-        const handler = (e: BeforeUnloadEvent) => { e.preventDefault() }
-        window.addEventListener('beforeunload', handler)
-        return () => window.removeEventListener('beforeunload', handler)
-    }, [savingAll])
-    const [failedIds, setFailedIds] = useState<Set<string>>(new Set())
     const [syncPromptIds, setSyncPromptIds] = useState<string[]>([])
-    const [playlists, setPlaylists] = useState<Playlist[]>([])
-    const [draftIds, setDraftIds] = useState<Set<string>>(new Set())
-    const [eligibleSongs, setEligibleSongs] = useState<EligibleSong[]>([])
     const eligibleIds = useMemo(() => new Set(eligibleSongs.filter(s => s.eligible).map(s => s.uuid)), [eligibleSongs])
+    const eligibleCount = useMemo(() => eligibleSongs.filter(s => s.eligible).length, [eligibleSongs])
     const [publishModalOpen, setPublishModalOpen] = useState(false)
     const [publishing, setPublishing] = useState(false)
     const [offlineSyncModalOpen, setOfflineSyncModalOpen] = useState(false)
@@ -164,11 +176,11 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         const handler = () => {
             setCachedIds(new Set())
             setSyncPromptIds([])
-            if (navigator.onLine) refreshSongs()
+            if (navigator.onLine) queryClient.invalidateQueries({ queryKey: queryKeys.librarySongs })
         }
         window.addEventListener(EVENTS.offlineCleared, handler)
         return () => window.removeEventListener(EVENTS.offlineCleared, handler)
-    }, [])
+    }, [queryClient])
 
     const supersededIds = useMemo(
         () => new Set(songs.map(s => s.parent_song_id).filter(Boolean) as string[]),
@@ -181,43 +193,34 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         },
         [songs, cachedIds, online, supersededIds]
     )
-    const [eligibleCount, setEligibleCount] = useState(0)
     const playlistStubs = useMemo(() => playlists.map(p => ({ id: p.id, name: p.name })), [playlists])
 
     useEffect(() => {
-        if (navigator.onLine) refreshSongs()
-        if (navigator.onLine) fetchEligibleSongs().then(e => { setEligibleSongs(e); setEligibleCount(e.filter(s => s.eligible).length) })
-     
-    }, [])
-
-    useEffect(() => {
-        getCachedSongIds().then(async ids => {
-            setCachedIds(ids)
+        refreshCachedIds().then(async ids => {
             if (!online || songs.length === 0) {
-                const cached = await fetchLibrarySongs()
-                const playable = cached.filter(s => ids.has(s.uuid))
-                if (playable.length > 0) setSongs(playable)
+                try {
+                    const cached = await fetchLibrarySongs()
+                    const playable = cached.filter(s => ids.has(s.uuid))
+                    if (playable.length > 0) queryClient.setQueryData(queryKeys.librarySongs, playable)
+                } catch {}
             }
             setOfflineReady(true)
-            // Sync local cache state with server; surface songs on server not yet local
             if (navigator.onLine) {
-                const serverOnly = await syncOfflineSongs([...ids])
-                const resolvable = serverOnly.filter(id => songs.some(s => s.uuid === id))
-                if (resolvable.length > 0) setSyncPromptIds(resolvable)
+                try {
+                    const serverOnly = await syncOfflineSongs([...ids])
+                    const resolvable = serverOnly.filter(id => songs.some(s => s.uuid === id))
+                    if (resolvable.length > 0) setSyncPromptIds(resolvable)
+                } catch {}
             }
         })
-        fetchPlaylists().then(setPlaylists)
-        fetchDrafts().then(d => setDraftIds(new Set(d.map(x => x.song_id))))
         function onDraftChanged(e: Event) {
-            // Banner deletes pass { deleted: songId } as a fast path. Editor
-            // saves/deletes (data.ts saveEditDraft/deleteEditDraft) dispatch
-            // with no detail — refetch in that case so newly-created drafts
-            // light up the kebab/edit highlighting.
             const deleted = (e as CustomEvent).detail?.deleted
             if (deleted) {
-                setDraftIds(prev => { const next = new Set(prev); next.delete(deleted); return next })
+                queryClient.setQueryData(queryKeys.drafts, (prev: any[]) =>
+                    prev ? prev.filter(d => d.song_id !== deleted) : []
+                )
             } else {
-                fetchDrafts().then(d => setDraftIds(new Set(d.map(x => x.song_id))))
+                queryClient.invalidateQueries({ queryKey: queryKeys.drafts })
             }
         }
         window.addEventListener(EVENTS.draftChanged, onDraftChanged)
@@ -230,75 +233,42 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
         router.replace(`${routes.library}?view=${v}`, { scroll: false })
     }
 
-    async function refreshSongs() {
-        const fresh = await fetchLibrarySongs()
-        setSongs(fresh)
-    }
-
-    async function refreshPlaylists() {
-        fetchPlaylists().then(setPlaylists)
+    function refreshPlaylists() {
+        queryClient.invalidateQueries({ queryKey: queryKeys.playlists })
     }
 
     async function openPublishModal() {
-        const all = await fetchEligibleSongs()
-        setEligibleSongs(all)
-        setEligibleCount(all.filter(s => s.eligible).length)
+        await queryClient.invalidateQueries({ queryKey: queryKeys.eligibleSongs })
         setPublishModalOpen(true)
     }
 
     async function handlePublishConfirm(ids: string[]) {
         setPublishing(true)
-        await publishSongs(ids)
+        try {
+            await publishSongs(ids)
+            setPublishModalOpen(false)
+            await queryClient.invalidateQueries({ queryKey: queryKeys.librarySongs })
+            queryClient.invalidateQueries({ queryKey: queryKeys.eligibleSongs })
+        } catch {}
         setPublishing(false)
-        setPublishModalOpen(false)
-        await refreshSongs()
-        fetchEligibleSongs().then(e => setEligibleCount(e.filter(s => s.eligible).length))
-    }
-
-    async function cacheSongsById(songList: LibrarySong[]) {
-        const failed = new Set<string>()
-        setSavingAll(true)
-        setSaveAllProgress({ done: 0, total: songList.length })
-        for (const song of songList) {
-            try {
-                await cacheSong(song.uuid)
-                setCachedIds(prev => new Set([...prev, song.uuid]))
-                addServerOfflineSong(song.uuid)
-                if (song.properties) {
-                    const artUrls = [
-                        artworkUrl(song.properties.artworkUrl100, 400),
-                        ...(song.artwork_cached ? [
-                            songArtworkUrl(song.uuid, true, undefined, 200)!,
-                            songArtworkUrl(song.uuid, true, undefined, 400)!,
-                        ] : []),
-                    ].filter(Boolean)
-                    cacheArtworkUrls(artUrls)
-                }
-            } catch {
-                failed.add(song.uuid)
-            }
-            setSaveAllProgress(p => ({ ...p, done: p.done + 1 }))
-        }
-        setSavingAll(false)
-        setFailedIds(failed)
     }
 
     async function saveAllOffline() {
-        const freshCached = await getCachedSongIds()
-        setCachedIds(freshCached)
-        setFailedIds(new Set())
+        const freshCached = await refreshCachedIds()
         const uncached = displaySongs.filter(s => s.properties && !freshCached.has(s.uuid))
-        if (uncached.length) await cacheSongsById(uncached)
-        // Cache playlist metadata + song lists in IDB so they're available offline
-        const fresh = await fetchPlaylists()
-        setPlaylists(fresh)
+        if (uncached.length) {
+            const failed = await cacheSongsById(uncached)
+            if (failed.size > 0) showToast(`${failed.size} song${failed.size > 1 ? 's' : ''} failed to save offline`, true)
+        }
+        await queryClient.invalidateQueries({ queryKey: queryKeys.playlists })
+        const fresh = queryClient.getQueryData<Playlist[]>(queryKeys.playlists) ?? []
         await Promise.allSettled(fresh.map(p => fetchPlaylistSongs(p.id)))
     }
 
     async function retryFailed() {
         const toRetry = songs.filter(s => failedIds.has(s.uuid))
-        setFailedIds(new Set())
-        await cacheSongsById(toRetry)
+        const failed = await cacheSongsById(toRetry)
+        if (failed.size > 0) showToast(`${failed.size} song${failed.size > 1 ? 's' : ''} failed to save offline`, true)
     }
 
     async function downloadSyncSongs() {
@@ -733,71 +703,109 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
     async function handleBulkRemoveFromLibrary() {
         setBulkLoading(true)
         const ids = [...selectedIds]
-        await bulkRemoveFromLibrary(ids)
+        try { await bulkRemoveFromLibrary(ids) } catch { showToast('could not remove from library, try again', true); setBulkLoading(false); return }
         for (const id of ids) {
             onLibraryRemove(id)
             if (cachedIds.has(id)) {
                 try { await uncacheSong(id) } catch {}
-                removeServerOfflineSong(id)
             }
         }
         setCachedIds(prev => { const next = new Set(prev); ids.forEach(id => next.delete(id)); return next })
         setSyncPromptIds(prev => prev.filter(x => !selectedIds.has(x)))
-        setSongs(prev => prev.filter(s => !selectedIds.has(s.uuid)))
+        queryClient.setQueryData(queryKeys.librarySongs, (prev: LibrarySong[] | undefined) =>
+            (prev ?? []).filter(s => !selectedIds.has(s.uuid))
+        )
         exitSelectMode()
         setBulkLoading(false)
     }
 
     async function bulkSaveOffline() {
         setBulkLoading(true)
+        const failed = new Set<string>()
         for (const id of selectedIds) {
             if (!cachedIds.has(id)) {
                 try {
                     await cacheSong(id)
+                    try {
+                        await addServerOfflineSong(id)
+                    } catch {
+                        await uncacheSong(id).catch(() => {})
+                        failed.add(id)
+                        continue
+                    }
                     setCachedIds(prev => new Set([...prev, id]))
-                    addServerOfflineSong(id)
-                } catch {}
+                } catch { failed.add(id) }
             }
         }
-        exitSelectMode()
+        if (failed.size > 0) {
+            setSelectedIds(failed)
+            showToast(`${failed.size} song${failed.size > 1 ? 's' : ''} failed to save offline`, true)
+        } else {
+            exitSelectMode()
+        }
         setBulkLoading(false)
     }
 
     async function bulkDownload() {
         setBulkLoading(true)
+        const failedIds = new Set<string>()
         for (const id of selectedIds) {
             const song = songs.find(s => s.uuid === id)
             if (song?.properties) {
-                await downloadSongToFile(id, song.properties.trackName, song.properties.artistName)
+                try { await downloadSongToFile(id, song.properties.trackName, song.properties.artistName) } catch { failedIds.add(id) }
             }
         }
-        exitSelectMode()
+        if (failedIds.size > 0) {
+            setSelectedIds(failedIds)
+            showToast(`${failedIds.size} download${failedIds.size > 1 ? 's' : ''} failed`, true)
+        } else {
+            exitSelectMode()
+        }
         setBulkLoading(false)
     }
 
     async function bulkRemoveOffline() {
         setBulkLoading(true)
+        const failed = new Set<string>()
         for (const id of selectedIds) {
             if (cachedIds.has(id)) {
-                try { await uncacheSong(id) } catch {}
-                setCachedIds(prev => { const next = new Set(prev); next.delete(id); return next })
-                removeServerOfflineSong(id)
+                try {
+                    await removeServerOfflineSong(id)
+                    await uncacheSong(id)
+                    setCachedIds(prev => { const next = new Set(prev); next.delete(id); return next })
+                } catch { failed.add(id) }
             }
         }
-        exitSelectMode()
+        if (failed.size > 0) {
+            setSelectedIds(failed)
+            showToast(`${failed.size} song${failed.size > 1 ? 's' : ''} failed to remove offline`, true)
+        } else {
+            exitSelectMode()
+        }
         setBulkLoading(false)
     }
 
     async function bulkAddToPlaylist(playlistId: string) {
         setBulkLoading(true)
         setBulkPlaylistPicking(false)
-        await bulkAddSongsToPlaylist(playlistId, [...selectedIds])
-        await refreshPlaylists()
+        try {
+            await bulkAddSongsToPlaylist(playlistId, [...selectedIds])
+            await refreshPlaylists()
+        } catch {
+            showToast('failed to add to playlist', true)
+        }
         exitSelectMode()
         setBulkLoading(false)
     }
 
-    if (!offlineReady && displaySongs.length === 0) return null
+    if (songsLoading && displaySongs.length === 0) return null
+    if (displaySongs.length === 0 && songsError) {
+        return (
+            <div className="py-4">
+                <QueryError error={songsError} retry={refetchSongs} context="your library" />
+            </div>
+        )
+    }
     if (displaySongs.length === 0 && !online) {
         return <p className="text-gray-400 text-sm py-4">no songs saved offline — save songs while online to listen offline</p>
     }
@@ -823,7 +831,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                     <span>{failedIds.size} song{failedIds.size !== 1 ? 's' : ''} failed to download offline</span>
                     <div className="flex gap-2 shrink-0">
                         <button onClick={retryFailed} className="font-medium underline underline-offset-2 hover:no-underline">Retry</button>
-                        <button onClick={() => setFailedIds(new Set())} className="opacity-60 hover:opacity-100">Dismiss</button>
+                        <button onClick={clearFailedIds} className="opacity-60 hover:opacity-100">Dismiss</button>
                     </div>
                 </div>
             )}
@@ -901,6 +909,12 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
             </div>
             </div>{/* end sticky header */}
 
+            {songsError && (
+                <div className="my-4">
+                    <QueryError error={songsError} retry={refetchSongs} context="your library" />
+                </div>
+            )}
+
             {/* Playlists view */}
             {viewMode === 'playlists' && (
                 <PlaylistsView playlists={playlists} onRefresh={refreshPlaylists} />
@@ -963,7 +977,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                     }}
                                     inLibrary={true}
                                     onRemove={() => {
-                                        setSongs(prev => prev.filter(s => s.uuid !== song.uuid))
+                                        queryClient.setQueryData(queryKeys.librarySongs, (prev: LibrarySong[] | undefined) => (prev ?? []).filter(s => s.uuid !== song.uuid))
                                         setSyncPromptIds(prev => prev.filter(x => x !== song.uuid))
                                     }}
                                     cachedOffline={cachedIds.has(song.uuid)}
@@ -1021,7 +1035,7 @@ export default function LibraryList({ initialSongs }: { initialSongs: LibrarySon
                                     }}
                                     inLibrary={true}
                                     onRemove={() => {
-                                        setSongs(prev => prev.filter(s => s.uuid !== song.uuid))
+                                        queryClient.setQueryData(queryKeys.librarySongs, (prev: LibrarySong[] | undefined) => (prev ?? []).filter(s => s.uuid !== song.uuid))
                                         setSyncPromptIds(prev => prev.filter(x => x !== song.uuid))
                                     }}
                                     cachedOffline={cachedIds.has(song.uuid)}

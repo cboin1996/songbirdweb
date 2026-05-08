@@ -266,6 +266,10 @@ test.describe('player queue', () => {
             await player.waitForBar(10000)
             await player.openQueue()
 
+            await expect.poll(async () => {
+                return await player.queueRows().count()
+            }, { timeout: 10000 }).toBe(count)
+
             const afterRows = player.queueRows()
             const afterNames: string[] = []
             const afterCount = await afterRows.count()

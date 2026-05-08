@@ -1,5 +1,6 @@
 'use client'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
+import { useToast } from "./toast"
 import { useVirtualList } from "../lib/use-virtual-list"
 import Image from "next/image"
 import Link from "next/link"
@@ -64,7 +65,6 @@ interface PlayerContextValue {
     reorderQueue: (fromIdx: number, toIdx: number) => void
     onLibraryAdd: (song: PlayableSong) => void
     onLibraryRemove: (songId: string) => void
-    showToast: (msg: string, error?: boolean) => void
 }
 
 const PlayerContext = createContext<PlayerContextValue>({
@@ -86,8 +86,8 @@ const PlayerContext = createContext<PlayerContextValue>({
     reorderQueue: () => {},
     onLibraryAdd: () => {},
     onLibraryRemove: () => {},
-    showToast: () => {},
 })
+
 
 export function usePlayer() {
     return useContext(PlayerContext)
@@ -214,8 +214,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const shuffleOrderRef = useRef<number[]>([])
     const shufflePosRef = useRef(0)
     const [audioSrc, setAudioSrc] = useState('')
-    const [toast, setToast] = useState<{ msg: string; error?: boolean } | null>(null)
-    const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const dragFromRef = useRef<number | null>(null)
     const queueContainerRef = useRef<HTMLDivElement>(null)
     const [queueDropTarget, setQueueDropTarget] = useState<number | null>(null)
@@ -226,11 +224,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const shuffleSeedRef = useRef<number | null>(null)
     const playContextRef = useRef<PlayContext | null>(null)
 
-    const showToast = useCallback((msg: string, error?: boolean) => {
-        if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
-        setToast({ msg, error })
-        toastTimerRef.current = setTimeout(() => setToast(null), 2500)
-    }, [])
+    const { showToast } = useToast()
 
     function generateShuffleOrder(currentIdx = queueIndexRef.current, existingSeed?: number) {
         const seed = existingSeed ?? (Math.random() * 0xFFFFFFFF | 0)
@@ -249,11 +243,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             URL.revokeObjectURL(blobUrlRef.current)
             blobUrlRef.current = null
         }
-        const cached = await getSongFile(songUuid)
-        if (cached) {
-            blobUrlRef.current = URL.createObjectURL(cached)
-            return blobUrlRef.current
-        }
+        try {
+            const cached = await getSongFile(songUuid)
+            if (cached) {
+                blobUrlRef.current = URL.createObjectURL(cached)
+                return blobUrlRef.current
+            }
+        } catch {}
         return `${DOWNLOAD_URL}/${songUuid}`
     }
 
@@ -279,8 +275,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 if (lib?.properties) {
                     results.push({ uuid: lib.uuid, properties: lib.properties!, last_position: lib.last_position, last_played_at: lib.last_played_at, artwork_cached: lib.artwork_cached, source: sourceMap[id] ?? fallbackCtx })
                 } else {
-                    const fetched = await fetchSongById(id)
-                    if (fetched) results.push({ ...fetched, source: sourceMap[id] ?? fallbackCtx })
+                    try {
+                        const fetched = await fetchSongById(id)
+                        if (fetched) results.push({ ...fetched, source: sourceMap[id] ?? fallbackCtx })
+                    } catch {}
                 }
             }
             return results
@@ -360,7 +358,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     }
 
     const savePosition = useCallback((song: PlayableSong, time: number) => {
-        updatePosition(song.uuid, time)
+        updatePosition(song.uuid, time).catch(() => {})
     }, [])
 
     async function loadSong(song: PlayableSong, fromStart = false) {
@@ -440,7 +438,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             setShuffleOrder([...order])
         }
         scheduleSave()
-        queueInsert(song.uuid, insertAt, song.source ?? undefined)
+        queueInsert(song.uuid, insertAt, song.source ?? undefined).catch(() => {})
         const afterName = queueRef.current[queueIndexRef.current]?.properties?.trackName
         showToast(afterName ? `Playing after ${afterName}` : 'Added to queue')
     }
@@ -465,7 +463,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             setShuffleOrder([...order])
         }
         scheduleSave()
-        if (songId) queueRemove(songId)
+        if (songId) queueRemove(songId).catch(() => {})
     }
 
     // fromDpos / toDpos are *display positions* — i.e. positions in the queue panel as the
@@ -486,7 +484,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             }
             setShuffleOrder([...order])
             scheduleSave()
-            apiQueueReorder(fromDpos, toDpos)
+            apiQueueReorder(fromDpos, toDpos).catch(() => {})
             return
         }
         const q = [...queueRef.current]
@@ -502,7 +500,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         queueIndexRef.current = newIdx
         setQueue([...q])
         scheduleSave()
-        apiQueueReorder(fromDpos, toDpos)
+        apiQueueReorder(fromDpos, toDpos).catch(() => {})
     }
 
     function onLibraryAdd(song: PlayableSong) {
@@ -524,7 +522,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 setShuffleOrder([...order])
             }
             scheduleSave()
-            queueInsert(song.uuid, insertAt)
+            queueInsert(song.uuid, insertAt).catch(() => {})
         } else {
             const trackName = song.properties?.trackName?.toLowerCase() ?? ''
             const currentIdx = queueIndexRef.current
@@ -537,7 +535,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             queueRef.current = q
             setQueue([...q])
             scheduleSave()
-            queueInsert(song.uuid, insertAt)
+            queueInsert(song.uuid, insertAt).catch(() => {})
         }
     }
 
@@ -605,10 +603,16 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     }, [savePosition])
 
     const resume = useCallback(() => {
-        audioRef.current?.play().catch(() => {})
+        const audio = audioRef.current
+        const song = currentRef.current
+        if (!audio || !song) return
+        if (audio.error) {
+            loadSong(song)
+            return
+        }
+        audio.play().catch(() => {})
         setIsPlaying(true)
         if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing'
-        const song = currentRef.current
         if (song) syncMediaSession(song)
     }, [])
 
@@ -700,7 +704,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 queue_sources: sources,
             }
             try { localStorage.setItem('playerState', JSON.stringify({ ...state, saved_at: new Date().toISOString() })) } catch {}
-            savePlayerState(state)
+            savePlayerState(state).catch(() => {})
         }, 2000)
     }
 
@@ -786,6 +790,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             updatePositionState()
         }
         function onDurationChange() { setDuration(audio!.duration); updatePositionState() }
+        function onError() {
+            setIsBuffering(false)
+            setIsPlaying(false)
+            showToast('playback failed, try again', true)
+        }
         audio.addEventListener('play', onPlay)
         audio.addEventListener('pause', onPause)
         audio.addEventListener('loadstart', onLoadStart)
@@ -794,6 +803,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         audio.addEventListener('canplay', onCanPlay)
         audio.addEventListener('timeupdate', onTimeUpdate)
         audio.addEventListener('durationchange', onDurationChange)
+        audio.addEventListener('error', onError)
         return () => {
             audio.removeEventListener('play', onPlay)
             audio.removeEventListener('pause', onPause)
@@ -803,6 +813,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             audio.removeEventListener('canplay', onCanPlay)
             audio.removeEventListener('timeupdate', onTimeUpdate)
             audio.removeEventListener('durationchange', onDurationChange)
+            audio.removeEventListener('error', onError)
         }
 
     }, [])
@@ -848,7 +859,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             if (audioRef.current && current) savePosition(current, audioRef.current.currentTime)
         }, 10000)
         const playTimer = setTimeout(() => {
-            if (current) recordPlay(current.uuid)
+            if (current) recordPlay(current.uuid).catch(() => {})
         }, 30000)
         return () => {
             clearInterval(posTimer)
@@ -960,19 +971,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     const contextValue = useMemo(() => ({
         current, isPlaying, queue, shuffle, repeat, playContext,
-        play, pause, resume, skipNext, skipPrev, toggleShuffle, toggleRepeat, insertNext, removeFromQueue, reorderQueue, onLibraryAdd, onLibraryRemove, showToast,
+        play, pause, resume, skipNext, skipPrev, toggleShuffle, toggleRepeat, insertNext, removeFromQueue, reorderQueue, onLibraryAdd, onLibraryRemove,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }), [current, isPlaying, queue, shuffle, repeat, playContext, showToast])
+    }), [current, isPlaying, queue, shuffle, repeat, playContext])
 
     return (
         <PlayerContext.Provider value={contextValue}>
             <audio ref={audioRef} src={audioSrc || undefined} preload="metadata" playsInline/>
             {children}
-            {toast && (
-                <div className={`fixed bottom-24 left-1/2 -translate-x-1/2 z-[60] px-4 py-2 rounded-full text-xs font-medium shadow-lg pointer-events-none whitespace-nowrap ${toast.error ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' : 'bg-gray-100 text-gray-900 dark:bg-gray-900 dark:text-white'}`}>
-                    {toast.msg}
-                </div>
-            )}
             {syncPrompt && (
                 <div data-testid="sync-prompt" className="fixed inset-0 z-[70] flex items-end justify-center bg-black/40">
                     <div className="w-full max-w-md bg-white dark:bg-gray-900 rounded-t-2xl p-6 shadow-2xl">
