@@ -6,7 +6,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { LibrarySong, Playlist, EligibleSong, artworkUrl, songArtworkUrl, fetchLibrarySongs, fetchPlaylists, fetchPlaylistSongs, fetchEligibleSongs, fetchDrafts, publishSongs, removeFromLibrary, downloadSongToFile, addSongToPlaylist, bulkRemoveFromLibrary, bulkAddSongsToPlaylist, syncOfflineSongs, addServerOfflineSong, removeServerOfflineSong, clearServerOfflineSongs } from "../../lib/data"
 import { queryKeys } from "../../lib/query-keys"
 import SongPickerModal, { PickerSong } from "../../components/song-picker-modal"
-import { cacheSong, uncacheSong, getCachedSongIds, cacheArtworkUrls } from "../../lib/offline"
+import { cacheSong, uncacheSong, cacheArtworkUrls } from "../../lib/offline"
+import { useOfflineSave } from "../../lib/offline-save-context"
 import { useOnline } from "../../lib/use-online"
 import Song from "../../components/song"
 import { usePlayer } from "../../components/player"
@@ -148,19 +149,8 @@ export default function LibraryList() {
     const sectionRefs = useRef<Record<string, HTMLElement | null>>({})
     const stickyHeaderRef = useRef<HTMLDivElement | null>(null)
     const isDesktop = useIsDesktop()
-    const [cachedIds, setCachedIds] = useState<Set<string>>(new Set())
+    const { savingAll, progress: saveAllProgress, failedIds, clearFailedIds, cachedIds, setCachedIds, cacheSongsById, refreshCachedIds } = useOfflineSave()
     const [offlineReady, setOfflineReady] = useState(false)
-    const [savingAll, setSavingAll] = useState(false)
-    const [saveAllProgress, setSaveAllProgress] = useState({ done: 0, total: 0 })
-
-    // Warn before unloading while a save-all is in progress.
-    useEffect(() => {
-        if (!savingAll) return
-        const handler = (e: BeforeUnloadEvent) => { e.preventDefault() }
-        window.addEventListener('beforeunload', handler)
-        return () => window.removeEventListener('beforeunload', handler)
-    }, [savingAll])
-    const [failedIds, setFailedIds] = useState<Set<string>>(new Set())
     const [syncPromptIds, setSyncPromptIds] = useState<string[]>([])
     const eligibleIds = useMemo(() => new Set(eligibleSongs.filter(s => s.eligible).map(s => s.uuid)), [eligibleSongs])
     const eligibleCount = useMemo(() => eligibleSongs.filter(s => s.eligible).length, [eligibleSongs])
@@ -206,8 +196,7 @@ export default function LibraryList() {
     const playlistStubs = useMemo(() => playlists.map(p => ({ id: p.id, name: p.name })), [playlists])
 
     useEffect(() => {
-        getCachedSongIds().then(async ids => {
-            setCachedIds(ids)
+        refreshCachedIds().then(async ids => {
             if (!online || songs.length === 0) {
                 try {
                     const cached = await fetchLibrarySongs()
@@ -264,49 +253,13 @@ export default function LibraryList() {
         setPublishing(false)
     }
 
-    async function cacheSongsById(songList: LibrarySong[]) {
-        const failed = new Set<string>()
-        setSavingAll(true)
-        setSaveAllProgress({ done: 0, total: songList.length })
-        for (const song of songList) {
-            try {
-                await cacheSong(song.uuid)
-                try {
-                    await addServerOfflineSong(song.uuid)
-                } catch {
-                    await uncacheSong(song.uuid).catch(() => {})
-                    failed.add(song.uuid)
-                    setSaveAllProgress(p => ({ ...p, done: p.done + 1 }))
-                    continue
-                }
-                setCachedIds(prev => new Set([...prev, song.uuid]))
-                if (song.properties) {
-                    const artUrls = [
-                        artworkUrl(song.properties.artworkUrl100, 400),
-                        ...(song.artwork_cached ? [
-                            songArtworkUrl(song.uuid, true, undefined, 200)!,
-                            songArtworkUrl(song.uuid, true, undefined, 400)!,
-                        ] : []),
-                    ].filter(Boolean)
-                    cacheArtworkUrls(artUrls)
-                }
-            } catch {
-                failed.add(song.uuid)
-            }
-            setSaveAllProgress(p => ({ ...p, done: p.done + 1 }))
-        }
-        setSavingAll(false)
-        setFailedIds(failed)
-        if (failed.size > 0) showToast(`${failed.size} song${failed.size > 1 ? 's' : ''} failed to save offline`, true)
-    }
-
     async function saveAllOffline() {
-        const freshCached = await getCachedSongIds()
-        setCachedIds(freshCached)
-        setFailedIds(new Set())
+        const freshCached = await refreshCachedIds()
         const uncached = displaySongs.filter(s => s.properties && !freshCached.has(s.uuid))
-        if (uncached.length) await cacheSongsById(uncached)
-        // Cache playlist metadata + song lists in IDB so they're available offline
+        if (uncached.length) {
+            const failed = await cacheSongsById(uncached)
+            if (failed.size > 0) showToast(`${failed.size} song${failed.size > 1 ? 's' : ''} failed to save offline`, true)
+        }
         await queryClient.invalidateQueries({ queryKey: queryKeys.playlists })
         const fresh = queryClient.getQueryData<Playlist[]>(queryKeys.playlists) ?? []
         await Promise.allSettled(fresh.map(p => fetchPlaylistSongs(p.id)))
@@ -314,8 +267,8 @@ export default function LibraryList() {
 
     async function retryFailed() {
         const toRetry = songs.filter(s => failedIds.has(s.uuid))
-        setFailedIds(new Set())
-        await cacheSongsById(toRetry)
+        const failed = await cacheSongsById(toRetry)
+        if (failed.size > 0) showToast(`${failed.size} song${failed.size > 1 ? 's' : ''} failed to save offline`, true)
     }
 
     async function downloadSyncSongs() {
@@ -878,7 +831,7 @@ export default function LibraryList() {
                     <span>{failedIds.size} song{failedIds.size !== 1 ? 's' : ''} failed to download offline</span>
                     <div className="flex gap-2 shrink-0">
                         <button onClick={retryFailed} className="font-medium underline underline-offset-2 hover:no-underline">Retry</button>
-                        <button onClick={() => setFailedIds(new Set())} className="opacity-60 hover:opacity-100">Dismiss</button>
+                        <button onClick={clearFailedIds} className="opacity-60 hover:opacity-100">Dismiss</button>
                     </div>
                 </div>
             )}

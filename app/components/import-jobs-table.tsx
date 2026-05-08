@@ -11,7 +11,7 @@ import Spinner from './spinner'
 import QueryError from './query-error'
 import TableSkeleton from './table-skeleton'
 
-const PAGE_SIZE = 20
+const PAGE_SIZE = 10
 const POLL_INTERVAL_MS = 3000
 
 export interface ImportJobsTableHandle {
@@ -29,7 +29,6 @@ export default function ImportJobsTable({
   const debouncedFilter = useDebouncedValue(filter)
   const [activeIds, setActiveIds] = useState<Set<string>>(new Set())
   const activeIdsRef = useRef<Set<string>>(new Set())
-  const [sessionFinished, setSessionFinished] = useState(0)
   const inFlight = activeIds.size
   const hasInFlight = inFlight > 0
 
@@ -47,18 +46,12 @@ export default function ImportJobsTable({
   function trackJob(job: ImportJobResult, replaceId?: string) {
     setActiveIds(prev => {
       const next = new Set(prev)
-      let finishedDelta = 0
-      if (replaceId) {
-        if (next.delete(replaceId) && !isPending(job.status)) finishedDelta = 1
-      }
+      if (replaceId) next.delete(replaceId)
       if (isPending(job.status)) {
-        if (prev.size === 0 && next.size === 0) setSessionFinished(0)
         next.add(job.job_id)
-      } else if (next.has(job.job_id)) {
+      } else {
         next.delete(job.job_id)
-        finishedDelta = 1
       }
-      if (finishedDelta) setSessionFinished(d => d + finishedDelta)
       activeIdsRef.current = next
       return next
     })
@@ -98,16 +91,11 @@ export default function ImportJobsTable({
           }))
         }
         setActiveIds(prev => {
-          let finishedDelta = 0
           const next = new Set(prev)
           for (const id of prev) {
             const updated = byId.get(id)
-            if (updated && !isPending(updated.status)) {
-              next.delete(id)
-              finishedDelta++
-            }
+            if (updated && !isPending(updated.status)) next.delete(id)
           }
-          if (finishedDelta) setSessionFinished(d => d + finishedDelta)
           activeIdsRef.current = next
           return next
         })
@@ -204,8 +192,6 @@ export default function ImportJobsTable({
           <span className="text-sky-600 dark:text-sky-400 font-medium">
             {inFlight} importing
           </span>
-          <span className="text-gray-400">·</span>
-          <span className="text-gray-500">{sessionFinished} finished</span>
         </div>
       )}
 
