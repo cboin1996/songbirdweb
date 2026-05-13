@@ -292,7 +292,10 @@ test.describe('download page', () => {
                     expect(contentType).toContain('audio/mpeg')
                 }
             } finally {
-                if (songUuid) await api.delete(`/v1/library/${songUuid}`)
+                if (songUuid) {
+                    await api.delete(`/v1/library/${songUuid}`)
+                    await api.delete(`/v1/download/${songUuid}`)
+                }
                 await api.put('/v1/settings', { data: { audio_format: 'mp3' } })
                 await api.dispose()
             }

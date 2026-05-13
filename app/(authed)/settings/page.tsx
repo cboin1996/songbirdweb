@@ -200,8 +200,11 @@ function AudioFormatSetting() {
     async function handleChange(format: AudioFormat) {
         if (format === settings.audio_format) return
         setSaving(true)
-        await saveSettings({ audio_format: format })
-        setSaving(false)
+        try {
+            await saveSettings({ audio_format: format })
+        } finally {
+            setSaving(false)
+        }
     }
 
     const options: AudioFormat[] = ['mp3', 'm4a']
