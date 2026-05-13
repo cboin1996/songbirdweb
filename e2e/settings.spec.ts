@@ -1,5 +1,6 @@
 import { routes } from './routes'
 import { test, expect } from '@playwright/test'
+import { login } from './helpers'
 
 const API_BASE = `${process.env.E2E_API_BASE_URL ?? `http://${process.env.NEXT_PUBLIC_API_HOST ?? 'localhost'}:8000`}/v1`
 const TEST_USER = 'test_pw_user'
@@ -95,5 +96,62 @@ test.describe('settings - change password', () => {
             { url: `${API_BASE}/auth/login`, u: TEST_USER, p: TEST_INITIAL_PW },
         )
         expect(rejected).toBe(401)
+    })
+})
+
+test.describe('settings - audio format', () => {
+    test('defaults to MP3', async ({ page }) => {
+        await login(page)
+        await page.goto(routes.settings)
+        const mp3 = page.getByRole('button', { name: 'MP3' })
+        await expect(mp3).toBeVisible()
+        await expect(mp3).toHaveClass(/bg-sky-500/)
+    })
+
+    test('switch to M4A persists across reload', async ({ page }) => {
+        await login(page)
+        await page.goto(routes.settings)
+
+        const m4a = page.getByRole('button', { name: 'M4A' })
+        await m4a.click()
+        await expect(m4a).toHaveClass(/bg-sky-500/)
+
+        await page.reload()
+        await expect(page.getByRole('button', { name: 'M4A' })).toHaveClass(/bg-sky-500/)
+    })
+
+    test('switch back to MP3', async ({ page }) => {
+        await login(page)
+        await page.goto(routes.settings)
+
+        await page.getByRole('button', { name: 'M4A' }).click()
+        await expect(page.getByRole('button', { name: 'M4A' })).toHaveClass(/bg-sky-500/)
+
+        await page.getByRole('button', { name: 'MP3' }).click()
+        await expect(page.getByRole('button', { name: 'MP3' })).toHaveClass(/bg-sky-500/)
+
+        await page.reload()
+        await expect(page.getByRole('button', { name: 'MP3' })).toHaveClass(/bg-sky-500/)
+    })
+
+    test('format preference included in download request body', async ({ page }) => {
+        await login(page)
+        await page.goto(routes.settings)
+        await page.getByRole('button', { name: 'M4A' }).click()
+        await expect(page.getByRole('button', { name: 'M4A' })).toHaveClass(/bg-sky-500/)
+
+        let capturedBody: any = null
+        await page.route('**/v1/download', route => {
+            capturedBody = route.request().postDataJSON()
+            return route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({ song_ids: ['fake-id'], cached: false }),
+            })
+        })
+
+        await page.goto(`${routes.downloadUrl}?query=${encodeURIComponent('https://example.com/test')}`)
+        await expect.poll(() => capturedBody, { timeout: 10000 }).toBeTruthy()
+        expect(capturedBody.file_format).toBe('m4a')
     })
 })
