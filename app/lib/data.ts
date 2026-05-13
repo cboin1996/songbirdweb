@@ -301,6 +301,10 @@ export async function addToLibrary(songId: string): Promise<void> {
   await fetchData<LibraryEntry>({ url: `${API_V1}/library/${songId}`, method: 'POST' })
 }
 
+export async function restoreSong(songId: string, target: string): Promise<void> {
+  await fetchData({ url: `${API_V1}/library/${songId}/restore`, method: 'POST', body: { target }, responseType: ResponseTypes.none })
+}
+
 export async function removeFromLibrary(songId: string): Promise<void> {
   await fetchData({ url: `${API_V1}/library/${songId}`, method: 'DELETE', responseType: ResponseTypes.none })
 }

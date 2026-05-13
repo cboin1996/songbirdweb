@@ -247,8 +247,12 @@ export default function LibraryList() {
         try {
             await publishSongs(ids)
             setPublishModalOpen(false)
-            await queryClient.invalidateQueries({ queryKey: queryKeys.librarySongs })
-            queryClient.invalidateQueries({ queryKey: queryKeys.eligibleSongs })
+            await Promise.all([
+                queryClient.invalidateQueries({ queryKey: queryKeys.librarySongs }),
+                queryClient.invalidateQueries({ queryKey: queryKeys.eligibleSongs }),
+                queryClient.invalidateQueries({ queryKey: queryKeys.library }),
+                queryClient.invalidateQueries({ queryKey: queryKeys.drafts }),
+            ])
         } catch {}
         setPublishing(false)
     }

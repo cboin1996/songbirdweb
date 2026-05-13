@@ -457,6 +457,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         if (existingIdx >= 0) {
             removeFromQueue(existingIdx)
         }
+        manualNextRef.current = []
+        setManualNextIds(new Set())
         insertNext(song, true)
         skipNext()
     }

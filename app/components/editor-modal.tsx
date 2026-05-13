@@ -5,7 +5,7 @@ import RegionsPlugin from 'wavesurfer.js/plugins/regions'
 import {
   DOWNLOAD_URL, createEditJob, deleteEditDraft, Cut, EditParams, FadeEdit, fetchEditDraft,
   pollEditJob, Properties, saveEditDraft, songArtworkUrl, artworkUrl,
-  addToLibrary, removeFromLibrary, removeServerOfflineSong, uploadSongArtwork, API_V1,
+  addToLibrary, removeFromLibrary, restoreSong, removeServerOfflineSong, uploadSongArtwork, API_V1,
   fetchSongEligibility, SongEligibility, isLosslessEligible,
 } from '../lib/data'
 import { uncacheSong } from '../lib/offline'
@@ -1919,11 +1919,14 @@ export default function EditorModal({
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
     const restoredId = rootSongId ?? songId
     setRestoring(true)
-    await Promise.all([removeFromLibrary(activeSongId), deleteEditDraft(activeSongIdRef.current)])
+    await restoreSong(activeSongId, restoredId)
+    await deleteEditDraft(restoredId)
     uncacheSong(activeSongId).catch(() => {})
     removeServerOfflineSong(activeSongId).catch(() => {})
-    await addToLibrary(restoredId)
-    await queryClient.invalidateQueries({ queryKey: queryKeys.librarySongs })
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.librarySongs }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.drafts }),
+    ])
     setRestoring(false)
     router.replace(editSongRoute(restoredId))
   }
@@ -1933,11 +1936,13 @@ export default function EditorModal({
     stopPreview()
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
     setRestoring(true)
-    await removeFromLibrary(activeSongId)
+    await restoreSong(activeSongId, parentSongId)
     uncacheSong(activeSongId).catch(() => {})
     removeServerOfflineSong(activeSongId).catch(() => {})
-    await addToLibrary(parentSongId)
-    await queryClient.invalidateQueries({ queryKey: queryKeys.librarySongs })
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.librarySongs }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.drafts }),
+    ])
     setRestoring(false)
     router.replace(editSongRoute(parentSongId))
   }
@@ -1979,7 +1984,9 @@ export default function EditorModal({
         if (isLossless && result.lossless === false) {
           showToast('edit was re-encoded — trim-only edits are lossless')
         }
-        await deleteEditDraft(activeSongIdRef.current)
+        if (overwrite) {
+          await deleteEditDraft(activeSongIdRef.current)
+        }
         const landId = (!overwrite && result.result_song_id) ? result.result_song_id : activeSongIdRef.current
         if (!overwrite && result.result_song_id) {
           await saveEditDraft(result.result_song_id, stripClientIds(paramsRef.current))
@@ -1987,6 +1994,7 @@ export default function EditorModal({
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: queryKeys.library }),
           queryClient.invalidateQueries({ queryKey: queryKeys.librarySongs }),
+          queryClient.invalidateQueries({ queryKey: queryKeys.drafts }),
         ])
         router.push(`${routes.library}?song=${landId}`)
       }
@@ -2685,7 +2693,7 @@ export default function EditorModal({
 
             {/* actions */}
             <div className="flex flex-col gap-2 pt-1">
-              <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-2">
                 <button
                   onClick={handleSave}
                   disabled={!wsReady || jobStatus === 'submitting' || jobStatus === 'polling' || jobStatus === 'done'}
@@ -2702,17 +2710,19 @@ export default function EditorModal({
                     {isLossless ? 'lossless' : 're-encode'}
                   </span>
                 )}
+              </div>
+              <div className="flex items-center gap-3">
                 <button
                   onClick={handleSaveDraft}
                   disabled={draftSaveStatus === 'saving'}
-                  className={`text-sm transition-colors disabled:opacity-40 ${draftSaveStatus === 'saved' ? 'text-amber-400 hover:text-amber-300' : 'text-gray-400 hover:text-sky-500'}`}
+                  className={`text-xs transition-colors disabled:opacity-40 ${draftSaveStatus === 'saved' ? 'text-amber-400 hover:text-amber-300' : 'text-gray-400 hover:text-sky-500'}`}
                 >
                   {draftSaveStatus === 'saving' ? 'Saving…' : draftSaveStatus === 'saved' ? 'Draft saved ✓' : 'Save Draft'}
                 </button>
                 {parentSongId && parentSongId !== rootSongId && (
                   <button
                     onClick={() => setRestoreConfirm('last')}
-                    className="text-sm text-gray-400 hover:text-gray-300 transition-colors"
+                    className="text-xs text-gray-400 hover:text-gray-300 transition-colors"
                   >
                     Revert to Last Save
                   </button>
@@ -2720,7 +2730,7 @@ export default function EditorModal({
                 {activeRootSongId && activeRootSongId !== activeSongId && (
                   <button
                     onClick={() => setRestoreConfirm('original')}
-                    className="text-sm text-amber-400 hover:text-amber-300 transition-colors border border-amber-400/40 hover:border-amber-300/60 rounded-lg px-3 py-1.5"
+                    className="text-xs text-amber-400 hover:text-amber-300 transition-colors"
                   >
                     Restore Original
                   </button>
@@ -3036,6 +3046,7 @@ export default function EditorModal({
           </div>
         </div>
       )}
+
     </div>
   )
 }
