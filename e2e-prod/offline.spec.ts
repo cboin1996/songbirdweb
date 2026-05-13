@@ -205,6 +205,41 @@ test.describe('Offline Behavior', () => {
     await expect(common.navLink('Library')).toBeVisible({ timeout: 5000 })
   })
 
+  test('cache audit detects orphaned and corrupt files, fix resolves them', async ({ page }) => {
+    test.setTimeout(60000)
+
+    await login(page)
+
+    await page.evaluate(async () => {
+      const root = await navigator.storage.getDirectory()
+      const dir = await root.getDirectoryHandle('audio', { create: true })
+      const orphan = await dir.getFileHandle('fake-orphan-id.mp3', { create: true })
+      const w1 = await orphan.createWritable()
+      await w1.write(new Blob(['fake'], { type: 'audio/mpeg' }))
+      await w1.close()
+      const corrupt = await dir.getFileHandle('fake-corrupt-id.mp3', { create: true })
+      const w2 = await corrupt.createWritable()
+      await w2.close()
+    })
+
+    await page.goto('/settings')
+
+    await page.getByRole('button', { name: 'check cache health' }).click()
+    await expect(page.getByText(/orphaned/)).toBeVisible({ timeout: 10000 })
+    await expect(page.getByText(/corrupt/)).toBeVisible()
+
+    await page.getByRole('button', { name: /fix \d+ file/ }).click()
+    await expect(page.getByText('all clear')).toBeVisible({ timeout: 30000 })
+  })
+
+  test('cache audit shows all clear when cache is healthy', async ({ page }) => {
+    await login(page)
+    await page.goto('/settings')
+
+    await page.getByRole('button', { name: 'check cache health' }).click()
+    await expect(page.getByText('all clear')).toBeVisible({ timeout: 10000 })
+  })
+
   test.fixme('kebab menu actions are disabled when offline (Download, Play next, Edit)', async ({ page }) => {
     const lib = new LibraryPage(page)
     await login(page)
