@@ -812,7 +812,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         function onDurationChange() { setDuration(audio!.duration); updatePositionState() }
         function onError() {
             setIsBuffering(false)
-            setIsPlaying(false)
         }
         audio.addEventListener('play', onPlay)
         audio.addEventListener('pause', onPause)
