@@ -431,13 +431,14 @@ export async function fetchSong(id: string): Promise<Blob | undefined> {
   });
 }
 
-export async function downloadSongToFile(songId: string, trackName: string, artistName: string, format: AudioFormat = 'mp3'): Promise<void> {
+export async function downloadSongToFile(songId: string, trackName: string, artistName: string): Promise<void> {
   const blob = await fetchSong(songId)
   if (!blob) throw new FetchError('failed to fetch song file')
+  const ext = blob.type === 'audio/mp4' ? 'm4a' : 'mp3'
   const url = window.URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = `${trackName} - ${artistName}.${format}`
+  link.download = `${trackName} - ${artistName}.${ext}`
   document.body.appendChild(link)
   link.click()
   document.body.removeChild(link)

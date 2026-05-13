@@ -61,7 +61,7 @@ export default function DownloadViaUrl({ query }: { query: string }) {
         if (!songId) return
         setStatus('saving')
         try {
-            await downloadSongToFile(songId, properties?.trackName ?? songId, properties?.artistName ?? '', settings.audio_format)
+            await downloadSongToFile(songId, properties?.trackName ?? songId, properties?.artistName ?? '')
             setDoneAction('file'); setStatus('done')
         } catch (e) {
             setStatus('error'); setErrorMsg('file download failed'); setLastError(e instanceof Error ? e : new Error(String(e)))

@@ -80,7 +80,7 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
         if (!readySong?.songId) return
         setStatus('saving')
         try {
-            await downloadSongToFile(readySong.songId, readySong.properties.trackName, readySong.properties.artistName, settings.audio_format)
+            await downloadSongToFile(readySong.songId, readySong.properties.trackName, readySong.properties.artistName)
             dismiss()
         } catch {
             setStatus('error'); setErrorMsg('file download failed')
