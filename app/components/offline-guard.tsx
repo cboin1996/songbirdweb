@@ -1,5 +1,4 @@
 'use client'
-import Link from 'next/link'
 import { FaWifi } from 'react-icons/fa'
 import { useOnline } from '../lib/use-online'
 import { routes } from '../lib/routes'
@@ -12,12 +11,12 @@ export default function OfflineGuard({ feature, children }: { feature: string; c
             <FaWifi size={28} className="text-gray-400" />
             <p className="text-sm font-medium">you&rsquo;re offline</p>
             <p className="text-sm text-gray-400 max-w-xs">{feature} needs internet. your saved songs are still available.</p>
-            <Link
+            <a
                 href={routes.library}
                 className="mt-2 px-4 py-1.5 bg-sky-500 hover:bg-sky-400 text-white rounded-full text-sm font-medium transition-colors"
             >
                 go to library
-            </Link>
+            </a>
         </div>
     )
 }

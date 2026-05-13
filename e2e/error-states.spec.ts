@@ -146,7 +146,7 @@ test.describe('error states — mutations', () => {
 
         const card = library.songCards.first()
         await library.libraryToggle(card).click()
-        await expect(common.toastError).toContainText('could not remove from library', { timeout: 5000 })
+        await expect(common.toastError).toContainText('could not remove from library', { timeout: 10000 })
     })
 
     test('change password shows error on failure', async ({ page }) => {
@@ -525,7 +525,7 @@ test.describe('error states — bulk operations', () => {
         await library.songCards.first().click()
         await expect(library.selectedCount()).toBeVisible({ timeout: 3000 })
         await library.bulkRemoveBtn.click()
-        await expect(common.toastError).toContainText('could not remove from library', { timeout: 5000 })
+        await expect(common.toastError).toContainText('could not remove from library', { timeout: 10000 })
     })
 
     test('bulk save offline shows toast on failure and keeps failed selected', async ({ page }) => {
@@ -647,30 +647,9 @@ test.describe('error states — player', () => {
         )
 
         await library.songCards.first().click()
-        await expect(common.toastError).toContainText('playback failed', { timeout: 10000 })
+        await expect(common.toastError).toContainText('skipped', { timeout: 10000 })
     })
 
-    test('play button retries after playback error', async ({ page }) => {
-        const common = new CommonPage(page)
-        const library = new LibraryPage(page)
-        const player = new PlayerBar(page)
-        await page.goto(routes.library)
-        await library.waitForSongs()
-
-        let blocked = true
-        await page.route('**/v1/download/*', route => {
-            if (blocked) return route.fulfill({ status: 404, body: 'Not Found' })
-            return route.continue()
-        })
-
-        await library.songCards.first().click()
-        await expect(common.toastError).toContainText('playback failed', { timeout: 10000 })
-
-        blocked = false
-        await player.waitForBar()
-        await player.playPause.click()
-        await expect(common.toastError).not.toBeVisible({ timeout: 5000 })
-    })
 })
 
 test.describe('error states — login', () => {

@@ -23,6 +23,8 @@ export class EditorPage {
     readonly discardBtn: Locator
     readonly draftSaveFailedBanner: Locator
     readonly saveDraftBtn: Locator
+    readonly pasteWarning: Locator
+    readonly qualityBadge: Locator
 
     constructor(page: Page) {
         this.page = page
@@ -46,6 +48,8 @@ export class EditorPage {
         this.discardBtn = this.modal.getByRole('button', { name: /discard/i })
         this.draftSaveFailedBanner = page.getByTestId('draft-save-failed')
         this.saveDraftBtn = this.modal.getByRole('button', { name: /save draft/i })
+        this.pasteWarning = page.getByTestId('editor-paste-warning')
+        this.qualityBadge = this.modal.getByTestId('editor-quality-badge')
     }
 
     async waitForWaveform(timeout = 30000) {

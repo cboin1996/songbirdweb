@@ -168,9 +168,21 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
         if (!song.songId) return
         try {
             const result = await createShareToken(song.songId)
+            const url = `${window.location.origin}/share/${result.token}`
             try {
-                await navigator.clipboard.writeText(`${window.location.origin}/share/${result.token}`)
-            } catch { /* clipboard can fail in restricted contexts */ }
+                await navigator.clipboard.writeText(url)
+            } catch {
+                // Clipboard API fails on mobile when the user gesture is consumed by the
+                // preceding await. Fall back to a temporary input element.
+                const el = document.createElement('input')
+                el.value = url
+                el.style.position = 'fixed'
+                el.style.opacity = '0'
+                document.body.appendChild(el)
+                el.select()
+                document.execCommand('copy')
+                document.body.removeChild(el)
+            }
             setCopied(true)
             setTimeout(() => setCopied(false), 2000)
         } catch {
@@ -389,7 +401,7 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
                         )}
                     </div>
                     <div className="flex flex-col min-w-0 flex-1 gap-0.5">
-                        <span className={`text-base font-medium truncate flex items-center gap-1 ${isCurrentSong ? 'text-sky-500' : ''}`}>
+                        <span data-testid="song-track-name" className={`text-base font-medium truncate flex items-center gap-1 ${isCurrentSong ? 'text-sky-500' : ''}`}>
                             {isPrivate && <FaLock size={10} className="text-gray-400 shrink-0" />}
                             {song.properties.trackName || 'Unknown title'}
                             {showSource && song.source === 'community' && <CommunityBadge />}
@@ -438,7 +450,7 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
                             )}
                         </div>
                         <div className="flex flex-col px-3 min-w-0">
-                            <span className="text-lg md:text-2xl font-medium text-left truncate flex items-center gap-1.5">
+                            <span data-testid="song-track-name" className="text-lg md:text-2xl font-medium text-left truncate flex items-center gap-1.5">
                                 {isPrivate && <FaLock size={12} className="text-gray-400 shrink-0" />}
                                 {song.properties.trackName || 'Unknown title'}
                                 {showSource && song.source === 'community' && <CommunityBadge />}

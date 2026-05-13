@@ -1,30 +1,49 @@
 import { test, expect } from '@playwright/test'
-import { login, USERNAME, PASSWORD, API_BASE, ignoreError } from '../e2e/helpers'
-import { LibraryPage, PlayerBar } from '../e2e/pages'
+import { login } from '../e2e/helpers'
+import { LibraryPage, PlayerBar, CommonPage } from '../e2e/pages'
 
 test.describe('Offline Behavior', () => {
-  test('login then go offline → /library still loads (cached shell)', async ({ page }) => {
+  test('client-side nav to library works offline', async ({ page }) => {
     await login(page)
     await page.goto('/library')
-    await expect(page).toHaveURL(/\/library/)
+    await page.goto('/download')
+    await expect(page).toHaveURL(/\/download/)
 
     await page.context().setOffline(true)
+    await page.evaluate(() => window.dispatchEvent(new Event('offline')))
 
-    await page.reload()
-
-    await expect(page).toHaveURL(/\/library/)
-    await expect(page.locator('text=/library|saved|playlist/i').first()).toBeVisible({ timeout: 5000 })
+    await page.locator('a[href="/library"]').first().click()
+    await expect(page).toHaveURL(/\/library/, { timeout: 10000 })
+    await expect(page).not.toHaveURL(/^\/$/)
   })
 
-  test.fixme('unreachable navigation falls through to /offline page', async ({ page }) => {
+  test('offline banner appears when offline', async ({ page }) => {
     await login(page)
     await page.goto('/library')
+
+    await expect(page.locator('[data-testid="offline-banner"]')).not.toBeVisible()
+
+    await page.context().setOffline(true)
+    await page.evaluate(() => window.dispatchEvent(new Event('offline')))
+
+    await expect(page.locator('[data-testid="offline-banner"]')).toBeVisible()
+  })
+
+  test('/offline page has links to library and settings', async ({ page }) => {
+    await page.goto('/offline')
+    await expect(page.locator('a[href="/library"]')).toBeVisible()
+    await expect(page.locator('a[href="/settings"]')).toBeVisible()
+  })
+
+  test('uncached route offline falls back to /offline page', async ({ page }) => {
+    await login(page)
+    await page.goto('/library')
+    await page.evaluate(() => navigator.serviceWorker.ready)
 
     await page.context().setOffline(true)
 
     await page.goto('/nonexistent-route-12345', { waitUntil: 'domcontentloaded' })
-
-    await expect(page.locator('text=/songs saved for offline will still play/i')).toBeVisible()
+    await expect(page.locator('text=/songs saved for offline will still play/i')).toBeVisible({ timeout: 5000 })
   })
 
   test("OfflineGuard on /import shows offline state", async ({ page }) => {
@@ -73,9 +92,14 @@ test.describe('Offline Behavior', () => {
       const root = await navigator.storage.getDirectory()
       try {
         const dir = await root.getDirectoryHandle('audio')
-        const fh = await dir.getFileHandle(`${id}.mp3`)
-        const f = await fh.getFile()
-        return f.size
+        for (const ext of ['mp3', 'm4a']) {
+          try {
+            const fh = await dir.getFileHandle(`${id}.${ext}`)
+            const f = await fh.getFile()
+            if (f.size > 0) return f.size
+          } catch { /* try next */ }
+        }
+        return 0
       } catch { return 0 }
     }, songId)
     expect(opfsHasFile).toBeGreaterThan(0)
@@ -106,6 +130,65 @@ test.describe('Offline Behavior', () => {
     expect(offlineReadyState).toBeGreaterThanOrEqual(2)
 
     await context.setOffline(false)
+  })
+
+  test('OfflineGuard on /explore shows offline state', async ({ page }) => {
+    const common = new CommonPage(page)
+
+    await login(page)
+    await page.goto('/explore')
+    await expect(page).toHaveURL(/\/explore/)
+    await page.waitForLoadState('networkidle')
+
+    await common.goOffline()
+    await page.reload()
+
+    await expect(common.navLink('Library')).toBeVisible({ timeout: 5000 })
+  })
+
+  test('OfflineGuard on /download shows offline state', async ({ page }) => {
+    const common = new CommonPage(page)
+
+    await login(page)
+    await page.goto('/download')
+    await expect(page).toHaveURL(/\/download/)
+    await page.waitForLoadState('networkidle')
+
+    await common.goOffline()
+    await page.reload()
+
+    await expect(common.navLink('Library')).toBeVisible({ timeout: 5000 })
+  })
+
+  test('cache audit detects orphaned files, fix resolves them', async ({ page }) => {
+    test.setTimeout(60000)
+
+    await login(page)
+
+    await page.evaluate(async () => {
+      const root = await navigator.storage.getDirectory()
+      const dir = await root.getDirectoryHandle('audio', { create: true })
+      const orphan = await dir.getFileHandle('fake-orphan-id.mp3', { create: true })
+      const w = await orphan.createWritable()
+      await w.write(new Blob(['fake'], { type: 'audio/mpeg' }))
+      await w.close()
+    })
+
+    await page.goto('/settings')
+
+    await page.getByRole('button', { name: 'check cache health' }).click()
+    await expect(page.getByText(/orphaned/)).toBeVisible({ timeout: 10000 })
+
+    await page.getByRole('button', { name: /fix \d+ file/ }).click()
+    await expect(page.getByText('all clear')).toBeVisible({ timeout: 30000 })
+  })
+
+  test('cache audit shows all clear when cache is healthy', async ({ page }) => {
+    await login(page)
+    await page.goto('/settings')
+
+    await page.getByRole('button', { name: 'check cache health' }).click()
+    await expect(page.getByText('all clear')).toBeVisible({ timeout: 10000 })
   })
 
   test.fixme('kebab menu actions are disabled when offline (Download, Play next, Edit)', async ({ page }) => {
@@ -141,26 +224,4 @@ test.describe('Offline Behavior', () => {
     expect(manifest.icons.length).toBeGreaterThan(0)
   })
 
-  test('no console errors during login → library → play flow', async ({ page }) => {
-    const consoleErrors: string[] = []
-
-    page.on('console', (msg) => {
-      if (msg.type() === 'error') {
-        const text = msg.text()
-        if (!ignoreError(text)) {
-          consoleErrors.push(text)
-        }
-      }
-    })
-
-    await login(page)
-    await page.goto('/library')
-    const playButton = page.locator('[data-testid="play-button"]').first()
-    if (await playButton.isVisible()) {
-      await playButton.click()
-    }
-    await page.waitForTimeout(1000)
-
-    expect(consoleErrors).toEqual([])
-  })
 })

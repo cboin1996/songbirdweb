@@ -1,10 +1,11 @@
 {
   "name": "songbirdweb",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
     "dev:e2e": "next dev -p ${E2E_WEB_PORT:-3001}",
+    "prebuild": "node -e \"const fs=require('fs');const v=require('./package.json').version;fs.writeFileSync('public/sw.js',fs.readFileSync('public/sw.template.js','utf8').replace('__SW_VERSION__',v))\"",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",

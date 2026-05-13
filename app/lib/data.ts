@@ -36,6 +36,7 @@ let refreshPromise: Promise<boolean> | null = null
 
 function redirectToLogin() {
   if (window.location.pathname === '/') return
+  if (!navigator.onLine) return
   window.location.href = '/?next=' + encodeURIComponent(window.location.pathname + window.location.search)
 }
 
@@ -95,8 +96,14 @@ async function fetchData<T>(args: {
   try {
     response = await fetch(args.url, options);
   } catch {
+    if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(EVENTS.serverUnreachable))
     throw new FetchError(`server unavailable: ${args.method} ${args.url}`, 0);
   }
+  if (response.status === 502) {
+    if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(EVENTS.serverUnreachable))
+    throw new FetchError(`server unavailable: ${args.method} ${args.url}`, 0);
+  }
+  if (response.ok && typeof window !== 'undefined' && !response.headers.get('X-SW-Stale')) window.dispatchEvent(new CustomEvent(EVENTS.serverReachable))
   if (!response.ok) {
     const silent = args.silentStatuses ?? []
     if (response.status === 401 && typeof window !== 'undefined' && !SKIP_REFRESH_URLS.has(args.url)) {
@@ -238,7 +245,7 @@ export async function fetchLibrarySongs(): Promise<LibrarySong[]> {
     }
     return []
   } catch (error) {
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    if (error instanceof FetchError && error.status === 0) {
       return await getCachedData<LibrarySong[]>('library-songs') ?? []
     }
     throw error
@@ -299,6 +306,10 @@ export async function recordPlay(songId: string): Promise<void> {
 
 export async function addToLibrary(songId: string): Promise<void> {
   await fetchData<LibraryEntry>({ url: `${API_V1}/library/${songId}`, method: 'POST' })
+}
+
+export async function restoreSong(songId: string, target: string): Promise<void> {
+  await fetchData({ url: `${API_V1}/library/${songId}/restore`, method: 'POST', body: { target }, responseType: ResponseTypes.none })
 }
 
 export async function removeFromLibrary(songId: string): Promise<void> {
@@ -785,11 +796,22 @@ export interface EditParams {
   properties_overrides?: Properties | null
 }
 
+export function isLosslessEligible(p: EditParams): boolean {
+  return (
+    Math.abs(p.volume - 1.0) < 1e-6 &&
+    Math.abs(p.speed - 1.0) < 0.001 &&
+    !p.normalize &&
+    p.fades.length === 0 &&
+    p.cuts.every(c => (c.fade_in || 0) === 0 && (c.fade_out || 0) === 0)
+  )
+}
+
 export interface EditJobResponse {
   job_id: string
   status: 'pending' | 'processing' | 'done' | 'failed'
   result_song_id: string | null
   error: string | null
+  lossless: boolean | null
 }
 
 export async function createEditJob(
@@ -849,7 +871,7 @@ export async function fetchPlaylists(): Promise<Playlist[]> {
     }
     return []
   } catch (error) {
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    if (error instanceof FetchError && error.status === 0) {
       return await getCachedData<Playlist[]>('playlists') ?? []
     }
     throw error
@@ -881,7 +903,7 @@ export async function fetchPlaylistSongs(id: string): Promise<PlaylistSong[]> {
     }
     return []
   } catch (error) {
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    if (error instanceof FetchError && error.status === 0) {
       return await getCachedData<PlaylistSong[]>(`playlist-songs:${id}`) ?? []
     }
     throw error

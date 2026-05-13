@@ -145,7 +145,7 @@ export default function LibraryList() {
     const router = useRouter()
     const searchParams = useSearchParams()
     const viewMode = (searchParams.get('view') as ViewMode | null) ?? 'songs'
-    const { play, pause, resume, current, isPlaying, playContext, onLibraryRemove } = usePlayer()
+    const { play, playNow, pause, resume, current, isPlaying, playContext, onLibraryRemove } = usePlayer()
     const sectionRefs = useRef<Record<string, HTMLElement | null>>({})
     const stickyHeaderRef = useRef<HTMLDivElement | null>(null)
     const isDesktop = useIsDesktop()
@@ -247,8 +247,12 @@ export default function LibraryList() {
         try {
             await publishSongs(ids)
             setPublishModalOpen(false)
-            await queryClient.invalidateQueries({ queryKey: queryKeys.librarySongs })
-            queryClient.invalidateQueries({ queryKey: queryKeys.eligibleSongs })
+            await Promise.all([
+                queryClient.invalidateQueries({ queryKey: queryKeys.librarySongs }),
+                queryClient.invalidateQueries({ queryKey: queryKeys.eligibleSongs }),
+                queryClient.invalidateQueries({ queryKey: queryKeys.library }),
+                queryClient.invalidateQueries({ queryKey: queryKeys.drafts }),
+            ])
         } catch {}
         setPublishing(false)
     }
@@ -392,7 +396,8 @@ export default function LibraryList() {
     function scrollTo(letter: string) {
         const params = new URLSearchParams(searchParams.toString())
         params.set('letter', letter)
-        router.replace(`?${params.toString()}`, { scroll: false })
+        const qs = params.toString()
+        window.history.replaceState(null, '', qs ? `?${qs}` : window.location.pathname)
         if (viewMode === 'genres') {
             const genre = [...genreGrouped.keys()].find(g => letterKey(g) === letter)
             scrollToEl(genre ? sectionRefs.current[genre] ?? null : null, 'smooth')
@@ -966,14 +971,7 @@ export default function LibraryList() {
                                         if (!song.properties) return
                                         const baseHref = `${routes.library}?view=genres`
                                         const ctx = { label: genre, href: baseHref, id: `genre:${genre}` }
-                                        const queue = group
-                                            .filter(s => s.properties)
-                                            .map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached, source: { ...ctx, href: withSong(baseHref, s.uuid) } }))
-                                        play(
-                                            { uuid: song.uuid, properties: song.properties, last_position: song.last_position, last_played_at: song.last_played_at, artwork_cached: song.artwork_cached, source: { ...ctx, href: withSong(baseHref, song.uuid) } },
-                                            queue,
-                                            ctx
-                                        )
+                                        playNow({ uuid: song.uuid, properties: song.properties, last_position: song.last_position, last_played_at: song.last_played_at, artwork_cached: song.artwork_cached, source: { ...ctx, href: withSong(baseHref, song.uuid) } })
                                     }}
                                     inLibrary={true}
                                     onRemove={() => {
@@ -1024,14 +1022,7 @@ export default function LibraryList() {
                                         }
                                         const baseCtx = VIEW_CONTEXT[viewMode]
                                         const ctx = { ...baseCtx, id: viewMode === 'songs' ? 'library' : viewMode }
-                                        const queue = allSortedSongs
-                                            .filter(s => s.properties)
-                                            .map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached, source: { ...ctx, href: withSong(baseCtx.href, s.uuid) } }))
-                                        play(
-                                            { uuid: song.uuid, properties: song.properties, last_position: song.last_position, last_played_at: song.last_played_at, artwork_cached: song.artwork_cached, source: { ...ctx, href: withSong(baseCtx.href, song.uuid) } },
-                                            queue,
-                                            ctx
-                                        )
+                                        playNow({ uuid: song.uuid, properties: song.properties, last_position: song.last_position, last_played_at: song.last_played_at, artwork_cached: song.artwork_cached, source: { ...ctx, href: withSong(baseCtx.href, song.uuid) } })
                                     }}
                                     inLibrary={true}
                                     onRemove={() => {

@@ -61,6 +61,7 @@ interface PlayerContextValue {
     toggleShuffle: () => void
     toggleRepeat: () => void
     insertNext: (song: PlayableSong) => void
+    playNow: (song: PlayableSong) => void
     removeFromQueue: (index: number) => void
     reorderQueue: (fromIdx: number, toIdx: number) => void
     onLibraryAdd: (song: PlayableSong) => void
@@ -82,6 +83,7 @@ const PlayerContext = createContext<PlayerContextValue>({
     toggleShuffle: () => {},
     toggleRepeat: () => {},
     insertNext: () => {},
+    playNow: () => {},
     removeFromQueue: () => {},
     reorderQueue: () => {},
     onLibraryAdd: () => {},
@@ -417,9 +419,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         scheduleSave()
     }
 
-    function insertNext(song: PlayableSong) {
+    function insertNext(song: PlayableSong, silent = false) {
         if (queueRef.current.some(s => s.uuid === song.uuid)) {
-            showToast('Already in queue')
+            if (!silent) showToast('Already in queue')
             return
         }
         const q = [...queueRef.current]
@@ -439,8 +441,26 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         }
         scheduleSave()
         queueInsert(song.uuid, insertAt, song.source ?? undefined).catch(() => {})
-        const afterName = queueRef.current[queueIndexRef.current]?.properties?.trackName
-        showToast(afterName ? `Playing after ${afterName}` : 'Added to queue')
+        if (!silent) {
+            const afterName = queueRef.current[queueIndexRef.current]?.properties?.trackName
+            showToast(afterName ? `Playing after ${afterName}` : 'Added to queue')
+        }
+    }
+
+    function playNow(song: PlayableSong) {
+        hasUserPlayedRef.current = true
+        if (queueRef.current.length === 0) {
+            play(song)
+            return
+        }
+        const existingIdx = queueRef.current.findIndex(s => s.uuid === song.uuid)
+        if (existingIdx >= 0) {
+            removeFromQueue(existingIdx)
+        }
+        manualNextRef.current = []
+        setManualNextIds(new Set())
+        insertNext(song, true)
+        skipNext()
     }
 
     function removeFromQueue(index: number) {
@@ -793,7 +813,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         function onError() {
             setIsBuffering(false)
             setIsPlaying(false)
-            showToast('playback failed, try again', true)
         }
         audio.addEventListener('play', onPlay)
         audio.addEventListener('pause', onPause)
@@ -849,8 +868,22 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 skipNext()
             }
         }
+        function onError() {
+            const name = current?.properties?.trackName ?? 'song'
+            const code = audio?.error?.code
+            const reason = code === 2 ? 'network error'
+                : code === 3 ? 'file corrupt or unsupported'
+                : code === 4 ? 'source not found'
+                : 'playback failed'
+            if (current) showToast(`skipped "${name}" — ${reason}`, true)
+            skipNext()
+        }
         audio.addEventListener('ended', onEnded)
-        return () => audio.removeEventListener('ended', onEnded)
+        audio.addEventListener('error', onError)
+        return () => {
+            audio.removeEventListener('ended', onEnded)
+            audio.removeEventListener('error', onError)
+        }
     }, [current, savePosition, skipNext])
 
     useEffect(() => {
@@ -971,7 +1004,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     const contextValue = useMemo(() => ({
         current, isPlaying, queue, shuffle, repeat, playContext,
-        play, pause, resume, skipNext, skipPrev, toggleShuffle, toggleRepeat, insertNext, removeFromQueue, reorderQueue, onLibraryAdd, onLibraryRemove,
+        play, pause, resume, skipNext, skipPrev, toggleShuffle, toggleRepeat, insertNext, playNow, removeFromQueue, reorderQueue, onLibraryAdd, onLibraryRemove,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }), [current, isPlaying, queue, shuffle, repeat, playContext])
 
