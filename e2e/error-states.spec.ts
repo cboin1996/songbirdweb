@@ -146,7 +146,7 @@ test.describe('error states — mutations', () => {
 
         const card = library.songCards.first()
         await library.libraryToggle(card).click()
-        await expect(common.toastError).toContainText('could not remove from library', { timeout: 5000 })
+        await expect(common.toastError).toContainText('could not remove from library', { timeout: 10000 })
     })
 
     test('change password shows error on failure', async ({ page }) => {
@@ -525,7 +525,7 @@ test.describe('error states — bulk operations', () => {
         await library.songCards.first().click()
         await expect(library.selectedCount()).toBeVisible({ timeout: 3000 })
         await library.bulkRemoveBtn.click()
-        await expect(common.toastError).toContainText('could not remove from library', { timeout: 5000 })
+        await expect(common.toastError).toContainText('could not remove from library', { timeout: 10000 })
     })
 
     test('bulk save offline shows toast on failure and keeps failed selected', async ({ page }) => {

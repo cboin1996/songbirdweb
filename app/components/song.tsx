@@ -401,7 +401,7 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
                         )}
                     </div>
                     <div className="flex flex-col min-w-0 flex-1 gap-0.5">
-                        <span className={`text-base font-medium truncate flex items-center gap-1 ${isCurrentSong ? 'text-sky-500' : ''}`}>
+                        <span data-testid="song-track-name" className={`text-base font-medium truncate flex items-center gap-1 ${isCurrentSong ? 'text-sky-500' : ''}`}>
                             {isPrivate && <FaLock size={10} className="text-gray-400 shrink-0" />}
                             {song.properties.trackName || 'Unknown title'}
                             {showSource && song.source === 'community' && <CommunityBadge />}
@@ -450,7 +450,7 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
                             )}
                         </div>
                         <div className="flex flex-col px-3 min-w-0">
-                            <span className="text-lg md:text-2xl font-medium text-left truncate flex items-center gap-1.5">
+                            <span data-testid="song-track-name" className="text-lg md:text-2xl font-medium text-left truncate flex items-center gap-1.5">
                                 {isPrivate && <FaLock size={12} className="text-gray-400 shrink-0" />}
                                 {song.properties.trackName || 'Unknown title'}
                                 {showSource && song.source === 'community' && <CommunityBadge />}
