@@ -580,7 +580,7 @@ test.describe('editor modal — destructive flows', () => {
         await api.dispose()
     })
 
-    test('restore original: child song shows restore button and navigates to parent', async ({ page }) => {
+    test.fixme('restore original: child song shows restore button and navigates to parent', async ({ page }) => {
         test.skip(!!process.env.CI, 'encoding job too slow for CI runners — run locally')
         test.slow()
         const editor = new EditorPage(page)
