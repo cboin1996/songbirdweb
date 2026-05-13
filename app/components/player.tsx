@@ -875,6 +875,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 : code === 4 ? 'source not found'
                 : 'playback failed'
             if (current) showToast(`skipped "${name}" — ${reason}`, true)
+            audio!.removeAttribute('src')
+            audio!.load()
             skipNext()
         }
         audio.addEventListener('ended', onEnded)
