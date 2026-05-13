@@ -392,7 +392,8 @@ export default function LibraryList() {
     function scrollTo(letter: string) {
         const params = new URLSearchParams(searchParams.toString())
         params.set('letter', letter)
-        router.replace(`?${params.toString()}`, { scroll: false })
+        const qs = params.toString()
+        window.history.replaceState(null, '', qs ? `?${qs}` : window.location.pathname)
         if (viewMode === 'genres') {
             const genre = [...genreGrouped.keys()].find(g => letterKey(g) === letter)
             scrollToEl(genre ? sectionRefs.current[genre] ?? null : null, 'smooth')
