@@ -1,12 +1,12 @@
 'use client'
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import WaveSurfer from 'wavesurfer.js'
 import RegionsPlugin from 'wavesurfer.js/plugins/regions'
 import {
   DOWNLOAD_URL, createEditJob, deleteEditDraft, Cut, EditParams, FadeEdit, fetchEditDraft,
   pollEditJob, Properties, saveEditDraft, songArtworkUrl, artworkUrl,
   addToLibrary, removeFromLibrary, removeServerOfflineSong, uploadSongArtwork, API_V1,
-  fetchSongEligibility, SongEligibility,
+  fetchSongEligibility, SongEligibility, isLosslessEligible,
 } from '../lib/data'
 import { uncacheSong } from '../lib/offline'
 import { FaPlay, FaPause, FaTimes, FaUndo, FaRedo, FaTrash, FaCut, FaChevronDown } from 'react-icons/fa'
@@ -127,6 +127,8 @@ export default function EditorModal({
   const [draftSaveStatus, setDraftSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
   const [eligibility, setEligibility] = useState<SongEligibility | null>(null)
 
+  const isLossless = useMemo(() => isLosslessEligible(params), [params])
+
   // --- undo/redo ---
   const historyRef = useRef<EditParams[]>([])
   const redoStackRef = useRef<EditParams[]>([])
@@ -168,6 +170,9 @@ export default function EditorModal({
   const [activeSongId, setActiveSongId] = useState(songId)
   const activeSongIdRef = useRef(songId)
   const [activeRootSongId, setActiveRootSongId] = useState<string | null | undefined>(rootSongId)
+
+  // audio source: always the root original so edits are never stacked
+  const audioSourceId = activeRootSongId ?? activeSongId
 
   // --- preview (Web Audio) ---
   const fullQualityBufferRef = useRef<AudioBuffer | null>(null)
@@ -647,7 +652,7 @@ export default function EditorModal({
     // If a WaveSurfer upgrade breaks this, the overlay returns (benign visual regression).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ;(ws as any).renderer.renderProgress = () => {}
-    ws.load(`${DOWNLOAD_URL}/${songId}`).catch((err: Error) => {
+    ws.load(`${DOWNLOAD_URL}/${audioSourceId}`).catch((err: Error) => {
       if (err?.name !== 'AbortError') { console.error('WaveSurfer load:', err); setWsLoadError(err) }
     })
     ws.on('ready', () => {
@@ -1153,7 +1158,7 @@ export default function EditorModal({
       regionsRef.current = null
       ws.destroy()
     }
-  }, [songId, scheduleSave, renderWave])
+  }, [songId, audioSourceId, scheduleSave, renderWave])
 
   // Attach capturing pointerdown + mousemove listeners for fade handle interaction
   useEffect(() => {
@@ -1191,7 +1196,7 @@ export default function EditorModal({
     })
     wsOrigRef.current = ws
      
-    ws.load(`${DOWNLOAD_URL}/${songId}`).catch((err: Error) => {
+    ws.load(`${DOWNLOAD_URL}/${audioSourceId}`).catch((err: Error) => {
       if (err?.name !== 'AbortError') { console.error('WaveSurfer orig:', err); setOrigLoadError(err) }
     })
     ws.on('ready', () => {
@@ -1213,13 +1218,13 @@ export default function EditorModal({
     ws.on('finish', () => setOrigPlaying(false))
     ws.on('error', (err: Error) => { if (err?.name !== 'AbortError') { console.error('WaveSurfer orig:', err); setOrigLoadError(err) } })
     return () => { wsOrigRef.current = null; ws.destroy() }
-  }, [songId])
+  }, [audioSourceId])
 
   // decode full-quality audio buffer for preview (WaveSurfer decodes at 8 kHz for waveform only)
   useEffect(() => {
     let cancelled = false
     fullQualityBufferRef.current = null
-    fetch(`${DOWNLOAD_URL}/${activeSongId}`, { credentials: 'include' })
+    fetch(`${DOWNLOAD_URL}/${audioSourceId}`, { credentials: 'include' })
       .then(r => r.arrayBuffer())
       .then(ab => {
         if (cancelled) return
@@ -1232,7 +1237,7 @@ export default function EditorModal({
       .then(buf => { if (!cancelled && buf) fullQualityBufferRef.current = buf })
       .catch(() => {})
     return () => { cancelled = true }
-  }, [activeSongId])
+  }, [audioSourceId])
 
   // sync volume — clamp to [0,1] since HTMLMediaElement.volume only accepts that range
   useEffect(() => { wsRef.current?.setVolume(Math.min(1, params.volume)) }, [params.volume])
@@ -1900,10 +1905,11 @@ export default function EditorModal({
     setWsReady(false)
     setOrigReady(false)
     regionsRef.current?.getRegions().forEach(r => r.remove())
-    wsRef.current?.load(`${DOWNLOAD_URL}/${id}`).catch((err: Error) => {
+    const sourceId = newRootId ?? id
+    wsRef.current?.load(`${DOWNLOAD_URL}/${sourceId}`).catch((err: Error) => {
       if (err?.name !== 'AbortError') console.error('WaveSurfer reload:', err)
     })
-    wsOrigRef.current?.load(`${DOWNLOAD_URL}/${id}`).catch((err: Error) => {
+    wsOrigRef.current?.load(`${DOWNLOAD_URL}/${sourceId}`).catch((err: Error) => {
       if (err?.name !== 'AbortError') console.error('WaveSurfer orig reload:', err)
     })
   }
@@ -1963,26 +1969,32 @@ export default function EditorModal({
         clearInterval(pollIntervalRef.current!)
         pollIntervalRef.current = null
         setJobStatus('idle')
-        showToast(result?.error ?? 'save timed out', true)
+        showToast('save timed out', true, result?.error ?? undefined)
         return
       }
       if (result.status === 'done') {
         clearInterval(pollIntervalRef.current!)
         pollIntervalRef.current = null
         setJobStatus('done')
+        if (isLossless && result.lossless === false) {
+          showToast('edit was re-encoded — trim-only edits are lossless')
+        }
         await deleteEditDraft(activeSongIdRef.current)
+        const landId = (!overwrite && result.result_song_id) ? result.result_song_id : activeSongIdRef.current
+        if (!overwrite && result.result_song_id) {
+          await saveEditDraft(result.result_song_id, stripClientIds(paramsRef.current))
+        }
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: queryKeys.library }),
           queryClient.invalidateQueries({ queryKey: queryKeys.librarySongs }),
         ])
-        const landId = (!overwrite && result.result_song_id) ? result.result_song_id : activeSongIdRef.current
         router.push(`${routes.library}?song=${landId}`)
       }
       if (result.status === 'failed') {
         clearInterval(pollIntervalRef.current!)
         pollIntervalRef.current = null
         setJobStatus('idle')
-        showToast(result.error ?? 'save failed', true)
+        showToast('save failed', true, result.error ?? undefined)
       }
     }, 1500)
   }
@@ -1992,6 +2004,10 @@ export default function EditorModal({
   }
 
   async function handleClose() {
+    wsRef.current?.pause()
+    wsOrigRef.current?.pause()
+    stopPreview()
+    pausePlayer()
     if (jobStatus === 'done') {
       router.push(`${routes.library}?song=${activeSongId}`)
       return
@@ -2397,12 +2413,7 @@ export default function EditorModal({
             >
               <div className="flex items-center justify-between gap-2 px-2 pt-2">
                 <div className="flex items-center gap-2">
-                  <span className={`text-xs font-medium ${activeRootSongId && activeRootSongId !== activeSongId ? 'text-amber-400' : 'text-gray-400'}`}>
-                    {activeRootSongId && activeRootSongId !== activeSongId ? 'prev. edit' : 'original'}
-                  </span>
-                  {activeRootSongId && activeRootSongId !== activeSongId && (
-                    <span className="text-[10px] text-amber-400/60">this song is already an edit</span>
-                  )}
+                  <span className="text-xs font-medium text-gray-400">original</span>
                 </div>
               </div>
               <div className="relative pb-2">
@@ -2524,6 +2535,7 @@ export default function EditorModal({
 
               {pasteWarning && (
                 <div
+                  data-testid="editor-paste-warning"
                   className="mx-2 mt-1 px-3 py-1.5 rounded text-xs bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300 flex items-center justify-between gap-2 cursor-pointer"
                   onClick={() => setPasteWarning(null)}
                 >
@@ -2682,6 +2694,14 @@ export default function EditorModal({
                 >
                   {jobStatus === 'submitting' ? 'Starting…' : jobStatus === 'polling' ? 'Processing…' : jobStatus === 'done' ? 'Saved ✓' : 'Save to Library'}
                 </button>
+                {paramsChanged(params) && (
+                  <span data-testid="editor-quality-badge" className={`text-xs px-2 py-0.5 rounded-full border ${isLossless
+                    ? 'bg-green-50 dark:bg-green-950/30 text-green-600 dark:text-green-400 border-green-200 dark:border-green-900'
+                    : 'bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-900'
+                  }`}>
+                    {isLossless ? 'lossless' : 're-encode'}
+                  </span>
+                )}
                 <button
                   onClick={handleSaveDraft}
                   disabled={draftSaveStatus === 'saving'}
@@ -2689,20 +2709,20 @@ export default function EditorModal({
                 >
                   {draftSaveStatus === 'saving' ? 'Saving…' : draftSaveStatus === 'saved' ? 'Draft saved ✓' : 'Save Draft'}
                 </button>
-                {activeRootSongId && activeRootSongId !== activeSongId && (
-                  <button
-                    onClick={() => setRestoreConfirm('original')}
-                    className="text-sm text-amber-400 hover:text-amber-300 transition-colors border border-amber-400/40 hover:border-amber-300/60 rounded-lg px-3 py-1.5"
-                  >
-                    Restore Original
-                  </button>
-                )}
                 {parentSongId && parentSongId !== rootSongId && (
                   <button
                     onClick={() => setRestoreConfirm('last')}
                     className="text-sm text-gray-400 hover:text-gray-300 transition-colors"
                   >
                     Revert to Last Save
+                  </button>
+                )}
+                {activeRootSongId && activeRootSongId !== activeSongId && (
+                  <button
+                    onClick={() => setRestoreConfirm('original')}
+                    className="text-sm text-amber-400 hover:text-amber-300 transition-colors border border-amber-400/40 hover:border-amber-300/60 rounded-lg px-3 py-1.5"
+                  >
+                    Restore Original
                   </button>
                 )}
               </div>
@@ -2741,6 +2761,12 @@ export default function EditorModal({
                     <span className="flex items-center gap-1"><Kbd>Ctrl</Kbd><Kbd>V</Kbd> paste at cursor</span>
                     <span className="flex items-center gap-1"><Kbd>Ctrl</Kbd><Kbd>A</Kbd> cycle regions</span>
                   </div>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <p className="text-gray-400 dark:text-gray-500 font-medium text-xs uppercase tracking-wide">Audio quality</p>
+                  <p><span className="text-green-500 font-medium">Lossless</span> — trim-only and cut-only edits (no crossfades) stream-copy the original audio data with zero re-encoding. No quality loss.</p>
+                  <p><span className="text-amber-500 font-medium">Re-encode</span> — volume, speed, fades, normalize, or cut crossfades require decoding and re-encoding at the highest quality VBR setting. Edits always apply to the original import, so only one generation of re-encoding ever occurs.</p>
+                  <p>The badge next to the save button shows which mode your current edits will use.</p>
                 </div>
                 <div className="flex flex-col gap-1">
                   <p className="text-gray-400 dark:text-gray-500 font-medium text-xs uppercase tracking-wide">Tips</p>

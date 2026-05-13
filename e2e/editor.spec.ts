@@ -2,6 +2,10 @@ import { routes, editSongRoute } from './routes'
 import { test, expect, Page, Locator } from '@playwright/test'
 import { USERNAME, PASSWORD, login, ignoreError, apiLogin, apiLoginAs, API_V1, EDITOR_USERNAME, EDITOR_PASSWORD } from './helpers'
 import { EditorPage } from './pages'
+import { execSync } from 'child_process'
+import * as fs from 'fs'
+import * as os from 'os'
+import * as path from 'path'
 
 
 test.describe('editor modal', () => {
@@ -114,6 +118,20 @@ test.describe('editor modal', () => {
         await editor.openFromLibrary()
         await editor.closeBtn.click()
         await expect(editor.modal).not.toBeVisible()
+    })
+
+    test('closing editor pauses all audio playback', async ({ page }) => {
+        const editor = new EditorPage(page)
+        await editor.openFromLibrary()
+        await editor.waitForWaveform()
+        await editor.origPlay.click()
+        await page.waitForTimeout(300)
+        await editor.closeBtn.click()
+        await expect(editor.modal).not.toBeVisible()
+        const anyPlaying = await page.evaluate(() =>
+            Array.from(document.querySelectorAll('audio, video')).some(el => !(el as HTMLMediaElement).paused)
+        )
+        expect(anyPlaying).toBe(false)
     })
 
     test('draft auto-save fires (no console errors during interaction)', async ({ page }) => {
@@ -412,6 +430,82 @@ test.describe('editor modal', () => {
         expect(real, `Errors after adding two cuts: ${real.join('\n')}`).toHaveLength(0)
     })
 
+    test('adding cuts until no room shows paste warning', async ({ page }) => {
+        const editor = new EditorPage(page)
+        await editor.openFromLibrary()
+        await editor.waitForWaveform()
+
+        // Trim to a short range so cuts fill it quickly
+        await editor.scrubFill('volume', '+0.0 dB')
+        await editor.undoBtn.click()
+
+        let warningFound = false
+        for (let i = 0; i < 50; i++) {
+            await editor.addCutBtn.click()
+            const visible = await editor.pasteWarning.isVisible()
+            if (visible) {
+                const text = await editor.pasteWarning.textContent()
+                expect(text).toMatch(/no room/i)
+                warningFound = true
+                break
+            }
+            await page.waitForTimeout(100)
+        }
+
+        expect(warningFound, 'paste warning should appear when no room for a new cut').toBe(true)
+    })
+
+    test('fade regions cannot overlap cuts — no console errors', async ({ page }) => {
+        const errors: string[] = []
+        page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
+        page.on('pageerror', err => errors.push(err.message))
+
+        const editor = new EditorPage(page)
+        await editor.openFromLibrary()
+        await editor.waitForWaveform()
+        errors.length = 0
+
+        await editor.addCutBtn.click()
+        await expect(editor.removeCutBtns.first()).toBeVisible({ timeout: 5000 })
+
+        const fadeInBtn = editor.modal.getByRole('button', { name: '+ fade in' })
+        await expect(fadeInBtn).toBeVisible({ timeout: 3000 })
+        await fadeInBtn.click()
+
+        // Both cut and fade-in should coexist (snap logic prevents overlap)
+        await expect(editor.removeCutBtns.first()).toBeVisible({ timeout: 3000 })
+
+        const real = errors.filter(e => !/AbortError/i.test(e) && !/Failed to fetch/i.test(e) && !/favicon/i.test(e) && !/401/i.test(e) && !/404/i.test(e))
+        expect(real, `Errors after adding cut + fade: ${real.join('\n')}`).toHaveLength(0)
+    })
+
+    test('lossless badge shows for lossless-eligible params, re-encode for volume change', async ({ page }) => {
+        const editor = new EditorPage(page)
+        await editor.openFromLibrary()
+        await editor.waitForWaveform()
+
+        // Discard any stale draft so we start from defaults
+        await editor.discardBtn.click()
+        await page.waitForTimeout(500)
+
+        // Badge only appears when paramsChanged — default params show nothing
+        await expect(editor.qualityBadge).not.toBeVisible()
+
+        // Add a cut (lossless eligible — no fades on cut)
+        await editor.addCutBtn.click()
+        await expect(editor.removeCutBtns.first()).toBeVisible({ timeout: 5000 })
+        await expect(editor.qualityBadge).toBeVisible({ timeout: 3000 })
+        await expect(editor.qualityBadge).toHaveText('lossless')
+
+        // Volume change makes it re-encode
+        await editor.scrubFill('volume', '+3.0 dB')
+        await expect(editor.qualityBadge).toHaveText('re-encode', { timeout: 3000 })
+
+        // Undo the volume change — should revert to lossless
+        await editor.undoBtn.click()
+        await expect(editor.qualityBadge).toHaveText('lossless', { timeout: 3000 })
+    })
+
 })
 
 test.describe('editor modal — destructive flows', () => {
@@ -533,5 +627,284 @@ test.describe('editor modal — destructive flows', () => {
         await editor.overwriteCheckbox.uncheck()
         await expect(editor.overwriteCheckbox).not.toBeChecked()
         await expect(labelSpan).not.toHaveClass(/text-red-400/)
+    })
+
+    test('trim-only edit produces correct duration (lossless stream-copy)', async ({ page: _page }) => {
+        test.skip(!!process.env.CI, 'encoding job too slow for CI runners — run locally')
+        test.slow()
+
+        const api = await apiLoginAs(EDITOR_USERNAME, EDITOR_PASSWORD)
+        let newSongId: string | null = null
+        try {
+            const libRes = await api.get(`${API_V1}/songs/library`)
+            expect(libRes.ok()).toBe(true)
+            const songs = await libRes.json()
+            expect(Array.isArray(songs) && songs.length > 0, 'Library must have at least one song').toBe(true)
+            const song = songs[0]
+
+            const editRes = await api.post(`${API_V1}/edit/songs/${song.uuid}`, {
+                data: {
+                    params: { trim_start: 0, trim_end: 30, volume: 1.0, fades: [], speed: 1.0, normalize: false, cuts: [] },
+                    overwrite: false,
+                },
+            })
+            expect(editRes.ok()).toBe(true)
+            const job = await editRes.json()
+
+            let result: any
+            for (let i = 0; i < 90; i++) {
+                await new Promise(r => setTimeout(r, 1000))
+                const pollRes = await api.get(`${API_V1}/edit/jobs/${job.job_id}`)
+                result = await pollRes.json()
+                if (result.status === 'done' || result.status === 'failed') break
+            }
+            expect(result.status, `Job failed: ${result.error}`).toBe('done')
+            expect(result.lossless, 'Trim-only should be lossless').toBe(true)
+
+            newSongId = result.result_song_id
+            expect(newSongId).toBeTruthy()
+
+            const audioRes = await api.get(`${API_V1}/download/${newSongId}`)
+            expect(audioRes.ok()).toBe(true)
+            const audioBuffer = await audioRes.body()
+            const tmpFile = path.join(os.tmpdir(), `e2e-trim-${newSongId}.mp3`)
+            fs.writeFileSync(tmpFile, audioBuffer)
+            try {
+                const probe = execSync(`ffprobe -v quiet -print_format json -show_streams "${tmpFile}"`).toString()
+                const streams = JSON.parse(probe).streams
+                const audioStream = streams.find((s: any) => s.codec_type === 'audio')
+                expect(audioStream, 'Audio stream must exist in output').toBeTruthy()
+                const audioDuration = parseFloat(audioStream.duration)
+                expect(audioDuration).toBeGreaterThan(28)
+                expect(audioDuration).toBeLessThan(32)
+            } finally {
+                fs.unlinkSync(tmpFile)
+            }
+        } finally {
+            if (newSongId) await api.delete(`${API_V1}/library/${newSongId}`)
+            await api.dispose()
+        }
+    })
+
+    test('volume change produces re-encoded output with same duration', async ({ page: _page }) => {
+        test.skip(!!process.env.CI, 'encoding job too slow for CI runners — run locally')
+        test.slow()
+
+        const api = await apiLoginAs(EDITOR_USERNAME, EDITOR_PASSWORD)
+        let newSongId: string | null = null
+        try {
+            const libRes = await api.get(`${API_V1}/songs/library`)
+            expect(libRes.ok()).toBe(true)
+            const songs = await libRes.json()
+            expect(Array.isArray(songs) && songs.length > 0).toBe(true)
+            const song = songs[0]
+
+            // Get original duration
+            const origAudioRes = await api.get(`${API_V1}/download/${song.uuid}`)
+            expect(origAudioRes.ok()).toBe(true)
+            const origBuffer = await origAudioRes.body()
+            const tmpOrig = path.join(os.tmpdir(), `e2e-orig-${song.uuid}.mp3`)
+            fs.writeFileSync(tmpOrig, origBuffer)
+            let origDuration: number
+            try {
+                const probe = execSync(`ffprobe -v quiet -print_format json -show_streams "${tmpOrig}"`).toString()
+                const streams = JSON.parse(probe).streams
+                origDuration = parseFloat(streams.find((s: any) => s.codec_type === 'audio').duration)
+            } finally {
+                fs.unlinkSync(tmpOrig)
+            }
+
+            const editRes = await api.post(`${API_V1}/edit/songs/${song.uuid}`, {
+                data: {
+                    params: { trim_start: 0, trim_end: null, volume: 1.5, fades: [], speed: 1.0, normalize: false, cuts: [] },
+                    overwrite: false,
+                },
+            })
+            expect(editRes.ok()).toBe(true)
+            const job = await editRes.json()
+
+            let result: any
+            for (let i = 0; i < 90; i++) {
+                await new Promise(r => setTimeout(r, 1000))
+                const pollRes = await api.get(`${API_V1}/edit/jobs/${job.job_id}`)
+                result = await pollRes.json()
+                if (result.status === 'done' || result.status === 'failed') break
+            }
+            expect(result.status, `Job failed: ${result.error}`).toBe('done')
+            expect(result.lossless, 'Volume change should not be lossless').toBe(false)
+
+            newSongId = result.result_song_id
+            expect(newSongId).toBeTruthy()
+
+            const audioRes = await api.get(`${API_V1}/download/${newSongId}`)
+            expect(audioRes.ok()).toBe(true)
+            const audioBuffer = await audioRes.body()
+            const tmpFile = path.join(os.tmpdir(), `e2e-vol-${newSongId}.mp3`)
+            fs.writeFileSync(tmpFile, audioBuffer)
+            try {
+                const probe = execSync(`ffprobe -v quiet -print_format json -show_streams "${tmpFile}"`).toString()
+                const streams = JSON.parse(probe).streams
+                const audioStream = streams.find((s: any) => s.codec_type === 'audio')
+                expect(audioStream).toBeTruthy()
+                const newDuration = parseFloat(audioStream.duration)
+                // Duration should be within 2s of original
+                expect(Math.abs(newDuration - origDuration)).toBeLessThan(2)
+            } finally {
+                fs.unlinkSync(tmpFile)
+            }
+        } finally {
+            if (newSongId) await api.delete(`${API_V1}/library/${newSongId}`)
+            await api.dispose()
+        }
+    })
+
+    test('cut removes audio segment — output shorter than original', async ({ page: _page }) => {
+        test.skip(!!process.env.CI, 'encoding job too slow for CI runners — run locally')
+        test.slow()
+
+        const api = await apiLoginAs(EDITOR_USERNAME, EDITOR_PASSWORD)
+        let newSongId: string | null = null
+        try {
+            const libRes = await api.get(`${API_V1}/songs/library`)
+            expect(libRes.ok()).toBe(true)
+            const songs = await libRes.json()
+            expect(Array.isArray(songs) && songs.length > 0).toBe(true)
+            const song = songs[0]
+
+            // Get original duration
+            const origAudioRes = await api.get(`${API_V1}/download/${song.uuid}`)
+            expect(origAudioRes.ok()).toBe(true)
+            const origBuffer = await origAudioRes.body()
+            const tmpOrig = path.join(os.tmpdir(), `e2e-orig-cut-${song.uuid}.mp3`)
+            fs.writeFileSync(tmpOrig, origBuffer)
+            let origDuration: number
+            try {
+                const probe = execSync(`ffprobe -v quiet -print_format json -show_streams "${tmpOrig}"`).toString()
+                const streams = JSON.parse(probe).streams
+                origDuration = parseFloat(streams.find((s: any) => s.codec_type === 'audio').duration)
+            } finally {
+                fs.unlinkSync(tmpOrig)
+            }
+            expect(origDuration, 'Song must be longer than 20s for cut test').toBeGreaterThan(20)
+
+            // Cut 10s-20s (removes 10s)
+            const editRes = await api.post(`${API_V1}/edit/songs/${song.uuid}`, {
+                data: {
+                    params: {
+                        trim_start: 0, trim_end: null, volume: 1.0, fades: [], speed: 1.0, normalize: false,
+                        cuts: [{ start: 10, end: 20, fade_in: 0, fade_out: 0 }],
+                    },
+                    overwrite: false,
+                },
+            })
+            expect(editRes.ok()).toBe(true)
+            const job = await editRes.json()
+
+            let result: any
+            for (let i = 0; i < 90; i++) {
+                await new Promise(r => setTimeout(r, 1000))
+                const pollRes = await api.get(`${API_V1}/edit/jobs/${job.job_id}`)
+                result = await pollRes.json()
+                if (result.status === 'done' || result.status === 'failed') break
+            }
+            expect(result.status, `Job failed: ${result.error}`).toBe('done')
+            expect(result.lossless, 'Cut with no fades should be lossless').toBe(true)
+
+            newSongId = result.result_song_id
+            expect(newSongId).toBeTruthy()
+
+            const audioRes = await api.get(`${API_V1}/download/${newSongId}`)
+            expect(audioRes.ok()).toBe(true)
+            const audioBuffer = await audioRes.body()
+            const tmpFile = path.join(os.tmpdir(), `e2e-cut-${newSongId}.mp3`)
+            fs.writeFileSync(tmpFile, audioBuffer)
+            try {
+                const probe = execSync(`ffprobe -v quiet -print_format json -show_streams "${tmpFile}"`).toString()
+                const streams = JSON.parse(probe).streams
+                const audioStream = streams.find((s: any) => s.codec_type === 'audio')
+                expect(audioStream).toBeTruthy()
+                const newDuration = parseFloat(audioStream.duration)
+                // Should be ~(origDuration - 10), allow ±2s tolerance
+                expect(Math.abs(newDuration - (origDuration - 10))).toBeLessThan(2)
+            } finally {
+                fs.unlinkSync(tmpFile)
+            }
+        } finally {
+            if (newSongId) await api.delete(`${API_V1}/library/${newSongId}`)
+            await api.dispose()
+        }
+    })
+
+    test('speed change alters duration — 2× speed halves length', async ({ page: _page }) => {
+        test.skip(!!process.env.CI, 'encoding job too slow for CI runners — run locally')
+        test.slow()
+
+        const api = await apiLoginAs(EDITOR_USERNAME, EDITOR_PASSWORD)
+        let newSongId: string | null = null
+        try {
+            const libRes = await api.get(`${API_V1}/songs/library`)
+            expect(libRes.ok()).toBe(true)
+            const songs = await libRes.json()
+            expect(Array.isArray(songs) && songs.length > 0).toBe(true)
+            const song = songs[0]
+
+            // Get original duration
+            const origAudioRes = await api.get(`${API_V1}/download/${song.uuid}`)
+            expect(origAudioRes.ok()).toBe(true)
+            const origBuffer = await origAudioRes.body()
+            const tmpOrig = path.join(os.tmpdir(), `e2e-orig-spd-${song.uuid}.mp3`)
+            fs.writeFileSync(tmpOrig, origBuffer)
+            let origDuration: number
+            try {
+                const probe = execSync(`ffprobe -v quiet -print_format json -show_streams "${tmpOrig}"`).toString()
+                const streams = JSON.parse(probe).streams
+                origDuration = parseFloat(streams.find((s: any) => s.codec_type === 'audio').duration)
+            } finally {
+                fs.unlinkSync(tmpOrig)
+            }
+
+            const editRes = await api.post(`${API_V1}/edit/songs/${song.uuid}`, {
+                data: {
+                    params: { trim_start: 0, trim_end: null, volume: 1.0, fades: [], speed: 2.0, normalize: false, cuts: [] },
+                    overwrite: false,
+                },
+            })
+            expect(editRes.ok()).toBe(true)
+            const job = await editRes.json()
+
+            let result: any
+            for (let i = 0; i < 90; i++) {
+                await new Promise(r => setTimeout(r, 1000))
+                const pollRes = await api.get(`${API_V1}/edit/jobs/${job.job_id}`)
+                result = await pollRes.json()
+                if (result.status === 'done' || result.status === 'failed') break
+            }
+            expect(result.status, `Job failed: ${result.error}`).toBe('done')
+            expect(result.lossless, 'Speed change should not be lossless').toBe(false)
+
+            newSongId = result.result_song_id
+            expect(newSongId).toBeTruthy()
+
+            const audioRes = await api.get(`${API_V1}/download/${newSongId}`)
+            expect(audioRes.ok()).toBe(true)
+            const audioBuffer = await audioRes.body()
+            const tmpFile = path.join(os.tmpdir(), `e2e-spd-${newSongId}.mp3`)
+            fs.writeFileSync(tmpFile, audioBuffer)
+            try {
+                const probe = execSync(`ffprobe -v quiet -print_format json -show_streams "${tmpFile}"`).toString()
+                const streams = JSON.parse(probe).streams
+                const audioStream = streams.find((s: any) => s.codec_type === 'audio')
+                expect(audioStream).toBeTruthy()
+                const newDuration = parseFloat(audioStream.duration)
+                const expectedDuration = origDuration / 2
+                // Allow ±3s tolerance for speed-change encoding
+                expect(Math.abs(newDuration - expectedDuration)).toBeLessThan(3)
+            } finally {
+                fs.unlinkSync(tmpFile)
+            }
+        } finally {
+            if (newSongId) await api.delete(`${API_V1}/library/${newSongId}`)
+            await api.dispose()
+        }
     })
 })

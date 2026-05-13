@@ -785,11 +785,22 @@ export interface EditParams {
   properties_overrides?: Properties | null
 }
 
+export function isLosslessEligible(p: EditParams): boolean {
+  return (
+    Math.abs(p.volume - 1.0) < 1e-6 &&
+    Math.abs(p.speed - 1.0) < 0.001 &&
+    !p.normalize &&
+    p.fades.length === 0 &&
+    p.cuts.every(c => (c.fade_in || 0) === 0 && (c.fade_out || 0) === 0)
+  )
+}
+
 export interface EditJobResponse {
   job_id: string
   status: 'pending' | 'processing' | 'done' | 'failed'
   result_song_id: string | null
   error: string | null
+  lossless: boolean | null
 }
 
 export async function createEditJob(
