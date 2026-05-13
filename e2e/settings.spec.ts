@@ -1,6 +1,6 @@
 import { routes } from './routes'
 import { test, expect } from '@playwright/test'
-import { login } from './helpers'
+import { login, apiLogin } from './helpers'
 
 const API_BASE = `${process.env.E2E_API_BASE_URL ?? `http://${process.env.NEXT_PUBLIC_API_HOST ?? 'localhost'}:8000`}/v1`
 const TEST_USER = 'test_pw_user'
@@ -100,6 +100,12 @@ test.describe('settings - change password', () => {
 })
 
 test.describe('settings - audio format', () => {
+    test.beforeEach(async () => {
+        const api = await apiLogin()
+        await api.put('/v1/settings', { data: { audio_format: 'mp3' } })
+        await api.dispose()
+    })
+
     test('defaults to MP3', async ({ page }) => {
         await login(page)
         await page.goto(routes.settings)

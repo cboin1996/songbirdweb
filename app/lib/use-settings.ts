@@ -5,7 +5,7 @@ import { queryKeys } from './query-keys'
 export function useSettings() {
   const queryClient = useQueryClient()
 
-  const { data: settings } = useQuery({
+  const { data: settings, isLoading } = useQuery({
     queryKey: queryKeys.settings,
     queryFn: fetchSettings,
     staleTime: Infinity,
@@ -20,6 +20,7 @@ export function useSettings() {
 
   return {
     settings: settings ?? { audio_format: 'mp3' as const },
+    settingsLoaded: !isLoading,
     saveSettings,
   }
 }

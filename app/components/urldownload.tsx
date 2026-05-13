@@ -20,13 +20,13 @@ export default function DownloadViaUrl({ query }: { query: string }) {
     const [artworkCached, setArtworkCached] = useState(false)
     const [doneAction, setDoneAction] = useState<'library' | 'file' | null>(null)
     const { onLibraryAdd } = usePlayer()
-    const { settings } = useSettings()
+    const { settings, settingsLoaded } = useSettings()
 
     useEffect(() => {
-        if (!query) return
+        if (!query || !settingsLoaded) return
         startDownload()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [query])
+    }, [query, settingsLoaded])
 
     async function startDownload() {
         setStatus('downloading')

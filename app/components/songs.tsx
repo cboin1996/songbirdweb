@@ -173,7 +173,7 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
             }
 
             {activeSong && (
-                <div className={`fixed left-0 right-0 z-[55] bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 shadow-2xl ${current ? 'bottom-[84px]' : 'bottom-0'}`}>
+                <div className="fixed left-0 right-0 z-[55] bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 shadow-2xl" style={{ bottom: 'var(--player-bar-h, 0px)' }}>
                     {status === 'ready' ? (
                         <div className="flex items-center gap-3 px-4 py-3">
                             <button type="button" onClick={dismiss} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 shrink-0 transition-colors">
