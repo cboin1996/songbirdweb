@@ -103,7 +103,7 @@ async function fetchData<T>(args: {
     if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(EVENTS.serverUnreachable))
     throw new FetchError(`server unavailable: ${args.method} ${args.url}`, 0);
   }
-  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(EVENTS.serverReachable))
+  if (response.ok && typeof window !== 'undefined' && !response.headers.get('X-SW-Stale')) window.dispatchEvent(new CustomEvent(EVENTS.serverReachable))
   if (!response.ok) {
     const silent = args.silentStatuses ?? []
     if (response.status === 401 && typeof window !== 'undefined' && !SKIP_REFRESH_URLS.has(args.url)) {

@@ -1,5 +1,7 @@
 const SHELL_CACHE = 'songbird-shell-v__SW_VERSION__'
 const ARTWORK_CACHE = 'songbird-artwork-v1'
+const API_CACHE = 'songbird-api-v1'
+const CACHED_API_PATHS = ['/v1/player/state', '/v1/songs/library', '/v1/library']
 
 self.addEventListener('install', event => {
     event.waitUntil(
@@ -9,7 +11,7 @@ self.addEventListener('install', event => {
 })
 
 self.addEventListener('activate', event => {
-    const keep = new Set([SHELL_CACHE, ARTWORK_CACHE])
+    const keep = new Set([SHELL_CACHE, ARTWORK_CACHE, API_CACHE])
     event.waitUntil(
         caches.keys().then(keys =>
             Promise.all(keys.filter(k => !keep.has(k)).map(k => caches.delete(k)))
@@ -75,6 +77,31 @@ self.addEventListener('fetch', event => {
                     if (r.ok) cache.put(event.request, r.clone())
                     return r
                 }).catch(() => Response.error())
+            })
+        )
+        return
+    }
+
+    // API data: network-first, serve stale when API is unreachable (502) or browser offline
+    if (url.origin === self.location.origin && CACHED_API_PATHS.includes(url.pathname)) {
+        event.respondWith(
+            caches.open(API_CACHE).then(async cache => {
+                try {
+                    const r = await fetch(event.request)
+                    if (r.ok) {
+                        cache.put(url.pathname, r.clone())
+                        return r
+                    }
+                    if (r.status === 502) {
+                        const c = await cache.match(url.pathname)
+                        if (c) return new Response(c.body, { status: c.status, statusText: c.statusText, headers: [...c.headers.entries(), ['X-SW-Stale', '1']] })
+                    }
+                    return r
+                } catch {
+                    const c = await cache.match(url.pathname)
+                    if (c) return new Response(c.body, { status: c.status, statusText: c.statusText, headers: [...c.headers.entries(), ['X-SW-Stale', '1']] })
+                    return Response.error()
+                }
             })
         )
         return
