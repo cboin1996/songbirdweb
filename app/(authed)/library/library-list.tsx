@@ -18,6 +18,7 @@ import { useToast } from "../../components/toast"
 import PlaylistsView from "./playlists-view"
 import EditsBanner from "./edits-banner"
 import QueryError from "../../components/query-error"
+import { useSettings } from "../../lib/use-settings"
 
 type ViewMode = 'songs' | 'artists' | 'albums' | 'genres' | 'playlists'
 
@@ -146,6 +147,7 @@ export default function LibraryList() {
     const searchParams = useSearchParams()
     const viewMode = (searchParams.get('view') as ViewMode | null) ?? 'songs'
     const { play, playNow, pause, resume, current, isPlaying, playContext, onLibraryRemove } = usePlayer()
+    const { settings } = useSettings()
     const sectionRefs = useRef<Record<string, HTMLElement | null>>({})
     const stickyHeaderRef = useRef<HTMLDivElement | null>(null)
     const isDesktop = useIsDesktop()
@@ -757,7 +759,7 @@ export default function LibraryList() {
         for (const id of selectedIds) {
             const song = songs.find(s => s.uuid === id)
             if (song?.properties) {
-                try { await downloadSongToFile(id, song.properties.trackName, song.properties.artistName) } catch { failedIds.add(id) }
+                try { await downloadSongToFile(id, song.properties.trackName, song.properties.artistName, settings.audio_format) } catch { failedIds.add(id) }
             }
         }
         if (failedIds.size > 0) {

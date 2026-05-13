@@ -414,11 +414,12 @@ interface DownloadedSongIds {
 export async function downloadSongViaUrl(
   url: string,
   embedThumbnail: boolean = false,
+  fileFormat: AudioFormat = 'mp3',
 ): Promise<DownloadedSongIds | undefined> {
   return fetchData<DownloadedSongIds>({
     url: DOWNLOAD_URL,
     method: "POST",
-    body: { url, embed_thumbnail: embedThumbnail },
+    body: { url, embed_thumbnail: embedThumbnail, file_format: fileFormat },
   });
 }
 
@@ -430,13 +431,13 @@ export async function fetchSong(id: string): Promise<Blob | undefined> {
   });
 }
 
-export async function downloadSongToFile(songId: string, trackName: string, artistName: string): Promise<void> {
+export async function downloadSongToFile(songId: string, trackName: string, artistName: string, format: AudioFormat = 'mp3'): Promise<void> {
   const blob = await fetchSong(songId)
   if (!blob) throw new FetchError('failed to fetch song file')
   const url = window.URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = `${trackName} - ${artistName}.mp3`
+  link.download = `${trackName} - ${artistName}.${format}`
   document.body.appendChild(link)
   link.click()
   document.body.removeChild(link)
@@ -992,4 +993,20 @@ export async function uploadSongArtwork(songId: string, file: File): Promise<voi
   const formData = new FormData()
   formData.append('file', file)
   await fetchData({ url: `${API_V1}/songs/${songId}/artwork`, method: 'POST', rawBody: formData, responseType: ResponseTypes.none })
+}
+
+export type AudioFormat = 'mp3' | 'm4a'
+
+export interface UserSettings {
+  audio_format: AudioFormat
+}
+
+export async function fetchSettings(): Promise<UserSettings> {
+  const result = await fetchData<UserSettings>({ url: `${API_V1}/settings`, method: 'GET' })
+  return result ?? { audio_format: 'mp3' }
+}
+
+export async function updateSettings(settings: UserSettings): Promise<UserSettings> {
+  const result = await fetchData<UserSettings>({ url: `${API_V1}/settings`, method: 'PUT', body: settings })
+  return result ?? settings
 }

@@ -13,6 +13,7 @@ import { useToast } from "./toast";
 import { routes, editSongRoute } from "../lib/routes";
 import { useUser } from "../lib/user-context";
 import { useOnline } from "../lib/use-online";
+import { useSettings } from "../lib/use-settings";
 import CommunityBadge from "./community-badge";
 
 function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cachedOffline: initialCachedOffline, onRemove, onCacheChange, compact, rank, isPrivate, playlists, onPlaylistAdd, selectMode, isSelected, onSelect, onLongPress, showSource, hasDraft, isEligible }: {
@@ -55,6 +56,7 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
     const kebabJustClosed = useRef(false)
     const { play, pause, resume, current, isPlaying, insertNext, onLibraryAdd, onLibraryRemove } = usePlayer()
     const { showToast } = useToast()
+    const { settings } = useSettings()
     const queryClient = useQueryClient()
     const pathname = usePathname()
     function pageSource() {
@@ -193,7 +195,7 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
     async function handleDownload() {
         if (!song.songId) return
         try {
-            await downloadSongToFile(song.songId, song.properties.trackName, song.properties.artistName)
+            await downloadSongToFile(song.songId, song.properties.trackName, song.properties.artistName, settings.audio_format)
         } catch {
             showToast('download failed, try again', true)
         }

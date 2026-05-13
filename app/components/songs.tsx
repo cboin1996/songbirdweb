@@ -16,6 +16,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DownloadedSong, LibraryEntry, downloadSongViaUrl, downloadSongToFile, addToLibrary, fetchLibrary, tagSong, toPlayableSong } from "../lib/data";
 import { queryKeys } from "../lib/query-keys";
 import { usePlayer } from "./player";
+import { useSettings } from "../lib/use-settings";
 import { routes } from "../lib/routes";
 import Song from "./song";
 import Spinner from "./spinner";
@@ -32,6 +33,7 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
     const [readySong, setReadySong] = useState<DownloadedSong | null>(null)
     const inputRef = useRef<HTMLInputElement>(null)
     const { play, playNow, current, onLibraryAdd } = usePlayer()
+    const { settings } = useSettings()
     const queryClient = useQueryClient()
     const { data: libraryEntries = [] } = useQuery({
         queryKey: queryKeys.library,
@@ -78,7 +80,7 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
         if (!readySong?.songId) return
         setStatus('saving')
         try {
-            await downloadSongToFile(readySong.songId, readySong.properties.trackName, readySong.properties.artistName)
+            await downloadSongToFile(readySong.songId, readySong.properties.trackName, readySong.properties.artistName, settings.audio_format)
             dismiss()
         } catch {
             setStatus('error'); setErrorMsg('file download failed')
@@ -92,7 +94,7 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
         setStatus('downloading')
         setErrorMsg('')
         try {
-            const result = await downloadSongViaUrl(text)
+            const result = await downloadSongViaUrl(text, false, settings.audio_format)
             if (!result || result.song_ids.length === 0) {
                 setStatus('error'); setErrorMsg('download failed'); return
             }

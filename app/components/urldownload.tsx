@@ -7,6 +7,7 @@ import Link from "next/link";
 import { routes } from "../lib/routes";
 import { FaCheckCircle } from "react-icons/fa";
 import { usePlayer } from "./player";
+import { useSettings } from "../lib/use-settings";
 import QueryError from "./query-error";
 
 export default function DownloadViaUrl({ query }: { query: string }) {
@@ -19,6 +20,7 @@ export default function DownloadViaUrl({ query }: { query: string }) {
     const [artworkCached, setArtworkCached] = useState(false)
     const [doneAction, setDoneAction] = useState<'library' | 'file' | null>(null)
     const { onLibraryAdd } = usePlayer()
+    const { settings } = useSettings()
 
     useEffect(() => {
         if (!query) return
@@ -30,7 +32,7 @@ export default function DownloadViaUrl({ query }: { query: string }) {
         setStatus('downloading')
         setErrorMsg('')
         try {
-            const result = await downloadSongViaUrl(query, true)
+            const result = await downloadSongViaUrl(query, true, settings.audio_format)
             if (!result || result.song_ids.length === 0) {
                 setStatus('error'); setErrorMsg('download failed'); setLastError(new Error('empty response')); return
             }
@@ -59,7 +61,7 @@ export default function DownloadViaUrl({ query }: { query: string }) {
         if (!songId) return
         setStatus('saving')
         try {
-            await downloadSongToFile(songId, properties?.trackName ?? songId, properties?.artistName ?? '')
+            await downloadSongToFile(songId, properties?.trackName ?? songId, properties?.artistName ?? '', settings.audio_format)
             setDoneAction('file'); setStatus('done')
         } catch (e) {
             setStatus('error'); setErrorMsg('file download failed'); setLastError(e instanceof Error ? e : new Error(String(e)))
