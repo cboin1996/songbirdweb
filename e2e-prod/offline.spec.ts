@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { login, USERNAME, PASSWORD, API_BASE, ignoreError } from '../e2e/helpers'
-import { LibraryPage, PlayerBar } from '../e2e/pages'
+import { LibraryPage, PlayerBar, CommonPage } from '../e2e/pages'
 
 test.describe('Offline Behavior', () => {
   test('login then go offline → /library still loads (cached shell)', async ({ page }) => {
@@ -152,6 +152,57 @@ test.describe('Offline Behavior', () => {
     expect(offlineReadyState).toBeGreaterThanOrEqual(2)
 
     await context.setOffline(false)
+  })
+
+  test('player survives refresh when offline (SW API cache)', async ({ page }) => {
+    test.setTimeout(60000)
+
+    const common = new CommonPage(page)
+    const player = new PlayerBar(page)
+    const lib = new LibraryPage(page)
+
+    await login(page)
+    await lib.goto()
+    await lib.waitForSongs()
+
+    lib.songCards.first().click()
+    await player.waitForBar()
+    const songName = await player.getTrackName()
+    expect(songName).toBeTruthy()
+
+    await common.goOffline()
+    await page.reload()
+
+    await player.waitForBar()
+    await expect(player.trackName).toHaveText(songName, { timeout: 10000 })
+  })
+
+  test('OfflineGuard on /explore shows offline state', async ({ page }) => {
+    const common = new CommonPage(page)
+
+    await login(page)
+    await page.goto('/explore')
+    await expect(page).toHaveURL(/\/explore/)
+    await page.waitForLoadState('networkidle')
+
+    await common.goOffline()
+    await page.reload()
+
+    await expect(common.navLink('Library')).toBeVisible({ timeout: 5000 })
+  })
+
+  test('OfflineGuard on /download shows offline state', async ({ page }) => {
+    const common = new CommonPage(page)
+
+    await login(page)
+    await page.goto('/download')
+    await expect(page).toHaveURL(/\/download/)
+    await page.waitForLoadState('networkidle')
+
+    await common.goOffline()
+    await page.reload()
+
+    await expect(common.navLink('Library')).toBeVisible({ timeout: 5000 })
   })
 
   test.fixme('kebab menu actions are disabled when offline (Download, Play next, Edit)', async ({ page }) => {
