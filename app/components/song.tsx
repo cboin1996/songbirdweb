@@ -168,9 +168,21 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
         if (!song.songId) return
         try {
             const result = await createShareToken(song.songId)
+            const url = `${window.location.origin}/share/${result.token}`
             try {
-                await navigator.clipboard.writeText(`${window.location.origin}/share/${result.token}`)
-            } catch { /* clipboard can fail in restricted contexts */ }
+                await navigator.clipboard.writeText(url)
+            } catch {
+                // Clipboard API fails on mobile when the user gesture is consumed by the
+                // preceding await. Fall back to a temporary input element.
+                const el = document.createElement('input')
+                el.value = url
+                el.style.position = 'fixed'
+                el.style.opacity = '0'
+                document.body.appendChild(el)
+                el.select()
+                document.execCommand('copy')
+                document.body.removeChild(el)
+            }
             setCopied(true)
             setTimeout(() => setCopied(false), 2000)
         } catch {

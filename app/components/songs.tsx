@@ -31,7 +31,7 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
     const [errorMsg, setErrorMsg] = useState('')
     const [readySong, setReadySong] = useState<DownloadedSong | null>(null)
     const inputRef = useRef<HTMLInputElement>(null)
-    const { play, current, onLibraryAdd } = usePlayer()
+    const { play, playNow, current, onLibraryAdd } = usePlayer()
     const queryClient = useQueryClient()
     const { data: libraryEntries = [] } = useQuery({
         queryKey: queryKeys.library,
@@ -140,7 +140,7 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
                                             : routes.download
                                         const ctx = { label: 'Downloads', href: here, id: 'downloads' }
                                         const q = downloaded.filter(s => s.songId).map(s => toPlayableSong(s, ctx))
-                                        play(toPlayableSong(song, ctx), q, ctx)
+                                        playNow(toPlayableSong(song, ctx))
                                     } else {
                                         setActiveIndex(globalIndex)
                                         setStatus('idle')
