@@ -57,7 +57,10 @@ async function proxy(req: NextRequest) {
         return await proxyImpl(req)
     } catch (err) {
         console.error('[v1 proxy]', req.method, req.nextUrl.pathname, err)
-        throw err
+        return NextResponse.json(
+            { detail: 'upstream unreachable' },
+            { status: 502 },
+        )
     }
 }
 

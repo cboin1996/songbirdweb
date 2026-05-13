@@ -36,6 +36,7 @@ let refreshPromise: Promise<boolean> | null = null
 
 function redirectToLogin() {
   if (window.location.pathname === '/') return
+  if (!navigator.onLine) return
   window.location.href = '/?next=' + encodeURIComponent(window.location.pathname + window.location.search)
 }
 
@@ -95,8 +96,14 @@ async function fetchData<T>(args: {
   try {
     response = await fetch(args.url, options);
   } catch {
+    if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(EVENTS.serverUnreachable))
     throw new FetchError(`server unavailable: ${args.method} ${args.url}`, 0);
   }
+  if (response.status === 502) {
+    if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(EVENTS.serverUnreachable))
+    throw new FetchError(`server unavailable: ${args.method} ${args.url}`, 0);
+  }
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(EVENTS.serverReachable))
   if (!response.ok) {
     const silent = args.silentStatuses ?? []
     if (response.status === 401 && typeof window !== 'undefined' && !SKIP_REFRESH_URLS.has(args.url)) {
@@ -238,7 +245,7 @@ export async function fetchLibrarySongs(): Promise<LibrarySong[]> {
     }
     return []
   } catch (error) {
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    if (error instanceof FetchError && error.status === 0) {
       return await getCachedData<LibrarySong[]>('library-songs') ?? []
     }
     throw error
@@ -864,7 +871,7 @@ export async function fetchPlaylists(): Promise<Playlist[]> {
     }
     return []
   } catch (error) {
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    if (error instanceof FetchError && error.status === 0) {
       return await getCachedData<Playlist[]>('playlists') ?? []
     }
     throw error
@@ -896,7 +903,7 @@ export async function fetchPlaylistSongs(id: string): Promise<PlaylistSong[]> {
     }
     return []
   } catch (error) {
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    if (error instanceof FetchError && error.status === 0) {
       return await getCachedData<PlaylistSong[]>(`playlist-songs:${id}`) ?? []
     }
     throw error

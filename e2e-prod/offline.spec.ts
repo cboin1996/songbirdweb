@@ -16,15 +16,61 @@ test.describe('Offline Behavior', () => {
     await expect(page.locator('text=/library|saved|playlist/i').first()).toBeVisible({ timeout: 5000 })
   })
 
-  test.fixme('unreachable navigation falls through to /offline page', async ({ page }) => {
+  test('client-side nav to library works offline', async ({ page }) => {
+    await login(page)
+    await page.goto('/library')
+    await page.goto('/download')
+    await expect(page).toHaveURL(/\/download/)
+
+    await page.context().setOffline(true)
+    await page.evaluate(() => window.dispatchEvent(new Event('offline')))
+
+    await page.locator('a[href="/library"]').first().click()
+    await expect(page).toHaveURL(/\/library/, { timeout: 10000 })
+    await expect(page).not.toHaveURL(/^\/$/)
+  })
+
+  test('offline with no cookies stays on library (no login redirect)', async ({ page }) => {
+    await login(page)
+    await page.goto('/library')
+    await page.goto('/download')
+    await page.goto('/settings')
+
+    await page.context().setOffline(true)
+    await page.evaluate(() => window.dispatchEvent(new Event('offline')))
+    await page.context().clearCookies()
+
+    await page.locator('a[href="/library"]').first().click()
+    await expect(page).toHaveURL(/\/library/, { timeout: 10000 })
+    await expect(page).not.toHaveURL(/^\/$/)
+  })
+
+  test('offline banner appears when offline', async ({ page }) => {
+    await login(page)
+    await page.goto('/library')
+
+    await expect(page.locator('[data-testid="offline-banner"]')).not.toBeVisible()
+
+    await page.context().setOffline(true)
+    await page.evaluate(() => window.dispatchEvent(new Event('offline')))
+
+    await expect(page.locator('[data-testid="offline-banner"]')).toBeVisible()
+  })
+
+  test('/offline page has links to library and settings', async ({ page }) => {
+    await page.goto('/offline')
+    await expect(page.locator('a[href="/library"]')).toBeVisible()
+    await expect(page.locator('a[href="/settings"]')).toBeVisible()
+  })
+
+  test('uncached route offline falls back to /offline page', async ({ page }) => {
     await login(page)
     await page.goto('/library')
 
     await page.context().setOffline(true)
 
     await page.goto('/nonexistent-route-12345', { waitUntil: 'domcontentloaded' })
-
-    await expect(page.locator('text=/songs saved for offline will still play/i')).toBeVisible()
+    await expect(page.locator('text=/songs saved for offline will still play/i')).toBeVisible({ timeout: 5000 })
   })
 
   test("OfflineGuard on /import shows offline state", async ({ page }) => {

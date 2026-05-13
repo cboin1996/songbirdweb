@@ -813,7 +813,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         function onError() {
             setIsBuffering(false)
             setIsPlaying(false)
-            showToast('playback failed, try again', true)
         }
         audio.addEventListener('play', onPlay)
         audio.addEventListener('pause', onPause)
@@ -869,8 +868,22 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 skipNext()
             }
         }
+        function onError() {
+            const name = current?.properties?.trackName ?? 'song'
+            const code = audio?.error?.code
+            const reason = code === 2 ? 'network error'
+                : code === 3 ? 'file corrupt or unsupported'
+                : code === 4 ? 'source not found'
+                : 'playback failed'
+            if (current) showToast(`skipped "${name}" — ${reason}`, true)
+            skipNext()
+        }
         audio.addEventListener('ended', onEnded)
-        return () => audio.removeEventListener('ended', onEnded)
+        audio.addEventListener('error', onError)
+        return () => {
+            audio.removeEventListener('ended', onEnded)
+            audio.removeEventListener('error', onError)
+        }
     }, [current, savePosition, skipNext])
 
     useEffect(() => {

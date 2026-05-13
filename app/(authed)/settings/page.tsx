@@ -1,9 +1,10 @@
 'use client'
 import { useEffect, useRef, useState } from "react";
-import { changePassword } from "../../lib/data";
-import { clearOfflineCache, getCachedSongIds, getStorageEstimate, formatBytes } from "../../lib/offline";
+import { changePassword, fetchLibrarySongs } from "../../lib/data";
+import { clearOfflineCache, getCachedSongIds, getStorageEstimate, formatBytes, getSongFile, uncacheSong, cacheSong } from "../../lib/offline";
 import { clearServerOfflineSongs } from "../../lib/data";
 import { EVENTS } from "../../lib/events";
+import { useOfflineSave } from "../../lib/offline-save-context";
 import Button from "../../components/button";
 import Input from "../../components/input";
 import { FaEye, FaEyeSlash } from "react-icons/fa";
@@ -90,6 +91,106 @@ function OfflineStorage() {
     )
 }
 
+interface AuditResult {
+    total: number
+    healthy: number
+    corrupt: string[]
+    orphaned: string[]
+}
+
+function CacheAudit() {
+    const { refreshCachedIds } = useOfflineSave()
+    const [running, setRunning] = useState(false)
+    const [result, setResult] = useState<AuditResult | null>(null)
+    const [fixing, setFixing] = useState(false)
+
+    async function runAudit() {
+        setRunning(true)
+        setResult(null)
+        try {
+            const [cachedIds, librarySongs] = await Promise.all([getCachedSongIds(), fetchLibrarySongs()])
+            const libraryIds = new Set(librarySongs.map(s => s.uuid))
+            const corrupt: string[] = []
+            const orphaned: string[] = []
+            let healthy = 0
+
+            for (const id of cachedIds) {
+                if (!libraryIds.has(id)) {
+                    orphaned.push(id)
+                    continue
+                }
+                const file = await getSongFile(id)
+                if (!file || file.size === 0) {
+                    corrupt.push(id)
+                } else {
+                    healthy++
+                }
+            }
+            setResult({ total: cachedIds.size, healthy, corrupt, orphaned })
+        } catch {
+            setResult({ total: 0, healthy: 0, corrupt: [], orphaned: [] })
+        }
+        setRunning(false)
+    }
+
+    const [fixProgress, setFixProgress] = useState('')
+
+    async function fixIssues() {
+        if (!result) return
+        setFixing(true)
+        for (const id of result.orphaned) {
+            setFixProgress(`removing orphan…`)
+            await uncacheSong(id)
+        }
+        for (let i = 0; i < result.corrupt.length; i++) {
+            const id = result.corrupt[i]
+            setFixProgress(`re-downloading ${i + 1}/${result.corrupt.length}…`)
+            await uncacheSong(id)
+            try {
+                await cacheSong(id)
+            } catch { /* will show as still corrupt on re-audit */ }
+        }
+        setFixProgress('')
+        setFixing(false)
+        await refreshCachedIds()
+        await runAudit()
+    }
+
+    const issues = result ? result.corrupt.length + result.orphaned.length : 0
+
+    return (
+        <div>
+            <p className="text-gray-400 text-sm pb-2">cache audit</p>
+            <div className="flex flex-col gap-3 w-full max-w-xs">
+                <Button
+                    text={running ? 'checking…' : 'check cache health'}
+                    disabled={running || fixing}
+                    onClick={runAudit}
+                />
+                {result && (
+                    <div className="text-xs space-y-1">
+                        <p className="text-gray-400">{result.total} cached, {result.healthy} healthy</p>
+                        {result.corrupt.length > 0 && (
+                            <p className="text-red-400">{result.corrupt.length} corrupt (empty/unreadable)</p>
+                        )}
+                        {result.orphaned.length > 0 && (
+                            <p className="text-amber-400">{result.orphaned.length} orphaned (not in library)</p>
+                        )}
+                        {issues === 0 && <p className="text-green-500">all clear</p>}
+                        {issues > 0 && (
+                            <Button
+                                text={fixing ? fixProgress || 'fixing…' : `fix ${issues} file${issues !== 1 ? 's' : ''}`}
+                                disabled={fixing}
+                                onClick={fixIssues}
+                            />
+                        )}
+                    </div>
+                )}
+            </div>
+        </div>
+    )
+}
+
 export default function Page() {
     const [currentPassword, setCurrentPassword] = useState('')
     const [newPassword, setNewPassword] = useState('')
@@ -129,6 +230,7 @@ export default function Page() {
         <main className="p-4">
             <div className="flex flex-col gap-8 py-4">
                 <OfflineStorage />
+                <CacheAudit />
                 <div>
                     <p className="text-gray-400 text-sm pb-2">change password</p>
                     <form onSubmit={handleSubmit} className="flex flex-col gap-2 w-full max-w-xs">

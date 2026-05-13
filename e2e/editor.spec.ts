@@ -508,6 +508,33 @@ test.describe('editor modal', () => {
 
 })
 
+async function submitEditAndWait(api: any, songId: string, params: Record<string, any> = {}, overwrite = false) {
+    const editRes = await api.post(`${API_V1}/edit/songs/${songId}`, {
+        data: {
+            params: { trim_start: 0, trim_end: null, volume: 1.0, fades: [], speed: 1.0, normalize: false, cuts: [], ...params },
+            overwrite,
+        },
+    })
+    expect(editRes.ok()).toBe(true)
+    const job = await editRes.json()
+    let result: any
+    for (let i = 0; i < 90; i++) {
+        await new Promise(r => setTimeout(r, 1000))
+        const pollRes = await api.get(`${API_V1}/edit/jobs/${job.job_id}`)
+        result = await pollRes.json()
+        if (result.status === 'done' || result.status === 'failed') break
+    }
+    expect(result.status, `Job failed: ${result.error}`).toBe('done')
+    return result
+}
+
+async function getSongFromLibrary(api: any, songId: string) {
+    const res = await api.get(`${API_V1}/songs/library`)
+    expect(res.ok()).toBe(true)
+    const songs = await res.json()
+    return songs.find((s: any) => s.uuid === songId) ?? null
+}
+
 test.describe('editor modal — destructive flows', () => {
     test.describe.configure({ mode: 'serial' })
     test.use({ storageState: 'e2e/.auth/editor-user.json' })
@@ -904,6 +931,149 @@ test.describe('editor modal — destructive flows', () => {
             }
         } finally {
             if (newSongId) await api.delete(`${API_V1}/library/${newSongId}`)
+            await api.dispose()
+        }
+    })
+
+    test('draft preserved on parent after non-overwrite save', async ({ page: _page }) => {
+        test.skip(!!process.env.CI, 'encoding job too slow for CI runners — run locally')
+        test.slow()
+        const api = await apiLoginAs(EDITOR_USERNAME, EDITOR_PASSWORD)
+        let childId: string | null = null
+        try {
+            const libRes = await api.get(`${API_V1}/songs/library`)
+            const songs = await libRes.json()
+            const song = songs.find((s: any) => s.properties && !s.parent_song_id)
+            expect(song, 'Need a root song in library').toBeTruthy()
+
+            // Save a draft on the source song
+            const draftParams = { trim_start: 5, trim_end: 30, volume: 0.8, fades: [], speed: 1.0, normalize: false, cuts: [] }
+            await api.put(`${API_V1}/edit/songs/${song.uuid}/draft`, { data: draftParams })
+
+            // Edit (non-overwrite) — creates child
+            const result = await submitEditAndWait(api, song.uuid, { trim_end: 30 })
+            childId = result.result_song_id
+            expect(childId).toBeTruthy()
+
+            // Parent's draft should still exist
+            const draftRes = await api.get(`${API_V1}/edit/songs/${song.uuid}/draft`)
+            expect(draftRes.ok(), 'Parent draft should survive non-overwrite save').toBe(true)
+            const draft = await draftRes.json()
+            expect(draft.params.trim_start).toBe(5)
+        } finally {
+            if (childId) await api.delete(`${API_V1}/library/${childId}`)
+            await api.dispose()
+        }
+    })
+
+    test('2-edit cap deletes grandparent intermediate', async ({ page: _page }) => {
+        test.skip(!!process.env.CI, 'encoding job too slow for CI runners — run locally')
+        test.slow()
+        const api = await apiLoginAs(EDITOR_USERNAME, EDITOR_PASSWORD)
+        const created: string[] = []
+        try {
+            const libRes = await api.get(`${API_V1}/songs/library`)
+            const songs = await libRes.json()
+            const root = songs.find((s: any) => s.properties && !s.parent_song_id)
+            expect(root, 'Need a root song in library').toBeTruthy()
+
+            // Edit 1: root → child1
+            const r1 = await submitEditAndWait(api, root.uuid, { normalize: true })
+            const child1 = r1.result_song_id
+            created.push(child1)
+
+            // Edit 2: child1 → child2
+            const r2 = await submitEditAndWait(api, child1, { normalize: true })
+            const child2 = r2.result_song_id
+            created.push(child2)
+
+            // Edit 3: child2 → child3 — should trigger cap, deleting child1
+            const r3 = await submitEditAndWait(api, child2, { normalize: true })
+            const child3 = r3.result_song_id
+            created.push(child3)
+
+            // child1 should be gone (deleted by 2-edit cap)
+            const child1Download = await api.get(`${API_V1}/download/${child1}`)
+            expect(child1Download.status(), 'Grandparent should be deleted by 2-edit cap').toBe(404)
+
+            // child2 should still exist (it's the hidden parent)
+            const child2Song = await getSongFromLibrary(api, child2)
+            // child2 was removed from library but song record should still exist
+            const child2Download = await api.get(`${API_V1}/download/${child2}`)
+            expect(child2Download.ok(), 'Parent should still exist').toBe(true)
+
+            // root should still exist
+            const rootDownload = await api.get(`${API_V1}/download/${root.uuid}`)
+            expect(rootDownload.ok(), 'Root should never be deleted').toBe(true)
+        } finally {
+            for (const id of created) await api.delete(`${API_V1}/library/${id}`).catch(() => {})
+            await api.dispose()
+        }
+    })
+
+    test('publish via API cleans up edit chain and nulls parent/root', async ({ page: _page }) => {
+        test.skip(!!process.env.CI, 'encoding job too slow for CI runners — run locally')
+        test.slow()
+        const api = await apiLoginAs(EDITOR_USERNAME, EDITOR_PASSWORD)
+        let childId: string | null = null
+        try {
+            const libRes = await api.get(`${API_V1}/songs/library`)
+            const songs = await libRes.json()
+            const root = songs.find((s: any) => s.properties && !s.parent_song_id && s.owner_id)
+            expect(root, 'Need a private root song in library').toBeTruthy()
+
+            // Edit root → child
+            const result = await submitEditAndWait(api, root.uuid, { normalize: true })
+            childId = result.result_song_id
+            expect(childId).toBeTruthy()
+
+            // Verify child has edit chain before publish
+            const beforeSong = await getSongFromLibrary(api, childId!)
+            expect(beforeSong, 'Child should be in library').toBeTruthy()
+            expect(beforeSong.parent_song_id, 'Child should have parent before publish').toBeTruthy()
+            expect(beforeSong.root_song_id, 'Child should have root before publish').toBeTruthy()
+
+            // Publish via library endpoint
+            const pubRes = await api.post(`${API_V1}/library/publish`, { data: { song_ids: [childId] } })
+            expect(pubRes.ok()).toBe(true)
+            const pubResult = await pubRes.json()
+            expect(pubResult.published).toBe(1)
+
+            // Verify chain cleaned up
+            const afterRes = await api.get(`${API_V1}/songs/library`)
+            const afterSongs = await afterRes.json()
+            const afterSong = afterSongs.find((s: any) => s.uuid === childId)
+            if (afterSong) {
+                expect(afterSong.parent_song_id, 'Published song parent should be null').toBeNull()
+                expect(afterSong.root_song_id, 'Published song root should be null').toBeNull()
+            }
+        } finally {
+            if (childId) await api.delete(`${API_V1}/library/${childId}`).catch(() => {})
+            await api.dispose()
+        }
+    })
+
+    test('non-overwrite save does not auto-publish', async ({ page: _page }) => {
+        test.skip(!!process.env.CI, 'encoding job too slow for CI runners — run locally')
+        test.slow()
+        const api = await apiLoginAs(EDITOR_USERNAME, EDITOR_PASSWORD)
+        let childId: string | null = null
+        try {
+            const libRes = await api.get(`${API_V1}/songs/library`)
+            const songs = await libRes.json()
+            const root = songs.find((s: any) => s.properties && !s.parent_song_id && s.owner_id)
+            expect(root, 'Need a private root song in library').toBeTruthy()
+
+            const result = await submitEditAndWait(api, root.uuid, { normalize: true })
+            childId = result.result_song_id
+            expect(childId).toBeTruthy()
+
+            // Child should still be owned by user (not auto-published)
+            const child = await getSongFromLibrary(api, childId!)
+            expect(child, 'Child should be in library').toBeTruthy()
+            expect(child.owner_id, 'Child should still have an owner (not auto-published)').toBeTruthy()
+        } finally {
+            if (childId) await api.delete(`${API_V1}/library/${childId}`).catch(() => {})
             await api.dispose()
         }
     })

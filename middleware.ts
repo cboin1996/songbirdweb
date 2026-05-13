@@ -15,17 +15,13 @@ function isExpired(token: string): boolean {
 }
 
 async function refreshAccessToken(refreshToken: string): Promise<string | null> {
-  try {
-    const res = await fetch(`${API_BASE}/v1/auth/refresh`, {
-      method: 'POST',
-      headers: { Cookie: `refresh_token=${refreshToken}` },
-    })
-    if (!res.ok) return null
-    const match = res.headers.get('set-cookie')?.match(/access_token=([^;]+)/)
-    return match?.[1] ?? null
-  } catch {
-    return null
-  }
+  const res = await fetch(`${API_BASE}/v1/auth/refresh`, {
+    method: 'POST',
+    headers: { Cookie: `refresh_token=${refreshToken}` },
+  })
+  if (!res.ok) return null
+  const match = res.headers.get('set-cookie')?.match(/access_token=([^;]+)/)
+  return match?.[1] ?? null
 }
 
 export async function middleware(request: NextRequest) {
@@ -52,7 +48,7 @@ export async function middleware(request: NextRequest) {
     try {
       newToken = await refreshAccessToken(refreshToken.value)
     } catch {
-      return NextResponse.redirect(new URL('/offline', request.url))
+      return NextResponse.next()
     }
     if (newToken) {
       const cookieStr = request.cookies.getAll()

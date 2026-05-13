@@ -80,16 +80,19 @@ self.addEventListener('fetch', event => {
         return
     }
 
-    // Next.js RSC payload fetches (client-side routing) — keyed by pathname only
+    // Next.js RSC payload fetches (client-side routing)
+    // Keyed with rsc: prefix to avoid collisions with pre-cached HTML pages
     if (url.origin === self.location.origin && url.searchParams.has('_rsc')) {
         event.respondWith(
             caches.open(SHELL_CACHE).then(async cache => {
                 try {
                     const r = await fetch(event.request)
-                    if (r.ok) cache.put(url.pathname, r.clone())
+                    if (r.ok) cache.put('rsc:' + url.pathname, r.clone())
                     return r
                 } catch {
-                    return cache.match(url.pathname).then(c => c ?? Response.error())
+                    const c = await cache.match('rsc:' + url.pathname)
+                    if (c) return c
+                    return Response.error()
                 }
             })
         )
