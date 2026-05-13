@@ -208,19 +208,25 @@ test.describe('Offline Behavior', () => {
   test('cache audit detects orphaned and corrupt files, fix resolves them', async ({ page }) => {
     test.setTimeout(60000)
 
+    const lib = new LibraryPage(page)
     await login(page)
+    await lib.goto()
+    await lib.waitForSongs()
 
-    await page.evaluate(async () => {
+    const realSongId = await page.locator('[data-song-id]').first().getAttribute('data-song-id')
+    expect(realSongId).toBeTruthy()
+
+    await page.evaluate(async (songId) => {
       const root = await navigator.storage.getDirectory()
       const dir = await root.getDirectoryHandle('audio', { create: true })
       const orphan = await dir.getFileHandle('fake-orphan-id.mp3', { create: true })
       const w1 = await orphan.createWritable()
       await w1.write(new Blob(['fake'], { type: 'audio/mpeg' }))
       await w1.close()
-      const corrupt = await dir.getFileHandle('fake-corrupt-id.mp3', { create: true })
+      const corrupt = await dir.getFileHandle(`${songId}.mp3`, { create: true })
       const w2 = await corrupt.createWritable()
       await w2.close()
-    })
+    }, realSongId)
 
     await page.goto('/settings')
 
