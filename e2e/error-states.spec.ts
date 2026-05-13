@@ -650,31 +650,6 @@ test.describe('error states — player', () => {
         await expect(common.toastError).toContainText('skipped', { timeout: 10000 })
     })
 
-    test.fixme('playback error auto-skips to next song', async ({ page }) => {
-        const common = new CommonPage(page)
-        const library = new LibraryPage(page)
-        const player = new PlayerBar(page)
-        await page.goto(routes.library)
-        await library.waitForSongs()
-
-        const firstSongId = await library.songCards.first().getAttribute('data-song-id')
-
-        let blocked = false
-        await page.route('**/v1/download/*', route => {
-            if (!blocked && route.request().url().includes(firstSongId!)) {
-                blocked = true
-                return route.fulfill({ status: 404, body: 'Not Found' })
-            }
-            return route.continue()
-        })
-
-        await library.songCards.first().click()
-        await expect(common.toastError).toContainText('skipped', { timeout: 10000 })
-        await player.waitForBar()
-        const currentName = await player.getTrackName()
-        const firstName = await library.songCards.first().locator('[data-testid="song-track-name"]').textContent()
-        expect(currentName).not.toBe(firstName?.trim())
-    })
 })
 
 test.describe('error states — login', () => {

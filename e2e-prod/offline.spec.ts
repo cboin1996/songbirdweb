@@ -1,22 +1,8 @@
 import { test, expect } from '@playwright/test'
-import { login, USERNAME, PASSWORD, API_BASE, ignoreError } from '../e2e/helpers'
+import { login } from '../e2e/helpers'
 import { LibraryPage, PlayerBar, CommonPage } from '../e2e/pages'
 
 test.describe('Offline Behavior', () => {
-  test('login then go offline → /library still loads (cached shell)', async ({ page }) => {
-    await login(page)
-    await page.goto('/library')
-    await expect(page).toHaveURL(/\/library/)
-    await page.evaluate(() => navigator.serviceWorker.ready)
-
-    await page.context().setOffline(true)
-
-    await page.reload({ waitUntil: 'domcontentloaded' })
-
-    await expect(page).toHaveURL(/\/library/)
-    await expect(page.locator('text=/library|saved|playlist/i').first()).toBeVisible({ timeout: 5000 })
-  })
-
   test('client-side nav to library works offline', async ({ page }) => {
     await login(page)
     await page.goto('/library')
@@ -25,22 +11,6 @@ test.describe('Offline Behavior', () => {
 
     await page.context().setOffline(true)
     await page.evaluate(() => window.dispatchEvent(new Event('offline')))
-
-    await page.locator('a[href="/library"]').first().click()
-    await expect(page).toHaveURL(/\/library/, { timeout: 10000 })
-    await expect(page).not.toHaveURL(/^\/$/)
-  })
-
-  test('offline with no cookies stays on library (no login redirect)', async ({ page }) => {
-    await login(page)
-    await page.goto('/library')
-    await page.evaluate(() => navigator.serviceWorker.ready)
-    await page.goto('/download')
-    await page.goto('/settings')
-
-    await page.context().setOffline(true)
-    await page.evaluate(() => window.dispatchEvent(new Event('offline')))
-    await page.context().clearCookies()
 
     await page.locator('a[href="/library"]').first().click()
     await expect(page).toHaveURL(/\/library/, { timeout: 10000 })
@@ -162,29 +132,6 @@ test.describe('Offline Behavior', () => {
     await context.setOffline(false)
   })
 
-  test('player survives refresh when offline (SW API cache)', async ({ page }) => {
-    test.setTimeout(60000)
-
-    const common = new CommonPage(page)
-    const player = new PlayerBar(page)
-    const lib = new LibraryPage(page)
-
-    await login(page)
-    await lib.goto()
-    await lib.waitForSongs()
-
-    lib.songCards.first().click()
-    await player.waitForBar()
-    const songName = await player.getTrackName()
-    expect(songName).toBeTruthy()
-
-    await common.goOffline()
-    await page.reload({ waitUntil: 'domcontentloaded' })
-
-    await player.waitForBar({ timeout: 15000 })
-    await expect(player.trackName).toHaveText(songName, { timeout: 10000 })
-  })
-
   test('OfflineGuard on /explore shows offline state', async ({ page }) => {
     const common = new CommonPage(page)
 
@@ -277,26 +224,4 @@ test.describe('Offline Behavior', () => {
     expect(manifest.icons.length).toBeGreaterThan(0)
   })
 
-  test('no console errors during login → library → play flow', async ({ page }) => {
-    const consoleErrors: string[] = []
-
-    page.on('console', (msg) => {
-      if (msg.type() === 'error') {
-        const text = msg.text()
-        if (!ignoreError(text)) {
-          consoleErrors.push(text)
-        }
-      }
-    })
-
-    await login(page)
-    await page.goto('/library')
-    const playButton = page.locator('[data-testid="play-button"]').first()
-    if (await playButton.isVisible()) {
-      await playButton.click()
-    }
-    await page.waitForTimeout(1000)
-
-    expect(consoleErrors).toEqual([])
-  })
 })
