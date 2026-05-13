@@ -180,6 +180,7 @@ function ProgressBar({ current, duration, buffered, onSeek }: {
 
 export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const audioRef = useRef<HTMLAudioElement>(null)
+    const playerBarRef = useRef<HTMLDivElement>(null)
     const [current, setCurrent] = useState<PlayableSong | null>(null)
     const currentRef = useRef<PlayableSong | null>(null)
     const [isPlaying, setIsPlaying] = useState(false)
@@ -982,6 +983,20 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [showQueue, current?.uuid])
 
+    useEffect(() => {
+        const el = playerBarRef.current
+        if (!el) {
+            document.documentElement.style.setProperty('--player-bar-h', '0px')
+            return
+        }
+        const ro = new ResizeObserver(([entry]) => {
+            const h = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height
+            document.documentElement.style.setProperty('--player-bar-h', `${h}px`)
+        })
+        ro.observe(el)
+        return () => { ro.disconnect(); document.documentElement.style.setProperty('--player-bar-h', '0px') }
+    }, [!!current])
+
     const p = current?.properties
     const hasQueue = queue.length > 1
     const activeClass = 'text-sky-500'
@@ -1147,7 +1162,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                         </div>
                     )}
 
-                    <div data-testid="player-bar" className="fixed bottom-0 left-0 right-0 z-50 bg-[var(--background)]/90 backdrop-blur-md border-t border-gray-100 dark:border-gray-800">
+                    <div ref={playerBarRef} data-testid="player-bar" className="fixed bottom-0 left-0 right-0 z-50 bg-[var(--background)]/90 backdrop-blur-md border-t border-gray-100 dark:border-gray-800">
                         <div className="flex flex-col">
                             {/* Mobile: single row. Desktop: three-column layout */}
                             <div className="flex items-center gap-3 px-4 pt-3 pb-1.5 md:grid md:grid-cols-[1fr_auto_1fr]">

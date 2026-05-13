@@ -7,5 +7,6 @@ export const queryKeys = {
     explore: ['explore'] as const,
     adminStats: ['admin-stats'] as const,
     adminUsers: ['admin-users'] as const,
+    settings: ['settings'] as const,
     version: ['version'] as const,
 }

@@ -241,4 +241,64 @@ test.describe('download page', () => {
             await api.dispose()
         }
     })
+
+    // --- format-specific download + tag tests (local only) ---
+
+    for (const format of ['mp3', 'm4a'] as const) {
+        test(`download + tag as ${format}`, async ({ page }) => {
+            test.skip(!!process.env.CI, 'requires yt-dlp + network — local only')
+            test.slow()
+
+            const dl = new DownloadPage(page)
+            const api = await import('./helpers').then(h => h.apiLogin())
+            let songUuid: string | null = null
+
+            try {
+                await api.put('/v1/settings', { data: { audio_format: format } })
+
+                await dl.gotoSongSearch('jolene')
+
+                const itunesCard = dl.songCards
+                    .filter({ hasNot: page.getByTestId('song-kebab') })
+                    .first()
+                await expect(itunesCard).toBeVisible({ timeout: 15000 })
+
+                await itunesCard.click()
+                await expect(dl.urlInput()).toBeVisible({ timeout: 5000 })
+
+                await dl.urlInput().fill('https://archive.org/download/testmp3testfile/mpthreetest.mp3')
+                await page.getByRole('button', { name: /^download$/i }).click()
+
+                await page.getByRole('button', { name: 'add to library', exact: true }).click({ timeout: 90000 })
+
+                let found = false
+                for (let i = 0; i < 30; i++) {
+                    const res = await api.get('/v1/songs/library')
+                    if (res.ok()) {
+                        const songs = await res.json()
+                        const song = songs.find((s: any) => s.properties?.trackName?.toLowerCase().includes('jolene'))
+                        if (song) { songUuid = song.uuid; found = true; break }
+                    }
+                    await page.waitForTimeout(1000)
+                }
+                expect(found, `${format} song did not appear in library within 30s`).toBe(true)
+
+                const fileRes = await api.get(`/v1/download/${songUuid}`)
+                expect(fileRes.ok()).toBe(true)
+                const contentType = fileRes.headers()['content-type']
+                if (format === 'm4a') {
+                    expect(contentType).toContain('audio/mp4')
+                } else {
+                    expect(contentType).toContain('audio/mpeg')
+                }
+            } finally {
+                if (songUuid) {
+                    await api.delete(`/v1/library/${songUuid}`)
+                    await api.delete(`/v1/download/${songUuid}`)
+                }
+                await api.put('/v1/settings', { data: { audio_format: 'mp3' } })
+                await api.dispose()
+            }
+        })
+    }
 })

@@ -8,6 +8,8 @@ import { useOfflineSave } from "../../lib/offline-save-context";
 import Button from "../../components/button";
 import Input from "../../components/input";
 import { FaEye, FaEyeSlash } from "react-icons/fa";
+import { useSettings } from "../../lib/use-settings";
+import type { AudioFormat } from "../../lib/data";
 
 function PasswordField({ placeholder, value, onChange, inputRef }: {
     placeholder: string
@@ -191,6 +193,46 @@ function CacheAudit() {
     )
 }
 
+function AudioFormatSetting() {
+    const { settings, saveSettings } = useSettings()
+    const [saving, setSaving] = useState(false)
+
+    async function handleChange(format: AudioFormat) {
+        if (format === settings.audio_format) return
+        setSaving(true)
+        try {
+            await saveSettings({ audio_format: format })
+        } finally {
+            setSaving(false)
+        }
+    }
+
+    const options: AudioFormat[] = ['mp3', 'm4a']
+
+    return (
+        <div>
+            <p className="text-gray-400 text-sm pb-2">audio format</p>
+            <div className="flex gap-2 w-full max-w-xs">
+                {options.map(fmt => (
+                    <button
+                        key={fmt}
+                        disabled={saving}
+                        onClick={() => handleChange(fmt)}
+                        className={`flex-1 px-3 py-1.5 text-sm rounded-lg border transition-colors ${
+                            settings.audio_format === fmt
+                                ? 'bg-sky-500 text-white border-sky-500'
+                                : 'border-gray-200 dark:border-gray-700 hover:border-sky-500 hover:text-sky-500'
+                        }`}
+                    >
+                        {fmt.toUpperCase()}
+                    </button>
+                ))}
+            </div>
+            <p className="text-xs text-gray-400 mt-1.5">format used when downloading new songs</p>
+        </div>
+    )
+}
+
 export default function Page() {
     const [currentPassword, setCurrentPassword] = useState('')
     const [newPassword, setNewPassword] = useState('')
@@ -229,6 +271,7 @@ export default function Page() {
     return (
         <main className="p-4">
             <div className="flex flex-col gap-8 py-4">
+                <AudioFormatSetting />
                 <OfflineStorage />
                 <CacheAudit />
                 <div>
