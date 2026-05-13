@@ -812,6 +812,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         function onDurationChange() { setDuration(audio!.duration); updatePositionState() }
         function onError() {
             setIsBuffering(false)
+            setIsPlaying(false)
         }
         audio.addEventListener('play', onPlay)
         audio.addEventListener('pause', onPause)
@@ -875,8 +876,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 : code === 4 ? 'source not found'
                 : 'playback failed'
             if (current) showToast(`skipped "${name}" — ${reason}`, true)
-            audio!.removeAttribute('src')
-            audio!.load()
             skipNext()
         }
         audio.addEventListener('ended', onEnded)

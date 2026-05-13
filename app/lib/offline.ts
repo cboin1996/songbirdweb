@@ -98,16 +98,18 @@ async function idbClearAll(): Promise<void> {
 
 export async function getSongFile(songId: string): Promise<File | null> {
     if (await opfsAvailable()) {
-        try {
-            const dir = await getAudioDir()
-            const handle = await dir.getFileHandle(`${songId}.mp3`, { create: false })
-            const file = await handle.getFile()
-            if (file.size > 0) return file
-        } catch { /* fall through to IDB */ }
+        const dir = await getAudioDir()
+        for (const ext of ['m4a', 'mp3']) {
+            try {
+                const handle = await dir.getFileHandle(`${songId}.${ext}`, { create: false })
+                const file = await handle.getFile()
+                if (file.size > 0) return file
+            } catch { /* try next */ }
+        }
     }
     const blob = await idbGet(songId)
     if (!blob || blob.size === 0) return null
-    return new File([blob], `${songId}.mp3`, { type: 'audio/mpeg' })
+    return new File([blob], `${songId}`, { type: blob.type || 'audio/mpeg' })
 }
 
 export async function getCachedSongIds(): Promise<Set<string>> {
@@ -117,10 +119,10 @@ export async function getCachedSongIds(): Promise<Set<string>> {
         try {
             const dir = await getAudioDir()
             for await (const [name, handle] of (dir as any).entries()) {
-                if (typeof name === 'string' && name.endsWith('.mp3')) {
+                if (typeof name === 'string' && (name.endsWith('.mp3') || name.endsWith('.m4a'))) {
                     try {
                         const file = await (handle as FileSystemFileHandle).getFile()
-                        if (file.size > 0) ids.add(name.slice(0, -4))
+                        if (file.size > 0) ids.add(name.replace(/\.(mp3|m4a)$/, ''))
                     } catch { /* skip */ }
                 }
             }
@@ -155,12 +157,17 @@ export async function cacheSong(
         if (contentLength > 0 && onProgress) onProgress(received / contentLength)
     }
 
-    const blob = new Blob(chunks, { type: 'audio/mpeg' })
+    const contentType = res.headers.get('content-type') || 'audio/mpeg'
+    const ext = contentType.includes('mp4') || contentType.includes('m4a') ? 'm4a' : 'mp3'
+    const blob = new Blob(chunks, { type: contentType })
 
     if (await opfsAvailable()) {
         try {
             const dir = await getAudioDir()
-            const fileHandle = await dir.getFileHandle(`${songId}.mp3`, { create: true })
+            if (ext !== 'mp3') {
+                try { await dir.removeEntry(`${songId}.mp3`) } catch { /* no old file */ }
+            }
+            const fileHandle = await dir.getFileHandle(`${songId}.${ext}`, { create: true })
             const writable = await fileHandle.createWritable()
             try {
                 await writable.write(blob)
@@ -180,10 +187,10 @@ export async function cacheSong(
 
 export async function uncacheSong(songId: string): Promise<void> {
     if (await opfsAvailable()) {
-        try {
-            const dir = await getAudioDir()
-            await dir.removeEntry(`${songId}.mp3`)
-        } catch { /* already gone */ }
+        const dir = await getAudioDir()
+        for (const ext of ['mp3', 'm4a']) {
+            try { await dir.removeEntry(`${songId}.${ext}`) } catch { /* already gone */ }
+        }
     }
     try { await idbDelete(songId) } catch { /* already gone */ }
 }
