@@ -16,6 +16,9 @@ export class LibraryPage {
     readonly bulkDownloadBtn: Locator
     readonly bulkRemoveBtn: Locator
     readonly bulkPlaylistBtn: Locator
+    readonly searchInput: Locator
+    readonly searchClear: Locator
+    readonly searchEmpty: Locator
 
     constructor(page: Page) {
         this.page = page
@@ -32,6 +35,9 @@ export class LibraryPage {
         this.bulkDownloadBtn = page.getByRole('button', { name: 'Download', exact: true })
         this.bulkRemoveBtn = page.getByRole('button', { name: 'Remove', exact: true })
         this.bulkPlaylistBtn = page.getByRole('button', { name: '+ Playlist' })
+        this.searchInput = page.getByTestId('library-search')
+        this.searchClear = page.getByTestId('library-search-clear')
+        this.searchEmpty = page.getByTestId('library-search-empty')
     }
 
     async goto(view?: 'songs' | 'artists' | 'albums' | 'genres' | 'playlists') {

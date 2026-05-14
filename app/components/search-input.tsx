@@ -7,9 +7,10 @@ interface SearchInputProps {
     onChange(value: string): void
     placeholder?: string
     className?: string
+    testId?: string
 }
 
-export default function SearchInput({ value, onChange, placeholder = 'search…', className = '' }: SearchInputProps) {
+export default function SearchInput({ value, onChange, placeholder = 'search…', className = '', testId }: SearchInputProps) {
     const inputRef = useRef<HTMLInputElement>(null)
 
     return (
@@ -17,6 +18,7 @@ export default function SearchInput({ value, onChange, placeholder = 'search…'
             <FaSearch size={11} className="absolute left-3 text-gray-400 pointer-events-none" />
             <input
                 ref={inputRef}
+                data-testid={testId}
                 type="text"
                 value={value}
                 onChange={e => onChange(e.target.value)}
@@ -27,8 +29,9 @@ export default function SearchInput({ value, onChange, placeholder = 'search…'
             {value && (
                 <button
                     type="button"
+                    data-testid={testId ? `${testId}-clear` : undefined}
                     onClick={() => { onChange(''); inputRef.current?.focus() }}
-                    className="absolute right-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                    className="absolute right-0 p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors touch-manipulation"
                     aria-label="Clear search"
                 >
                     <FaTimes size={11} />

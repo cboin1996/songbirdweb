@@ -11,6 +11,9 @@ export class PlayerBar {
     readonly progress: Locator
     readonly queueToggle: Locator
     readonly queuePanel: Locator
+    readonly queueSearch: Locator
+    readonly queueSearchClear: Locator
+    readonly queueSearchEmpty: Locator
 
     constructor(page: Page) {
         this.page = page
@@ -23,6 +26,9 @@ export class PlayerBar {
         this.progress = page.getByTestId('player-progress')
         this.queueToggle = page.getByTestId('player-queue-toggle')
         this.queuePanel = page.getByTestId('player-queue-panel')
+        this.queueSearch = page.getByTestId('queue-search')
+        this.queueSearchClear = page.getByTestId('queue-search-clear')
+        this.queueSearchEmpty = page.getByTestId('queue-search-empty')
     }
 
     async waitForBar(timeout = 5000) {
