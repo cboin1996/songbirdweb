@@ -31,7 +31,7 @@ export default function SearchInput({ value, onChange, placeholder = 'search…'
                     type="button"
                     data-testid={testId ? `${testId}-clear` : undefined}
                     onClick={() => { onChange(''); inputRef.current?.focus() }}
-                    className="absolute right-1 p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors touch-manipulation"
+                    className="absolute right-0 p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors touch-manipulation"
                     aria-label="Clear search"
                 >
                     <FaTimes size={11} />
