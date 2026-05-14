@@ -2693,6 +2693,12 @@ export default function EditorModal({
 
             {/* actions */}
             <div className="flex flex-col gap-2 pt-1">
+              {isAdmin && (
+                <label className="flex items-center gap-1.5 text-sm select-none cursor-pointer">
+                  <input data-testid="editor-overwrite-checkbox" type="checkbox" checked={publishAsOriginal} onChange={e => { setPublishAsOriginal(e.target.checked); setOverwrite(e.target.checked) }} className="accent-red-500" />
+                  <span className={publishAsOriginal ? 'text-red-400 font-medium' : 'text-gray-400'}>save as original</span>
+                </label>
+              )}
               <div className="flex items-center gap-2">
                 <button
                   onClick={handleSave}
@@ -2736,12 +2742,6 @@ export default function EditorModal({
                   </button>
                 )}
               </div>
-              {isAdmin && (
-                <label className="flex items-center gap-1.5 text-sm select-none cursor-pointer">
-                  <input data-testid="editor-overwrite-checkbox" type="checkbox" checked={publishAsOriginal} onChange={e => { setPublishAsOriginal(e.target.checked); setOverwrite(e.target.checked) }} className="accent-red-500" />
-                  <span className={publishAsOriginal ? 'text-red-400 font-medium' : 'text-gray-400'}>save as original</span>
-                </label>
-              )}
             </div>
 
             </div>{/* end edit-controls wrapper */}
