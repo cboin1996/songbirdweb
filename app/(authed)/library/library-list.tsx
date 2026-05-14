@@ -152,8 +152,9 @@ export default function LibraryList() {
     const updateSearchUrl = useCallback((q: string) => {
         const params = new URLSearchParams(searchParams.toString())
         if (q) params.set('q', q); else params.delete('q')
-        router.replace(`?${params.toString()}`, { scroll: false })
-    }, [router, searchParams])
+        const qs = params.toString()
+        window.history.replaceState(null, '', qs ? `?${qs}` : window.location.pathname)
+    }, [searchParams])
     const onSearchChange = useCallback((q: string) => {
         setSearchQuery(q)
         if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
