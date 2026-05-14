@@ -159,6 +159,18 @@ export default function LibraryList() {
         if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
         searchDebounceRef.current = setTimeout(() => updateSearchUrl(q), 300)
     }, [updateSearchUrl])
+    useEffect(() => {
+        function onKeyDown(e: KeyboardEvent) {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+                e.preventDefault()
+                const el = document.querySelector<HTMLInputElement>('[data-testid="library-search"]')
+                el?.focus()
+                el?.select()
+            }
+        }
+        window.addEventListener('keydown', onKeyDown)
+        return () => window.removeEventListener('keydown', onKeyDown)
+    }, [])
     const { play, playNow, pause, resume, current, isPlaying, playContext, onLibraryRemove } = usePlayer()
     const sectionRefs = useRef<Record<string, HTMLElement | null>>({})
     const stickyHeaderRef = useRef<HTMLDivElement | null>(null)
