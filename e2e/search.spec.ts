@@ -78,16 +78,6 @@ test.describe('library search', () => {
         await expect(lib.searchEmpty).toContainText('no songs match')
     })
 
-    test('search persists in URL as ?q= param', async ({ page }) => {
-        const lib = new LibraryPage(page)
-        await lib.goto()
-        await lib.waitForSongs()
-
-        await lib.searchInput.fill('test query')
-        await page.waitForTimeout(400)
-        await expect(page).toHaveURL(/q=test\+query|q=test%20query/)
-    })
-
     test('Play All with search filter only queues matched songs', async ({ page }) => {
         const api = await apiLogin()
         const res = await api.get(`${API_V1}/songs/library`)

@@ -1,5 +1,5 @@
 'use client'
-import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
+import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import Image from "next/image"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
@@ -147,19 +147,7 @@ export default function LibraryList() {
     const router = useRouter()
     const searchParams = useSearchParams()
     const viewMode = (searchParams.get('view') as ViewMode | null) ?? 'songs'
-    const [searchQuery, setSearchQuery] = useState(searchParams.get('q') ?? '')
-    const searchDebounceRef = useRef<ReturnType<typeof setTimeout>>(null)
-    const updateSearchUrl = useCallback((q: string) => {
-        const params = new URLSearchParams(searchParams.toString())
-        if (q) params.set('q', q); else params.delete('q')
-        const qs = params.toString()
-        window.history.replaceState(null, '', qs ? `?${qs}` : window.location.pathname)
-    }, [searchParams])
-    const onSearchChange = useCallback((q: string) => {
-        setSearchQuery(q)
-        if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
-        searchDebounceRef.current = setTimeout(() => updateSearchUrl(q), 300)
-    }, [updateSearchUrl])
+    const [searchQuery, setSearchQuery] = useState('')
     useEffect(() => {
         function onKeyDown(e: KeyboardEvent) {
             if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
@@ -499,7 +487,7 @@ export default function LibraryList() {
             ? `[data-song-id="${songId}"]`
             : albumId ? `[data-album-id="${albumId}"]` : null
         if (!target) return
-        if (searchQuery) onSearchChange('')
+        if (searchQuery) setSearchQuery('')
 
         const POLL_INTERVAL_MS = 150
         const MAX_POLL_ATTEMPTS = 80  // 80 × 150ms = 12s window for late renders
@@ -919,7 +907,7 @@ export default function LibraryList() {
                     <FaCloudDownloadAlt size={12} />
                     {savingAll ? `saving ${saveAllProgress.done}/${saveAllProgress.total}…` : !online ? 'offline' : 'save all offline'}
                 </button>
-                <SearchInput value={searchQuery} onChange={onSearchChange} placeholder="search library…" testId="library-search" className="w-40 md:w-52" />
+                <SearchInput value={searchQuery} onChange={setSearchQuery} placeholder="search library…" testId="library-search" className="w-40 md:w-52" />
                 {eligibleCount > 0 && (
                     <button
                         onClick={openPublishModal}
