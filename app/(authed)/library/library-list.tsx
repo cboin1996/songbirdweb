@@ -499,6 +499,7 @@ export default function LibraryList() {
             ? `[data-song-id="${songId}"]`
             : albumId ? `[data-album-id="${albumId}"]` : null
         if (!target) return
+        if (searchQuery) onSearchChange('')
 
         const POLL_INTERVAL_MS = 150
         const MAX_POLL_ATTEMPTS = 80  // 80 × 150ms = 12s window for late renders
