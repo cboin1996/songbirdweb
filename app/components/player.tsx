@@ -1066,8 +1066,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                     {showQueue && queue.length > 0 && (
                         <div
                             data-testid="player-queue-panel"
-                            className="fixed z-[60] left-0 right-0 bottom-[88px] bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-800 flex flex-col max-h-[45vh] shadow-2xl
-                                       md:left-auto md:right-4 md:bottom-24 md:w-[360px] md:max-h-[min(520px,70vh)] md:rounded-2xl md:border md:border-gray-200 md:dark:border-gray-700"
+                            style={{ bottom: 'var(--player-bar-h, 88px)' }}
+                            className="fixed z-[60] left-0 right-0 bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-800 flex flex-col max-h-[45vh] shadow-2xl
+                                       md:left-auto md:right-4 md:w-[360px] md:max-h-[min(520px,70vh)] md:rounded-2xl md:border md:border-gray-200 md:dark:border-gray-700"
                         >
                             {/* header */}
                             <div className="flex flex-col border-b border-gray-100 dark:border-gray-800 shrink-0">
