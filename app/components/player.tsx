@@ -6,6 +6,8 @@ import Image from "next/image"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { FaPause, FaPlay, FaStepBackward, FaStepForward, FaRandom, FaRedo, FaList, FaTimes, FaVolumeUp, FaVolumeMute, FaBars, FaMusic } from "react-icons/fa"
+import { filterSongs } from "../lib/use-filtered-songs"
+import SearchInput from "./search-input"
 import Spinner from "./spinner"
 import { DOWNLOAD_URL, LibrarySong, PlayableSong, PlayerState, artworkUrl, songArtworkUrl, fetchLibrarySongs, fetchPlayerState, fetchSongById, recordPlay, savePlayerState, updatePosition, queueInsert, queueRemove, queueReorder as apiQueueReorder } from "../lib/data"
 import { getSongFile, cacheArtworkUrls } from "../lib/offline"
@@ -194,6 +196,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     const [playContext, setPlayContext] = useState<PlayContext | null>(null)
     const [showQueue, setShowQueue] = useState(false)
+    const [queueSearch, setQueueSearch] = useState('')
     const [volume, setVolume] = useState(() => {
         if (typeof window === 'undefined') return 1
         const saved = localStorage.getItem('playerVolume')
@@ -968,12 +971,18 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     }, [volume])
 
     const QUEUE_ROW_H = 52
-    const queueDisplayItems = useMemo(
+    const queueDisplayItemsAll = useMemo(
         () => shuffle && shuffleOrder.length === queue.length
             ? shuffleOrder.map(qi => ({ song: queue[qi], qi }))
             : queue.map((song, qi) => ({ song, qi })),
         [shuffle, shuffleOrder, queue]
     )
+    const queueDisplayItems = useMemo(() => {
+        if (!queueSearch.trim()) return queueDisplayItemsAll
+        const matched = filterSongs(queueDisplayItemsAll.map(i => i.song), queueSearch)
+        const matchedIds = new Set(matched.map(s => s.uuid))
+        return queueDisplayItemsAll.filter(i => matchedIds.has(i.song.uuid))
+    }, [queueDisplayItemsAll, queueSearch])
     const { start, end, totalHeight, offsetTop } = useVirtualList(queueContainerRef, queueDisplayItems.length, QUEUE_ROW_H, 3, showQueue)
 
     useEffect(() => {
@@ -1061,24 +1070,31 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                        md:left-auto md:right-4 md:bottom-24 md:w-[360px] md:max-h-[min(520px,70vh)] md:rounded-2xl md:border md:border-gray-200 md:dark:border-gray-700"
                         >
                             {/* header */}
-                            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-gray-800 shrink-0">
-                                <span className="font-semibold text-sm">Queue</span>
-                                <div className="flex items-center gap-3">
-                                    {(() => {
-                                        const pos = shuffle
-                                            ? shuffleOrder.findIndex(qi => queue[qi]?.uuid === current.uuid)
-                                            : queue.findIndex(s => s.uuid === current.uuid)
-                                        return <span className="text-xs text-gray-400">{pos + 1} / {queue.length}</span>
-                                    })()}
-                                    {playContext && (
-                                        <Link href={playContext.href} onClick={() => setShowQueue(false)} className="text-xs text-gray-400 hover:text-sky-500 transition-colors truncate max-w-[120px]">
-                                            {playContext.label}
-                                        </Link>
-                                    )}
-                                    <button onClick={() => setShowQueue(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-1">
-                                        <FaTimes size={14} />
-                                    </button>
+                            <div className="flex flex-col border-b border-gray-100 dark:border-gray-800 shrink-0">
+                                <div className="flex items-center justify-between px-4 py-3">
+                                    <span className="font-semibold text-sm">Queue</span>
+                                    <div className="flex items-center gap-3">
+                                        {(() => {
+                                            const pos = shuffle
+                                                ? shuffleOrder.findIndex(qi => queue[qi]?.uuid === current.uuid)
+                                                : queue.findIndex(s => s.uuid === current.uuid)
+                                            return <span className="text-xs text-gray-400">{pos + 1} / {queue.length}</span>
+                                        })()}
+                                        {playContext && (
+                                            <Link href={playContext.href} onClick={() => { setShowQueue(false); setQueueSearch('') }} className="text-xs text-gray-400 hover:text-sky-500 transition-colors truncate max-w-[120px]">
+                                                {playContext.label}
+                                            </Link>
+                                        )}
+                                        <button onClick={() => { setShowQueue(false); setQueueSearch('') }} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-1">
+                                            <FaTimes size={14} />
+                                        </button>
+                                    </div>
                                 </div>
+                                {queue.length > 5 && (
+                                    <div className="px-4 pb-3">
+                                        <SearchInput value={queueSearch} onChange={setQueueSearch} placeholder="search queue…" testId="queue-search" />
+                                    </div>
+                                )}
                             </div>
                             {/* virtual scroll rows */}
                             <div
@@ -1108,6 +1124,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                     setQueueDropTarget(null)
                                 }}
                             >
+                                {queueSearch && queueDisplayItems.length === 0 && (
+                                    <p data-testid="queue-search-empty" className="text-gray-400 text-xs py-6 text-center">no songs match &ldquo;{queueSearch}&rdquo;</p>
+                                )}
                                 <div style={{ height: totalHeight }}>
                                     <div style={{ paddingTop: offsetTop }}>
                                         {queueDisplayItems.slice(start, end).map(({ song, qi }, i) => {
@@ -1232,7 +1251,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                         </button>
                                     </div>
                                     {/* Queue toggle (both breakpoints) — bigger tap target on mobile */}
-                                    <button data-testid="player-queue-toggle" onClick={() => setShowQueue(v => !v)} className={`shrink-0 p-2 -m-1 touch-manipulation ${showQueue ? activeClass : idleClass}`}>
+                                    <button data-testid="player-queue-toggle" onClick={() => { setShowQueue(v => !v); if (showQueue) setQueueSearch('') }} className={`shrink-0 p-2 -m-1 touch-manipulation ${showQueue ? activeClass : idleClass}`}>
                                         <FaList size={16} className="md:w-3 md:h-3" />
                                     </button>
                                     {/* Volume controls: desktop only — mobile audio.volume is ignored by iOS/Android, system handles it */}

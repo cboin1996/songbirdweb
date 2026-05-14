@@ -1,5 +1,5 @@
 'use client'
-import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import Image from "next/image"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
@@ -18,6 +18,8 @@ import { useToast } from "../../components/toast"
 import PlaylistsView from "./playlists-view"
 import EditsBanner from "./edits-banner"
 import QueryError from "../../components/query-error"
+import SearchInput from "../../components/search-input"
+import { useFilteredSongs } from "../../lib/use-filtered-songs"
 
 type ViewMode = 'songs' | 'artists' | 'albums' | 'genres' | 'playlists'
 
@@ -145,6 +147,18 @@ export default function LibraryList() {
     const router = useRouter()
     const searchParams = useSearchParams()
     const viewMode = (searchParams.get('view') as ViewMode | null) ?? 'songs'
+    const [searchQuery, setSearchQuery] = useState(searchParams.get('q') ?? '')
+    const searchDebounceRef = useRef<ReturnType<typeof setTimeout>>(null)
+    const updateSearchUrl = useCallback((q: string) => {
+        const params = new URLSearchParams(searchParams.toString())
+        if (q) params.set('q', q); else params.delete('q')
+        router.replace(`?${params.toString()}`, { scroll: false })
+    }, [router, searchParams])
+    const onSearchChange = useCallback((q: string) => {
+        setSearchQuery(q)
+        if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
+        searchDebounceRef.current = setTimeout(() => updateSearchUrl(q), 300)
+    }, [updateSearchUrl])
     const { play, playNow, pause, resume, current, isPlaying, playContext, onLibraryRemove } = usePlayer()
     const sectionRefs = useRef<Record<string, HTMLElement | null>>({})
     const stickyHeaderRef = useRef<HTMLDivElement | null>(null)
@@ -186,13 +200,14 @@ export default function LibraryList() {
         () => new Set(songs.map(s => s.parent_song_id).filter(Boolean) as string[]),
         [songs]
     )
-    const displaySongs = useMemo(
+    const baseSongs = useMemo(
         () => {
             const base = online ? songs : songs.filter(s => cachedIds.has(s.uuid))
             return base.filter(s => !supersededIds.has(s.uuid))
         },
         [songs, cachedIds, online, supersededIds]
     )
+    const displaySongs = useFilteredSongs(baseSongs, searchQuery)
     const playlistStubs = useMemo(() => playlists.map(p => ({ id: p.id, name: p.name })), [playlists])
 
     useEffect(() => {
@@ -803,18 +818,18 @@ export default function LibraryList() {
         setBulkLoading(false)
     }
 
-    if (songsLoading && displaySongs.length === 0) return null
-    if (displaySongs.length === 0 && songsError) {
+    if (songsLoading && baseSongs.length === 0) return null
+    if (baseSongs.length === 0 && songsError) {
         return (
             <div className="py-4">
                 <QueryError error={songsError} retry={refetchSongs} context="your library" />
             </div>
         )
     }
-    if (displaySongs.length === 0 && !online) {
+    if (baseSongs.length === 0 && !online) {
         return <p className="text-gray-400 text-sm py-4">no songs saved offline — save songs while online to listen offline</p>
     }
-    if (displaySongs.length === 0) {
+    if (baseSongs.length === 0) {
         return <p className="text-gray-400 text-sm py-4">library is empty</p>
     }
 
@@ -877,7 +892,7 @@ export default function LibraryList() {
                     className="flex items-center gap-1.5 px-3 py-1 bg-sky-500 hover:bg-sky-400 text-white rounded-full text-sm font-medium transition-colors"
                 >
                     <FaPlay size={9} />
-                    play all
+                    play all{searchQuery ? ` (${displaySongs.length})` : ''}
                 </button>
                 <EditsBanner />
                 <button
@@ -890,6 +905,7 @@ export default function LibraryList() {
                     <FaCloudDownloadAlt size={12} />
                     {savingAll ? `saving ${saveAllProgress.done}/${saveAllProgress.total}…` : !online ? 'offline' : 'save all offline'}
                 </button>
+                <SearchInput value={searchQuery} onChange={onSearchChange} placeholder="search library…" testId="library-search" className="w-40 md:w-52" />
                 {eligibleCount > 0 && (
                     <button
                         onClick={openPublishModal}
@@ -918,6 +934,10 @@ export default function LibraryList() {
                 <div className="my-4">
                     <QueryError error={songsError} retry={refetchSongs} context="your library" />
                 </div>
+            )}
+
+            {searchQuery && displaySongs.length === 0 && viewMode !== 'playlists' && (
+                <p data-testid="library-search-empty" className="text-gray-400 text-sm py-8 text-center">no songs match &ldquo;{searchQuery}&rdquo;</p>
             )}
 
             {/* Playlists view */}
