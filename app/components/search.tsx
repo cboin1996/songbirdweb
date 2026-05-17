@@ -1,7 +1,7 @@
 'use client'
 import { usePathname, useSearchParams, useRouter } from "next/navigation"
 import { useMemo, useRef, useState } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, keepPreviousData } from "@tanstack/react-query"
 import { FaSearch, FaTimes } from 'react-icons/fa'
 import { routes } from '../lib/routes'
 import { fetchPropertiesFromIndex, fetchLibrary, DownloadedSong } from '../lib/data'
@@ -38,6 +38,7 @@ export default function Search() {
         queryKey: ['index-search', debouncedText],
         queryFn: () => fetchPropertiesFromIndex(debouncedText),
         enabled: mode === 'song' && debouncedText.trim().length >= 2,
+        placeholderData: keepPreviousData,
         retry: false,
     })
 
@@ -151,7 +152,6 @@ export default function Search() {
                             inLibrary={song.songId ? libraryIds.has(song.songId) : false}
                             isPrivate={!!song.owner_id}
                             showSource={true}
-                            compact={true}
                         />
                     ))}
                     {text.trim().length >= 2 && (
