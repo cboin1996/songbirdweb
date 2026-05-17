@@ -49,7 +49,7 @@ export default function Search() {
     const libraryIds = useMemo(() => new Set(libraryEntries.map(e => e.song_id)), [libraryEntries])
 
     const showResults = mode === 'song' && text.trim().length >= 2
-    const internalResults: DownloadedSong[] = showResults ? (indexResults ?? []) : []
+    const internalResults: DownloadedSong[] = showResults ? (indexResults ?? []).slice(0, 6) : []
 
     function handleSubmit(e: React.FormEvent) {
         e.preventDefault()
