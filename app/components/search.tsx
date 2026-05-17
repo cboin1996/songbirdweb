@@ -1,5 +1,5 @@
 'use client'
-import { useSearchParams, useRouter } from "next/navigation"
+import { useSearchParams, useRouter, usePathname } from "next/navigation"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query"
 import { FaSearch, FaTimes } from 'react-icons/fa'
@@ -23,8 +23,8 @@ const PLACEHOLDERS: Record<Mode, string> = {
 
 export default function Search() {
     const searchParams = useSearchParams()
+    const pathname = usePathname()
     const router = useRouter()
-    const { replace } = useRouter()
     const inputRef = useRef<HTMLInputElement>(null)
     const queryClient = useQueryClient()
 
@@ -59,6 +59,8 @@ export default function Search() {
     const showResults = mode === 'song' && text.trim().length >= 2
     const internalResults: DownloadedSong[] = showResults ? (indexResults ?? []).slice(0, 6) : []
 
+    const itunesVisible = pathname !== routes.download
+
     function handleSubmit(e: React.FormEvent) {
         e.preventDefault()
         const params = new URLSearchParams(searchParams)
@@ -78,9 +80,14 @@ export default function Search() {
         if (!v) {
             queryClient.setQueryData(['index-search', debouncedText], [])
         }
-        if (searchParams.get('query')) {
-            replace(routes.download)
+        const params = new URLSearchParams(searchParams)
+        if (v.trim()) {
+            params.set('query', v.trim())
+        } else {
+            params.delete('query')
         }
+        params.set('mode', mode)
+        router.replace(`${routes.download}?${params.toString()}`)
     }
 
     function handleModeChange(m: Mode) {
@@ -92,7 +99,7 @@ export default function Search() {
         params.delete('lookup')
         params.delete('limit')
         params.set('mode', m)
-        replace(`${modeRoute(m)}?${params.toString()}`)
+        router.replace(`${modeRoute(m)}?${params.toString()}`)
     }
 
     const handleSongClick = useCallback((song: DownloadedSong) => {
@@ -167,7 +174,7 @@ export default function Search() {
                             />
                         ))}
                     </div>
-                    {text.trim().length >= 2 && !searchParams.get('query') && (
+                    {text.trim().length >= 2 && !itunesVisible && (
                         <button
                             type="button"
                             onClick={() => { const el = inputRef.current; if (el) { el.form?.requestSubmit() } }}
