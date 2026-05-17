@@ -1,5 +1,5 @@
 'use client'
-import { usePathname, useSearchParams, useRouter } from "next/navigation"
+import { useSearchParams, useRouter } from "next/navigation"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query"
 import { FaSearch, FaTimes } from 'react-icons/fa'
@@ -25,7 +25,6 @@ export default function Search() {
     const searchParams = useSearchParams()
     const router = useRouter()
     const { replace } = useRouter()
-    const pathname = usePathname()
     const inputRef = useRef<HTMLInputElement>(null)
     const queryClient = useQueryClient()
 
@@ -78,11 +77,9 @@ export default function Search() {
         setText(v)
         if (!v) {
             queryClient.setQueryData(['index-search', debouncedText], [])
-            const params = new URLSearchParams(searchParams)
-            params.delete('query')
-            params.delete('lookup')
-            params.delete('limit')
-            replace(`${pathname}?${params.toString()}`)
+        }
+        if (searchParams.get('query')) {
+            replace(routes.download)
         }
     }
 
