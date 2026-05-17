@@ -1,6 +1,6 @@
 'use client'
 import { usePathname, useSearchParams, useRouter } from "next/navigation"
-import { useCallback, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query"
 import { FaSearch, FaTimes } from 'react-icons/fa'
 import { routes } from '../lib/routes'
@@ -28,6 +28,15 @@ export default function Search() {
     const pathname = usePathname()
     const inputRef = useRef<HTMLInputElement>(null)
     const queryClient = useQueryClient()
+
+    const [isDesktop, setIsDesktop] = useState(false)
+    useEffect(() => {
+        const mq = window.matchMedia('(min-width: 768px)')
+        setIsDesktop(mq.matches)
+        const handler = (e: MediaQueryListEvent) => setIsDesktop(e.matches)
+        mq.addEventListener('change', handler)
+        return () => mq.removeEventListener('change', handler)
+    }, [])
 
     const [text, setText] = useState(searchParams.get('query') ?? '')
     const [mode, setMode] = useState<Mode>((searchParams.get('mode') as Mode) ?? 'song')
@@ -97,8 +106,8 @@ export default function Search() {
     }, [playNow])
 
     return (
-        <div>
-            <form onSubmit={handleSubmit}>
+        <>
+            <form onSubmit={handleSubmit} className="sticky top-11 z-40 bg-[var(--background)]/90 backdrop-blur-md border-b border-gray-100 dark:border-gray-800 px-2">
                 <div className="flex flex-wrap gap-2 py-3 items-center">
                     {MODES.map(m => (
                         <button
@@ -145,9 +154,9 @@ export default function Search() {
                 </div>
             </form>
             {internalResults.length > 0 && (
-                <div data-testid="instant-results" className="pb-3">
-                    <p className="text-gray-400 text-sm pb-2">In Songbird's Library</p>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-2 md:gap-6">
+                <div data-testid="instant-results" className="px-2 pb-3">
+                    <p className="text-gray-400 text-sm pb-2">{"In Songbird's Library"}</p>
+                    <div className={isDesktop ? "grid grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-6" : "flex flex-col"}>
                         {internalResults.map(song => (
                             <Song
                                 key={song.songId}
@@ -157,6 +166,7 @@ export default function Search() {
                                 inLibrary={song.songId ? libraryIds.has(song.songId) : false}
                                 isPrivate={!!song.owner_id}
                                 showSource={true}
+                                compact={!isDesktop}
                             />
                         ))}
                     </div>
@@ -171,6 +181,6 @@ export default function Search() {
                     )}
                 </div>
             )}
-        </div>
+        </>
     )
 }
