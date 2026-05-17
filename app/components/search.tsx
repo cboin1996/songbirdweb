@@ -49,8 +49,7 @@ export default function Search() {
     const libraryIds = useMemo(() => new Set(libraryEntries.map(e => e.song_id)), [libraryEntries])
 
     const showResults = mode === 'song' && text.trim().length >= 2
-    const internalResults: DownloadedSong[] = showResults ? (indexResults ?? []).slice(0, 6) : []
-    const hasSubmitted = searchParams.get('query') === text.trim() && text.trim().length > 0
+    const internalResults: DownloadedSong[] = showResults ? (indexResults ?? []) : []
 
     function handleSubmit(e: React.FormEvent) {
         e.preventDefault()
@@ -145,9 +144,9 @@ export default function Search() {
                     </button>
                 </div>
             </form>
-            {internalResults.length > 0 && !hasSubmitted && (
+            {internalResults.length > 0 && (
                 <div data-testid="instant-results" className="pb-3">
-                    <p className="text-xs text-gray-400 px-1 pb-2">songbird</p>
+                    <p className="text-gray-400 text-sm pb-2">In Songbird's Library</p>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-2 md:gap-6">
                         {internalResults.map(song => (
                             <Song
@@ -161,13 +160,13 @@ export default function Search() {
                             />
                         ))}
                     </div>
-                    {text.trim().length >= 2 && (
+                    {text.trim().length >= 2 && !searchParams.get('query') && (
                         <button
                             type="button"
                             onClick={() => { const el = inputRef.current; if (el) { el.form?.requestSubmit() } }}
                             className="text-xs text-sky-500 hover:text-sky-400 px-1 pt-2 text-left"
                         >
-                            search iTunes for &ldquo;{text.trim()}&rdquo; →
+                            also search iTunes for &ldquo;{text.trim()}&rdquo; →
                         </button>
                     )}
                 </div>
