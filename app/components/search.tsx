@@ -147,7 +147,7 @@ export default function Search() {
             </form>
             {internalResults.length > 0 && !hasSubmitted && (
                 <div data-testid="instant-results" className="pb-3">
-                    <p className="text-xs text-gray-400 px-1 pb-2">in your library</p>
+                    <p className="text-xs text-gray-400 px-1 pb-2">songbird</p>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-2 md:gap-6">
                         {internalResults.map(song => (
                             <Song

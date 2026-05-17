@@ -167,8 +167,8 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
             {songs.length === 0
                 ? <p>no songs found.</p>
                 : <>
-                    {renderSection(downloaded, "downloaded")}
-                    {renderSection(fromItunes, "matches")}
+                    {renderSection(downloaded, "songbird")}
+                    {renderSection(fromItunes, "iTunes matches")}
                 </>
             }
 
