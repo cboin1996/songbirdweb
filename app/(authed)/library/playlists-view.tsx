@@ -207,14 +207,14 @@ export default function PlaylistsView({
                             const Icon = PLAYLIST_ICONS[k]
                             return (
                                 <button key={k} type="button" onClick={() => setRenameIcon(k)}
-                                    className={`p-1 rounded transition-colors ${renameIcon === k ? 'bg-sky-500 text-white' : 'text-gray-400 hover:text-sky-500'}`}>
+                                    className={`p-2 -m-0.5 rounded transition-colors touch-manipulation ${renameIcon === k ? 'bg-sky-500 text-white' : 'text-gray-400 hover:text-sky-500'}`}>
                                     <Icon size={11} />
                                 </button>
                             )
                         })}
                     </div>
                     <button type="submit" className="text-xs px-2 py-0.5 bg-sky-500 text-white rounded shrink-0">save</button>
-                    <button type="button" onClick={() => setRenaming(false)} className="text-gray-400 hover:text-gray-600 p-1">
+                    <button type="button" onClick={() => setRenaming(false)} className="text-gray-400 hover:text-gray-600 p-2 -m-1 touch-manipulation">
                         <FaTimes size={10} />
                     </button>
                 </form>
@@ -222,14 +222,14 @@ export default function PlaylistsView({
                 <>
                     <button
                         onClick={() => { setRenameValue(modalPlaylist.name); setRenameIcon(modalPlaylist.icon ?? 'music'); setRenaming(true) }}
-                        className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-1"
+                        className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-2 -m-1 touch-manipulation"
                         title="rename"
                     >
                         <FaPencilAlt size={11} />
                     </button>
                     <button
                         onClick={handleDelete}
-                        className="text-gray-400 hover:text-red-400 p-1"
+                        className="text-gray-400 hover:text-red-400 p-2 -m-1 touch-manipulation"
                         title="delete playlist"
                     >
                         <FaTrash size={11} />

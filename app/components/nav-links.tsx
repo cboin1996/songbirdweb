@@ -52,7 +52,7 @@ export default function NavLinks() {
                 {links.map(l => renderLink(l))}
             </div>
             <div className="sm:hidden">
-                <button onClick={() => setOpen(p => !p)} className="hover:text-sky-600">
+                <button onClick={() => setOpen(p => !p)} className="hover:text-sky-600 p-2 -m-1 touch-manipulation">
                     {open ? <FaTimes size={16} /> : <FaBars size={16} />}
                 </button>
                 {open && (

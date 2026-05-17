@@ -1086,7 +1086,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                                 {playContext.label}
                                             </Link>
                                         )}
-                                        <button onClick={() => { setShowQueue(false); setQueueSearch('') }} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-1">
+                                        <button onClick={() => { setShowQueue(false); setQueueSearch('') }} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-2 -m-1 touch-manipulation">
                                             <FaTimes size={14} />
                                         </button>
                                     </div>
@@ -1170,7 +1170,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                                             {song.source.label}
                                                         </Link>
                                                     )}
-                                                    <button data-testid="queue-remove" onClick={() => removeFromQueue(qi)} className="shrink-0 text-gray-300 dark:text-gray-600 hover:text-red-400 transition-colors p-1">
+                                                    <button data-testid="queue-remove" onClick={() => removeFromQueue(qi)} className="shrink-0 text-gray-300 dark:text-gray-600 hover:text-red-400 transition-colors p-2 -m-1 touch-manipulation">
                                                         <FaTimes size={10} />
                                                     </button>
                                                 </div>

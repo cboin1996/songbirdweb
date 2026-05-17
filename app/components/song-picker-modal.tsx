@@ -150,7 +150,7 @@ export default function SongPickerModal({
                                     : hasDisabled ? 'select eligible' : 'select all'}
                             </button>
                         )}
-                        <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-1">
+                        <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-2 -m-1 touch-manipulation">
                             <FaTimes size={14} />
                         </button>
                     </div>

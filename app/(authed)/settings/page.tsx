@@ -32,7 +32,7 @@ function PasswordField({ placeholder, value, onChange, inputRef }: {
             <button
                 type="button"
                 tabIndex={-1}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-2 -m-1 touch-manipulation"
                 onClick={() => setShow(p => !p)}
             >
                 {show ? <FaEyeSlash size={14} /> : <FaEye size={14} />}

@@ -38,7 +38,7 @@ export default function QueryError({ error, retry, context, message }: { error: 
                     </code>
                     <button
                         onClick={copyError}
-                        className="shrink-0 p-1 text-red-400 hover:text-red-600 dark:hover:text-red-300 transition-colors"
+                        className="shrink-0 p-2 -m-1 text-red-400 hover:text-red-600 dark:hover:text-red-300 transition-colors touch-manipulation"
                     >
                         {copied ? <FaCheck size={12} /> : <FaCopy size={12} />}
                     </button>

@@ -176,7 +176,7 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
                 <div className="fixed left-0 right-0 z-[55] bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 shadow-2xl" style={{ bottom: 'var(--player-bar-h, 0px)' }}>
                     {status === 'ready' ? (
                         <div className="flex items-center gap-3 px-4 py-3">
-                            <button type="button" onClick={dismiss} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 shrink-0 transition-colors">
+                            <button type="button" onClick={dismiss} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 shrink-0 transition-colors p-2 -m-1 touch-manipulation">
                                 <FaX size={11} />
                             </button>
                             <div className="min-w-0 flex-1">
@@ -198,7 +198,7 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
                         </div>
                     ) : (
                         <form onSubmit={handleSongDownload} className="flex items-center gap-3 px-4 py-3">
-                            <button type="button" onClick={dismiss} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 shrink-0 transition-colors">
+                            <button type="button" onClick={dismiss} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 shrink-0 transition-colors p-2 -m-1 touch-manipulation">
                                 <FaX size={11} />
                             </button>
                             <div className="min-w-0 hidden sm:block shrink-0 w-40">
