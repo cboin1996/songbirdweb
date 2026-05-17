@@ -1,8 +1,15 @@
 'use client'
 import { usePathname, useSearchParams, useRouter } from "next/navigation"
-import { useRef, useState } from "react"
+import { useMemo, useRef, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import { FaSearch, FaTimes } from 'react-icons/fa'
 import { routes } from '../lib/routes'
+import { fetchPropertiesFromIndex, fetchLibrary, DownloadedSong } from '../lib/data'
+import { useDebouncedValue } from '../lib/use-debounce'
+import { queryKeys } from '../lib/query-keys'
+import { usePlayer } from './player'
+import Song from './song'
+import { toPlayableSong } from '../lib/data'
 
 const MODES = ['song', 'album', 'url'] as const
 type Mode = typeof MODES[number]
@@ -24,6 +31,24 @@ export default function Search() {
 
     const [text, setText] = useState(searchParams.get('query') ?? '')
     const [mode, setMode] = useState<Mode>((searchParams.get('mode') as Mode) ?? 'song')
+    const debouncedText = useDebouncedValue(text, 300)
+    const { playNow, current } = usePlayer()
+
+    const { data: indexResults = [] } = useQuery({
+        queryKey: ['index-search', debouncedText],
+        queryFn: () => fetchPropertiesFromIndex(debouncedText),
+        enabled: mode === 'song' && debouncedText.trim().length >= 2,
+        retry: false,
+    })
+
+    const { data: libraryEntries = [] } = useQuery({
+        queryKey: queryKeys.library,
+        queryFn: fetchLibrary,
+    })
+    const libraryIds = useMemo(() => new Set(libraryEntries.map(e => e.song_id)), [libraryEntries])
+
+    const internalResults: DownloadedSong[] = (indexResults ?? []).slice(0, 6)
+    const hasSubmitted = searchParams.get('query') === text.trim() && text.trim().length > 0
 
     function handleSubmit(e: React.FormEvent) {
         e.preventDefault()
@@ -62,50 +87,84 @@ export default function Search() {
     }
 
     return (
-        <form onSubmit={handleSubmit}>
-            <div className="flex flex-wrap gap-2 py-3 items-center">
-                {MODES.map(m => (
+        <div>
+            <form onSubmit={handleSubmit}>
+                <div className="flex flex-wrap gap-2 py-3 items-center">
+                    {MODES.map(m => (
+                        <button
+                            key={m}
+                            type="button"
+                            onClick={() => handleModeChange(m)}
+                            className={`px-3 py-1 rounded-full text-sm transition-colors ${
+                                mode === m ? 'bg-sky-500 text-white' : 'text-gray-400 hover:text-sky-500'
+                            }`}
+                        >
+                            {m}
+                        </button>
+                    ))}
+                    <span className="text-gray-200 dark:text-gray-700 self-center px-1">·</span>
+                    <div className="relative flex items-center flex-1 min-w-48 max-w-sm">
+                        <FaSearch size={11} className="absolute left-3 text-gray-400 pointer-events-none" />
+                        <input
+                            ref={inputRef}
+                            data-testid="download-search"
+                            type={mode === 'url' ? 'url' : 'text'}
+                            value={text}
+                            onChange={e => handleChange(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Escape' && text) { handleChange(''); e.preventDefault() } }}
+                            placeholder={PLACEHOLDERS[mode]}
+                            className="w-full pl-8 pr-8 py-1.5 rounded-lg text-base md:text-sm bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200 placeholder-gray-400 outline-none focus:ring-2 focus:ring-sky-500 invalid:ring-2 invalid:ring-red-500"
+                        />
+                        {text && (
+                            <button
+                                type="button"
+                                onClick={() => { handleChange(''); inputRef.current?.focus() }}
+                                className="absolute right-0 p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors touch-manipulation"
+                            >
+                                <FaTimes size={11} />
+                            </button>
+                        )}
+                    </div>
                     <button
-                        key={m}
-                        type="button"
-                        onClick={() => handleModeChange(m)}
-                        className={`px-3 py-1 rounded-full text-sm transition-colors ${
-                            mode === m ? 'bg-sky-500 text-white' : 'text-gray-400 hover:text-sky-500'
-                        }`}
+                        type="submit"
+                        disabled={!text.trim()}
+                        className="px-3 py-1.5 rounded-lg text-sm bg-sky-500 text-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-sky-600 transition-colors shrink-0"
                     >
-                        {m}
+                        {mode === 'url' ? 'download' : 'search'}
                     </button>
-                ))}
-                <span className="text-gray-200 dark:text-gray-700 self-center px-1">·</span>
-                <div className="relative flex items-center flex-1 min-w-48 max-w-sm">
-                    <FaSearch size={11} className="absolute left-3 text-gray-400 pointer-events-none" />
-                    <input
-                        ref={inputRef}
-                        type={mode === 'url' ? 'url' : 'text'}
-                        value={text}
-                        onChange={e => handleChange(e.target.value)}
-                        onKeyDown={e => { if (e.key === 'Escape' && text) { handleChange(''); e.preventDefault() } }}
-                        placeholder={PLACEHOLDERS[mode]}
-                        className="w-full pl-8 pr-8 py-1.5 rounded-lg text-base md:text-sm bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200 placeholder-gray-400 outline-none focus:ring-2 focus:ring-sky-500 invalid:ring-2 invalid:ring-red-500"
-                    />
-                    {text && (
+                </div>
+            </form>
+            {mode === 'song' && internalResults.length > 0 && !hasSubmitted && (
+                <div data-testid="instant-results" className="pb-3 flex flex-col gap-1">
+                    <p className="text-xs text-gray-400 px-1">in your library</p>
+                    {internalResults.map(song => (
+                        <Song
+                            key={song.songId}
+                            song={song}
+                            selected={song.songId ? current?.uuid === song.songId : false}
+                            onClick={() => {
+                                if (song.songId) {
+                                    const ctx = { label: 'Downloads', href: routes.download, id: 'downloads' }
+                                    playNow(toPlayableSong(song, ctx))
+                                }
+                            }}
+                            inLibrary={song.songId ? libraryIds.has(song.songId) : false}
+                            isPrivate={!!song.owner_id}
+                            showSource={true}
+                            compact={true}
+                        />
+                    ))}
+                    {text.trim().length >= 2 && (
                         <button
                             type="button"
-                            onClick={() => { handleChange(''); inputRef.current?.focus() }}
-                            className="absolute right-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                            onClick={() => { const el = inputRef.current; if (el) { el.form?.requestSubmit() } }}
+                            className="text-xs text-sky-500 hover:text-sky-400 px-1 pt-1 text-left"
                         >
-                            <FaTimes size={11} />
+                            search iTunes for &ldquo;{text.trim()}&rdquo; →
                         </button>
                     )}
                 </div>
-                <button
-                    type="submit"
-                    disabled={!text.trim()}
-                    className="px-3 py-1.5 rounded-lg text-sm bg-sky-500 text-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-sky-600 transition-colors shrink-0"
-                >
-                    {mode === 'url' ? 'download' : 'search'}
-                </button>
-            </div>
-        </form>
+            )}
+        </div>
     )
 }
