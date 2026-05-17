@@ -1,15 +1,14 @@
 'use client'
 import { usePathname, useSearchParams, useRouter } from "next/navigation"
-import { useMemo, useRef, useState } from "react"
-import { useQuery, keepPreviousData } from "@tanstack/react-query"
+import { useCallback, useMemo, useRef, useState } from "react"
+import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query"
 import { FaSearch, FaTimes } from 'react-icons/fa'
 import { routes } from '../lib/routes'
-import { fetchPropertiesFromIndex, fetchLibrary, DownloadedSong } from '../lib/data'
+import { fetchPropertiesFromIndex, fetchLibrary, DownloadedSong, toPlayableSong } from '../lib/data'
 import { useDebouncedValue } from '../lib/use-debounce'
 import { queryKeys } from '../lib/query-keys'
 import { usePlayer } from './player'
 import Song from './song'
-import { toPlayableSong } from '../lib/data'
 
 const MODES = ['song', 'album', 'url'] as const
 type Mode = typeof MODES[number]
@@ -28,6 +27,7 @@ export default function Search() {
     const { replace } = useRouter()
     const pathname = usePathname()
     const inputRef = useRef<HTMLInputElement>(null)
+    const queryClient = useQueryClient()
 
     const [text, setText] = useState(searchParams.get('query') ?? '')
     const [mode, setMode] = useState<Mode>((searchParams.get('mode') as Mode) ?? 'song')
@@ -48,7 +48,8 @@ export default function Search() {
     })
     const libraryIds = useMemo(() => new Set(libraryEntries.map(e => e.song_id)), [libraryEntries])
 
-    const internalResults: DownloadedSong[] = (indexResults ?? []).slice(0, 6)
+    const showResults = mode === 'song' && text.trim().length >= 2
+    const internalResults: DownloadedSong[] = showResults ? (indexResults ?? []).slice(0, 6) : []
     const hasSubmitted = searchParams.get('query') === text.trim() && text.trim().length > 0
 
     function handleSubmit(e: React.FormEvent) {
@@ -68,6 +69,7 @@ export default function Search() {
     function handleChange(v: string) {
         setText(v)
         if (!v) {
+            queryClient.setQueryData(['index-search', debouncedText], [])
             const params = new URLSearchParams(searchParams)
             params.delete('query')
             params.delete('lookup')
@@ -79,6 +81,7 @@ export default function Search() {
     function handleModeChange(m: Mode) {
         setMode(m)
         setText('')
+        queryClient.setQueryData(['index-search', debouncedText], [])
         const params = new URLSearchParams(searchParams)
         params.delete('query')
         params.delete('lookup')
@@ -86,6 +89,13 @@ export default function Search() {
         params.set('mode', m)
         replace(`${modeRoute(m)}?${params.toString()}`)
     }
+
+    const handleSongClick = useCallback((song: DownloadedSong) => {
+        if (song.songId) {
+            const ctx = { label: 'Downloads', href: routes.download, id: 'downloads' }
+            playNow(toPlayableSong(song, ctx))
+        }
+    }, [playNow])
 
     return (
         <div>
@@ -135,30 +145,27 @@ export default function Search() {
                     </button>
                 </div>
             </form>
-            {mode === 'song' && internalResults.length > 0 && !hasSubmitted && (
-                <div data-testid="instant-results" className="pb-3 flex flex-col gap-1">
-                    <p className="text-xs text-gray-400 px-1">in your library</p>
-                    {internalResults.map(song => (
-                        <Song
-                            key={song.songId}
-                            song={song}
-                            selected={song.songId ? current?.uuid === song.songId : false}
-                            onClick={() => {
-                                if (song.songId) {
-                                    const ctx = { label: 'Downloads', href: routes.download, id: 'downloads' }
-                                    playNow(toPlayableSong(song, ctx))
-                                }
-                            }}
-                            inLibrary={song.songId ? libraryIds.has(song.songId) : false}
-                            isPrivate={!!song.owner_id}
-                            showSource={true}
-                        />
-                    ))}
+            {internalResults.length > 0 && !hasSubmitted && (
+                <div data-testid="instant-results" className="pb-3">
+                    <p className="text-xs text-gray-400 px-1 pb-2">in your library</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-2 md:gap-6">
+                        {internalResults.map(song => (
+                            <Song
+                                key={song.songId}
+                                song={song}
+                                selected={song.songId ? current?.uuid === song.songId : false}
+                                onClick={() => handleSongClick(song)}
+                                inLibrary={song.songId ? libraryIds.has(song.songId) : false}
+                                isPrivate={!!song.owner_id}
+                                showSource={true}
+                            />
+                        ))}
+                    </div>
                     {text.trim().length >= 2 && (
                         <button
                             type="button"
                             onClick={() => { const el = inputRef.current; if (el) { el.form?.requestSubmit() } }}
-                            className="text-xs text-sky-500 hover:text-sky-400 px-1 pt-1 text-left"
+                            className="text-xs text-sky-500 hover:text-sky-400 px-1 pt-2 text-left"
                         >
                             search iTunes for &ldquo;{text.trim()}&rdquo; →
                         </button>
