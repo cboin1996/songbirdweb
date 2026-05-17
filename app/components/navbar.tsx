@@ -15,10 +15,10 @@ export default function NavBar() {
                 <NavLinks />
             </div>
             <div className="flex flex-row gap-3 items-center">
-                <Link href={routes.info} className="hover:text-sky-600">
+                <Link href={routes.info} className="hover:text-sky-600 p-2 -m-1 touch-manipulation">
                     <FaInfoCircle size="16" />
                 </Link>
-                <Link href={routes.settings} className="hover:text-sky-600">
+                <Link href={routes.settings} className="hover:text-sky-600 p-2 -m-1 touch-manipulation">
                     <FaUser size="16" />
                 </Link>
                 <LogoutButton />

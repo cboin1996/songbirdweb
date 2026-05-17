@@ -342,7 +342,7 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
                     onClick={handleLibraryToggle}
                     aria-disabled={libraryPending}
                     title={inLibrary ? 'Remove from library' : 'Add to library'}
-                    className={`aria-disabled:opacity-40 cursor-pointer transition-colors ${inLibrary ? 'text-sky-500 hover:text-red-400' : 'text-gray-400 hover:text-sky-500'}`}
+                    className={`aria-disabled:opacity-40 cursor-pointer transition-colors p-2 -m-1 touch-manipulation ${inLibrary ? 'text-sky-500 hover:text-red-400' : 'text-gray-400 hover:text-sky-500'}`}
                 >
                     {inLibrary
                         ? <FaBookmark size={iconSz} />
@@ -351,7 +351,7 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
                 </button>
             )}
             {offlineCached && (
-                <button onClick={handleOfflineToggle} title="Remove offline copy" className="text-sky-400 hover:text-red-400 transition-colors cursor-pointer">
+                <button onClick={handleOfflineToggle} title="Remove offline copy" className="text-sky-400 hover:text-red-400 transition-colors cursor-pointer p-2 -m-1 touch-manipulation">
                     <FaCloudDownloadAlt size={iconSz} />
                 </button>
             )}

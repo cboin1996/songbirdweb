@@ -2346,7 +2346,7 @@ export default function EditorModal({
               )
             })()}
           </div>
-          <button onClick={handleClose} data-testid="editor-close" className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 shrink-0 p-1 ml-1 transition-colors">
+          <button onClick={handleClose} data-testid="editor-close" className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 shrink-0 p-2 -m-1 ml-1 transition-colors touch-manipulation">
             <FaTimes size={13} />
           </button>
         </div>
@@ -2468,7 +2468,7 @@ export default function EditorModal({
                   data-testid="orig-play"
                   onClick={e => { e.stopPropagation(); switchToWaveform('orig'); if (origPlaying) wsOrigRef.current?.pause(); else { pausePlayer(); wsRef.current?.pause(); stopPreview(); wsOrigRef.current?.play() } }}
                   disabled={!origReady}
-                  className={`shrink-0 ${origReady ? 'text-sky-500 hover:text-sky-400' : 'text-gray-300 dark:text-gray-700'}`}
+                  className={`shrink-0 p-2 -m-1 touch-manipulation ${origReady ? 'text-sky-500 hover:text-sky-400' : 'text-gray-300 dark:text-gray-700'}`}
                 >
                   {origPlaying ? <FaPause size={12} /> : <FaPlay size={12} />}
                 </button>
@@ -2554,7 +2554,7 @@ export default function EditorModal({
 
               {/* transport row inside edit waveform card */}
               <div className="flex items-center gap-3 px-2 pb-2 border-t border-gray-100 dark:border-gray-800 pt-1.5" onClick={e => e.stopPropagation()}>
-                <button data-testid="editor-preview-btn" onClick={() => { switchToWaveform('edit'); handlePreview() }} disabled={!wsReady} title={previewing ? 'stop preview' : 'preview with edits'} className={`shrink-0 ${wsReady ? 'text-sky-500 hover:text-sky-400' : 'text-gray-300 dark:text-gray-700'}`}>
+                <button data-testid="editor-preview-btn" onClick={() => { switchToWaveform('edit'); handlePreview() }} disabled={!wsReady} title={previewing ? 'stop preview' : 'preview with edits'} className={`shrink-0 p-2 -m-1 touch-manipulation ${wsReady ? 'text-sky-500 hover:text-sky-400' : 'text-gray-300 dark:text-gray-700'}`}>
                   {previewing ? <FaPause size={12} /> : <FaPlay size={12} />}
                 </button>
 

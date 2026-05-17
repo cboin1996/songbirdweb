@@ -32,7 +32,7 @@ function PasswordField({ placeholder, value, onChange, inputRef }: {
             <button
                 type="button"
                 tabIndex={-1}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-2 -m-1 touch-manipulation"
                 onClick={() => setShow(p => !p)}
             >
                 {show ? <FaEyeSlash size={14} /> : <FaEye size={14} />}
@@ -194,7 +194,7 @@ function CacheAudit() {
 }
 
 function AudioFormatSetting() {
-    const { settings, saveSettings } = useSettings()
+    const { settings, settingsLoaded, saveSettings } = useSettings()
     const [saving, setSaving] = useState(false)
 
     async function handleChange(format: AudioFormat) {
@@ -216,12 +216,14 @@ function AudioFormatSetting() {
                 {options.map(fmt => (
                     <button
                         key={fmt}
-                        disabled={saving}
+                        disabled={saving || !settingsLoaded}
                         onClick={() => handleChange(fmt)}
                         className={`flex-1 px-3 py-1.5 text-sm rounded-lg border transition-colors ${
-                            settings.audio_format === fmt
-                                ? 'bg-sky-500 text-white border-sky-500'
-                                : 'border-gray-200 dark:border-gray-700 hover:border-sky-500 hover:text-sky-500'
+                            !settingsLoaded
+                                ? 'border-gray-200 dark:border-gray-700 text-gray-400'
+                                : settings.audio_format === fmt
+                                    ? 'bg-sky-500 text-white border-sky-500'
+                                    : 'border-gray-200 dark:border-gray-700 hover:border-sky-500 hover:text-sky-500'
                         }`}
                     >
                         {fmt.toUpperCase()}

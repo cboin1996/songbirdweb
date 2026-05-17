@@ -47,8 +47,6 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
         }
     }, [activeIndex, status])
 
-    const downloaded = songs.filter(s => s.songId !== undefined)
-    const fromItunes = songs.filter(s => s.songId === undefined)
     const activeSong = activeIndex !== noActiveIndex ? songs[activeIndex] : undefined
     const isDownloading = status === 'downloading' || status === 'tagging' || status === 'saving'
 
@@ -135,13 +133,10 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
                                 selected={song.songId ? current?.uuid === song.songId : activeIndex === globalIndex}
                                 onClick={() => {
                                     if (song.songId) {
-                                        // Source href captures the current URL so navigating back restores the user's
-                                        // search results / page state (e.g. /download/song?query=foo).
                                         const here = typeof window !== 'undefined'
                                             ? window.location.pathname + window.location.search
                                             : routes.download
                                         const ctx = { label: 'Downloads', href: here, id: 'downloads' }
-                                        const q = downloaded.filter(s => s.songId).map(s => toPlayableSong(s, ctx))
                                         playNow(toPlayableSong(song, ctx))
                                     } else {
                                         setActiveIndex(globalIndex)
@@ -166,17 +161,14 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
         <div className={activeSong ? 'pb-24' : ''}>
             {songs.length === 0
                 ? <p>no songs found.</p>
-                : <>
-                    {renderSection(downloaded, "downloaded")}
-                    {renderSection(fromItunes, "matches")}
-                </>
+                : renderSection(songs, "iTunes Matches")
             }
 
             {activeSong && (
                 <div className="fixed left-0 right-0 z-[55] bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 shadow-2xl" style={{ bottom: 'var(--player-bar-h, 0px)' }}>
                     {status === 'ready' ? (
                         <div className="flex items-center gap-3 px-4 py-3">
-                            <button type="button" onClick={dismiss} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 shrink-0 transition-colors">
+                            <button type="button" onClick={dismiss} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 shrink-0 transition-colors p-2 -m-1 touch-manipulation">
                                 <FaX size={11} />
                             </button>
                             <div className="min-w-0 flex-1">
@@ -198,7 +190,7 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
                         </div>
                     ) : (
                         <form onSubmit={handleSongDownload} className="flex items-center gap-3 px-4 py-3">
-                            <button type="button" onClick={dismiss} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 shrink-0 transition-colors">
+                            <button type="button" onClick={dismiss} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 shrink-0 transition-colors p-2 -m-1 touch-manipulation">
                                 <FaX size={11} />
                             </button>
                             <div className="min-w-0 hidden sm:block shrink-0 w-40">

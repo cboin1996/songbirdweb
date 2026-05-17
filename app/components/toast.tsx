@@ -61,7 +61,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                 <div onClick={dismiss} data-testid={toast.error ? 'toast-error' : 'toast'} className={`fixed bottom-48 left-1/2 -translate-x-1/2 z-[80] px-4 py-2 rounded-full text-xs font-medium shadow-lg cursor-pointer max-w-[90vw] flex items-center gap-2 ${toast.error ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' : 'bg-gray-100 text-gray-900 dark:bg-gray-900 dark:text-white'}`}>
                     <span className="truncate">{toast.msg}</span>
                     {toast.error && (
-                        <button onClick={handleCopy} className="shrink-0 p-0.5 hover:opacity-70 transition-opacity" title="copy error">
+                        <button onClick={handleCopy} className="shrink-0 p-2 -m-1 hover:opacity-70 transition-opacity touch-manipulation" title="copy error">
                             {copied ? <FaCheck size={10} /> : <FaCopy size={10} />}
                         </button>
                     )}
