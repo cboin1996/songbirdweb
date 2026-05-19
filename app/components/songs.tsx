@@ -67,6 +67,7 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
                 [...(prev ?? []), { song_id: readySong.songId!, added_at: new Date().toISOString(), last_position: 0, last_played_at: null }]
             )
             queryClient.invalidateQueries({ queryKey: ['index-search'] })
+            queryClient.invalidateQueries({ queryKey: queryKeys.librarySongs })
             onLibraryAdd({ uuid: readySong.songId!, properties: readySong.properties })
             dismiss()
         } catch {

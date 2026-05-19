@@ -168,6 +168,8 @@ test.describe('error states — mutations', () => {
         await page.route('**/v1/import*', route => {
             if (route.request().method() === 'POST')
                 return route.fulfill({ status: 500, body: 'Internal Server Error' })
+            if (route.request().method() === 'GET')
+                return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ total: 0, jobs: [], status_counts: {} }) })
             return route.continue()
         })
         await page.goto(routes.import)

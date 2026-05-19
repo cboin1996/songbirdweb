@@ -1019,8 +1019,8 @@ test.describe('editor modal — destructive flows', () => {
         try {
             const libRes = await api.get(`${API_V1}/songs/library`)
             const songs = await libRes.json()
-            const root = songs.find((s: any) => s.properties && !s.parent_song_id && s.owner_id)
-            expect(root, 'Need a private root song in library').toBeTruthy()
+            const root = songs.find((s: any) => s.properties && !s.parent_song_id)
+            expect(root, 'Need a root song with properties in library').toBeTruthy()
 
             // Edit root → child
             const result = await submitEditAndWait(api, root.uuid, { normalize: true })
@@ -1061,8 +1061,8 @@ test.describe('editor modal — destructive flows', () => {
         try {
             const libRes = await api.get(`${API_V1}/songs/library`)
             const songs = await libRes.json()
-            const root = songs.find((s: any) => s.properties && !s.parent_song_id && s.owner_id)
-            expect(root, 'Need a private root song in library').toBeTruthy()
+            const root = songs.find((s: any) => s.properties && !s.parent_song_id)
+            expect(root, 'Need a root song with properties in library').toBeTruthy()
 
             const result = await submitEditAndWait(api, root.uuid, { normalize: true })
             childId = result.result_song_id

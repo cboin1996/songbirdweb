@@ -196,13 +196,12 @@ test.describe('player state sync', () => {
             test.skip(songs.length < 1, 'need at least 1 library song')
 
             // Set same state on both server and local
-            await api.put(`${API_V1}/player/state`, {
-                data: {
-                    shuffle: false, repeat: 'off',
-                    queue: [songs[0].uuid], queue_index: 0,
-                    manual_next: [], current_song_uuid: songs[0].uuid,
-                },
-            })
+            const matchingState = {
+                shuffle: false, repeat: 'off',
+                queue: [songs[0].uuid], queue_index: 0,
+                manual_next: [], current_song_uuid: songs[0].uuid,
+            }
+            await api.put(`${API_V1}/player/state`, { data: matchingState })
 
             await page.goto(routes.library)
             await page.evaluate((uuid) => {
@@ -214,6 +213,8 @@ test.describe('player state sync', () => {
                 }))
             }, songs[0].uuid)
 
+            // Re-PUT right before reload to guard against parallel tests overwriting server state
+            await api.put(`${API_V1}/player/state`, { data: matchingState })
             await page.reload()
             await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 10000 })
             // No sync prompt, no sync toast

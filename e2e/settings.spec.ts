@@ -34,19 +34,26 @@ test.describe('settings - change password', () => {
     test.describe.configure({ mode: 'serial' })
 
     test.beforeAll(async ({ request }) => {
-        await request.post(`${API_BASE}/auth/login`, {
+        const loginRes = await request.post(`${API_BASE}/auth/login`, {
             data: { username: process.env.TEST_USERNAME!, password: process.env.TEST_PASSWORD! },
         })
+        if (!loginRes.ok()) throw new Error(`Admin login failed: ${loginRes.status()}`)
+
         // Clean up any leftover from a previous run
         const usersRes = await request.get(`${API_BASE}/admin/users`)
+        if (!usersRes.ok()) throw new Error(`Failed to list users: ${usersRes.status()}`)
         const usersBody = await usersRes.json()
         const users = Array.isArray(usersBody) ? usersBody : usersBody.users
         const leftover = users.find((u: any) => u.username === TEST_USER)
-        if (leftover) await request.delete(`${API_BASE}/admin/users/${leftover.id}`)
+        if (leftover) {
+            const del = await request.delete(`${API_BASE}/admin/users/${leftover.id}`)
+            if (!del.ok()) throw new Error(`Failed to delete leftover user: ${del.status()}`)
+        }
 
         const res = await request.post(`${API_BASE}/auth/register`, {
             data: { username: TEST_USER, email: TEST_EMAIL, password: TEST_INITIAL_PW },
         })
+        if (!res.ok()) throw new Error(`Failed to register ${TEST_USER}: ${res.status()}`)
         const user = await res.json()
         testUserId = user.id
     })
