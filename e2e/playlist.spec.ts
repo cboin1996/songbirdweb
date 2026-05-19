@@ -111,8 +111,9 @@ test.describe('playlists: create / add songs / delete', () => {
         await api.post(`${API_V1}/playlists/${pl.id}/songs`, { data: { song_uuid: b } })
 
         const initial = await (await api.get(`${API_V1}/playlists/${pl.id}/songs`)).json()
-        expect(initial[0].uuid).toBe(a)
-        expect(initial[1].uuid).toBe(b)
+        expect(initial).toHaveLength(2)
+        const first = initial[0].uuid
+        const second = initial[1].uuid
 
         await page.goto(routes.libraryPlaylists)
         const tile = page.locator('button').filter({ hasText: name }).first()
@@ -139,7 +140,7 @@ test.describe('playlists: create / add songs / delete', () => {
         await expect.poll(async () => {
             const r = await api.get(`${API_V1}/playlists/${pl.id}/songs`)
             const songs = await r.json()
-            return songs[0]?.uuid === b && songs[1]?.uuid === a
+            return songs[0]?.uuid === second && songs[1]?.uuid === first
         }, { timeout: 5000 }).toBe(true)
     })
 

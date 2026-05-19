@@ -8,7 +8,7 @@ import {
   addToLibrary, removeFromLibrary, restoreSong, removeServerOfflineSong, uploadSongArtwork, API_V1,
   fetchSongEligibility, SongEligibility, isLosslessEligible,
 } from '../lib/data'
-import { uncacheSong } from '../lib/offline'
+import { uncacheSong, cacheSong } from '../lib/offline'
 import { FaPlay, FaPause, FaTimes, FaUndo, FaRedo, FaTrash, FaCut, FaChevronDown } from 'react-icons/fa'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
@@ -1986,6 +1986,7 @@ export default function EditorModal({
         }
         if (overwrite) {
           await deleteEditDraft(activeSongIdRef.current)
+          uncacheSong(activeSongIdRef.current).then(() => cacheSong(activeSongIdRef.current))
         }
         const landId = (!overwrite && result.result_song_id) ? result.result_song_id : activeSongIdRef.current
         if (!overwrite && result.result_song_id) {

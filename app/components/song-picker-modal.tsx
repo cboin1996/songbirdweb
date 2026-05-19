@@ -51,6 +51,7 @@ export default function SongPickerModal({
     const containerRef = useRef<HTMLDivElement>(null)
     const dragReorderRef = useRef<number | null>(null)
     const [dropTarget, setDropTarget] = useState<number | null>(null)
+    const [draggedIdx, setDraggedIdx] = useState<number | null>(null)
 
     const hasDisabled = !!disabledItems && Object.keys(disabledItems).length > 0
 
@@ -111,20 +112,28 @@ export default function SongPickerModal({
         }
         if (reorderable && dragReorderRef.current !== null) {
             const idxStr = (el?.closest('[data-reorder-idx]') as HTMLElement | null)?.dataset.reorderIdx
-            if (idxStr !== undefined) setDropTarget(parseInt(idxStr))
+            if (idxStr !== undefined) {
+                const idx = parseInt(idxStr)
+                const from = dragReorderRef.current
+                if (idx === from) { setDropTarget(null); return }
+                setDropTarget(idx > from ? idx + 1 : idx)
+            }
         }
     }
 
     function onContainerPointerUp() {
         endDrag()
-        if (dragReorderRef.current !== null && dropTarget !== null && dragReorderRef.current !== dropTarget) {
+        if (dragReorderRef.current !== null && dropTarget !== null && dragReorderRef.current !== dropTarget && dragReorderRef.current !== dropTarget - 1) {
             const next = [...order]
-            const [moved] = next.splice(dragReorderRef.current, 1)
-            next.splice(dropTarget, 0, moved)
+            const from = dragReorderRef.current
+            const [moved] = next.splice(from, 1)
+            const insertAt = dropTarget > from ? dropTarget - 1 : dropTarget
+            next.splice(insertAt, 0, moved)
             setOrder(next)
             onReorder?.(next)
         }
         dragReorderRef.current = null
+        setDraggedIdx(null)
         setDropTarget(null)
     }
 
@@ -188,6 +197,8 @@ export default function SongPickerModal({
                                                 : null
                                         const isSelected = selected.has(song.uuid)
                                         const isDropTarget = dropTarget === absIdx
+                                        const isBeingDragged = draggedIdx === absIdx
+                                        const isDropAfter = dropTarget === absIdx + 1 && absIdx === order.length - 1 && !isBeingDragged
                                         const missingFields = disabledItems?.[song.uuid]
                                         const isDisabled = missingFields !== undefined
 
@@ -197,17 +208,17 @@ export default function SongPickerModal({
                                                 data-picker-id={isDisabled ? undefined : song.uuid}
                                                 data-reorder-idx={absIdx}
                                                 style={{ height: ROW_H }}
-                                                className={`flex items-center gap-3 px-4 border-t-2 transition-colors ${
-                                                    isDropTarget ? 'border-sky-500' : 'border-transparent'
-                                                } ${isDisabled ? 'opacity-40' : isSelected ? 'bg-sky-50 dark:bg-sky-950/30' : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'}`}
+                                                className={`flex items-center gap-3 px-4 border-t-2 border-b-2 transition-colors select-none ${
+                                                    isDropTarget ? 'border-t-sky-500' : 'border-t-transparent'
+                                                } ${isDropAfter ? 'border-b-sky-500' : 'border-b-transparent'} ${isBeingDragged ? 'opacity-40' : ''} ${isDisabled ? 'opacity-40' : isSelected ? 'bg-sky-50 dark:bg-sky-950/30' : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'}`}
                                             >
                                                 {/* reorder handle */}
                                                 {reorderable && (
                                                     <span
-                                                        className="text-gray-300 dark:text-gray-600 cursor-grab active:cursor-grabbing shrink-0 touch-none"
-                                                        onPointerDown={(e) => { e.preventDefault(); dragReorderRef.current = absIdx }}
+                                                        className="text-gray-300 dark:text-gray-600 cursor-grab active:cursor-grabbing shrink-0 touch-none select-none p-3 -m-3"
+                                                        onPointerDown={(e) => { e.preventDefault(); dragReorderRef.current = absIdx; setDraggedIdx(absIdx) }}
                                                     >
-                                                        <FaBars size={11} />
+                                                        <FaBars size={14} />
                                                     </span>
                                                 )}
 

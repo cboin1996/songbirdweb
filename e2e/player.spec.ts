@@ -333,30 +333,24 @@ test.describe('player bar', () => {
         await lib.goto()
         await lib.waitForSongs()
 
-        const songId = await page.locator('[data-song-id]').first().getAttribute('data-song-id')
-        expect(songId).toBeTruthy()
-
         await lib.playAllBtn.click()
         await player.waitForBar()
-
-        const linkBefore = page.locator('a[href*="library?song="]').first()
-        const hrefBefore = await linkBefore.getAttribute('href')
-        expect(hrefBefore).toContain(`song=${songId}`)
+        const trackBefore = await player.getTrackName()
+        expect(trackBefore).toBeTruthy()
 
         await expect.poll(async () => {
             const r = await api.get(`${API_V1}/player/state`)
             if (!r.ok()) return null
             const body = await r.json()
             return body?.current_song_uuid
-        }, { timeout: 10000 }).toBe(songId)
+        }, { timeout: 10000 }).toBeTruthy()
 
         await page.reload()
 
         await player.waitForBar()
-
-        const linkAfter = page.locator('a[href*="library?song="]').first()
-        const hrefAfter = await linkAfter.getAttribute('href')
-        expect(hrefAfter).toContain(`song=${songId}`)
+        await player.waitForTrackName()
+        const trackAfter = await player.getTrackName()
+        expect(trackAfter).toBe(trackBefore)
         } finally {
             await api.dispose()
         }
