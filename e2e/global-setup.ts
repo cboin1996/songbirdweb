@@ -208,19 +208,22 @@ async function globalSetup() {
     await admin.dispose()
 
     // --- Seed each user's library and save their storageState ---
-    // Run sequentially — 4 users × 9 imports would overwhelm the import queue in parallel.
+    // First user does real imports; the rest are duplicate-adds which are fast.
+    // Seed the first user sequentially, then parallelize the rest.
     await seedUser(TEST_USER, TEST_PASS, 'test-user.json')
-    await seedUser(EDITOR_USER, EDITOR_PASS, 'editor-user.json')
-    await seedUser(BULK_USER, BULK_PASS, 'bulk-user.json')
-    await seedUser(IMPORT_USER, IMPORT_PASS, 'import-user.json')
-    await seedUser(QUEUE_USER, QUEUE_PASS, 'queue-user.json')
-    await seedUser(PLAYER_USER, PLAYER_PASS, 'player-user.json')
-    await seedUser(SYNC_USER, SYNC_PASS, 'sync-user.json')
-    await seedUser(DOWNLOAD_USER, DOWNLOAD_PASS, 'download-user.json')
-    await seedUser(SETTINGS_USER, SETTINGS_PASS, 'settings-user.json')
-    await seedUser(LIBRARY_USER, LIBRARY_PASS, 'library-user.json')
-    await seedUser(SEARCH_USER, SEARCH_PASS, 'search-user.json')
-    await seedUser(ERROR_USER, ERROR_PASS, 'error-user.json')
+    await Promise.all([
+        seedUser(EDITOR_USER, EDITOR_PASS, 'editor-user.json'),
+        seedUser(BULK_USER, BULK_PASS, 'bulk-user.json'),
+        seedUser(IMPORT_USER, IMPORT_PASS, 'import-user.json'),
+        seedUser(QUEUE_USER, QUEUE_PASS, 'queue-user.json'),
+        seedUser(PLAYER_USER, PLAYER_PASS, 'player-user.json'),
+        seedUser(SYNC_USER, SYNC_PASS, 'sync-user.json'),
+        seedUser(DOWNLOAD_USER, DOWNLOAD_PASS, 'download-user.json'),
+        seedUser(SETTINGS_USER, SETTINGS_PASS, 'settings-user.json'),
+        seedUser(LIBRARY_USER, LIBRARY_PASS, 'library-user.json'),
+        seedUser(SEARCH_USER, SEARCH_PASS, 'search-user.json'),
+        seedUser(ERROR_USER, ERROR_PASS, 'error-user.json'),
+    ])
 }
 
 export default globalSetup
