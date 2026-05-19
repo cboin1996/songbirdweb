@@ -1958,9 +1958,9 @@ export default function EditorModal({
     let job
     try {
       job = await createEditJob(songId, paramsToSend, overwrite, isAdmin && publishAsOriginal)
-    } catch (err: any) {
+    } catch (err: unknown) {
       setJobStatus('idle')
-      showToast(err?.status === 0 ? 'server unavailable' : 'save failed', true)
+      showToast((err as { status?: number })?.status === 0 ? 'server unavailable' : 'save failed', true)
       return
     }
     if (!job) { setJobStatus('idle'); showToast('failed to start save', true); return }

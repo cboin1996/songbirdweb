@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -e
+
+echo "pre-commit: checking lint..."
+make lint
+
+echo "pre-commit: checking types..."
+make typecheck
+
+BRANCH=$(git branch --show-current)
+if [ "$BRANCH" != "main" ]; then
+    echo "pre-commit: checking version bump..."
+    MAIN_VERSION=$(git show origin/main:package.json | node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')).version)")
+    PR_VERSION=$(node -e "process.stdout.write(require('./package.json').version)")
+    if [ "$MAIN_VERSION" = "$PR_VERSION" ]; then
+        echo "ERROR: package.json version not bumped (still $PR_VERSION)"
+        exit 1
+    fi
+    echo "OK: $MAIN_VERSION -> $PR_VERSION"
+fi

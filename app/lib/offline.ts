@@ -118,7 +118,7 @@ export async function getCachedSongIds(): Promise<Set<string>> {
     if (await opfsAvailable()) {
         try {
             const dir = await getAudioDir()
-            for await (const [name, handle] of (dir as any).entries()) {
+            for await (const [name, handle] of (dir as FileSystemDirectoryHandle & { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()) {
                 if (typeof name === 'string' && (name.endsWith('.mp3') || name.endsWith('.m4a'))) {
                     try {
                         const file = await (handle as FileSystemFileHandle).getFile()

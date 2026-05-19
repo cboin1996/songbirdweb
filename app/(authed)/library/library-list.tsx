@@ -232,7 +232,7 @@ export default function LibraryList() {
         function onDraftChanged(e: Event) {
             const deleted = (e as CustomEvent).detail?.deleted
             if (deleted) {
-                queryClient.setQueryData(queryKeys.drafts, (prev: any[]) =>
+                queryClient.setQueryData(queryKeys.drafts, (prev: { song_id: string }[]) =>
                     prev ? prev.filter(d => d.song_id !== deleted) : []
                 )
             } else {

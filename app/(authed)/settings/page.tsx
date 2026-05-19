@@ -261,8 +261,8 @@ export default function Page() {
             setCurrentPassword('')
             setNewPassword('')
             setConfirmPassword('')
-        } catch (err: any) {
-            const s = err?.status
+        } catch (err: unknown) {
+            const s = (err as { status?: number })?.status
             if (s === 0 || s === undefined || s >= 500) setError('server unavailable')
             else if (s === 401) setError('incorrect current password')
             else setError('password change failed')

@@ -68,7 +68,7 @@ test.describe('Service Worker Lifecycle', () => {
 
     // Verify current shell cache is kept (artwork-v1 only exists if artwork was loaded)
     const cacheNames = await page.evaluate(() => caches.keys())
-    const version = require('../package.json').version
+    const { version } = await import('../package.json')
     expect(cacheNames).toContain(`songbird-shell-v${version}`)
     // artwork cache only exists if an image was loaded before cache cleanup
     // don't assert it here since it depends on page content
