@@ -1,6 +1,6 @@
 import { routes } from './routes'
 import { test, expect, Page } from '@playwright/test'
-import { USERNAME, PASSWORD, login, ignoreError, apiLogin, API_V1 } from './helpers'
+import { PLAYER_USERNAME, PLAYER_PASSWORD, login, ignoreError, apiLoginAs, API_V1 } from './helpers'
 import { LibraryPage, PlayerBar } from './pages'
 
 
@@ -16,9 +16,10 @@ async function startPlayback(page: Page) {
 
 test.describe('player bar', () => {
     test.describe.configure({ mode: 'serial' })
+    test.use({ storageState: 'e2e/.auth/player-user.json' })
 
     test.beforeEach(async ({ page }) => {
-        await login(page)
+        await login(page, PLAYER_USERNAME, PLAYER_PASSWORD)
     })
 
     test('player bar appears after clicking a song', async ({ page }) => {
@@ -72,7 +73,7 @@ test.describe('player bar', () => {
 
     test('shuffle toggle off+on preserves shuffle order (no reshuffle)', async ({ page }) => {
         const player = new PlayerBar(page)
-        const api = await apiLogin()
+        const api = await apiLoginAs(PLAYER_USERNAME, PLAYER_PASSWORD)
         try {
             const libRes = await api.get(`${API_V1}/songs/library`)
             const songs = (await libRes.json()) as { uuid: string }[]
@@ -196,7 +197,7 @@ test.describe('player bar', () => {
 
     test.fixme('position persists across reload (>=4s into the same track)', async ({ page }) => {
         const player = new PlayerBar(page)
-        const api = await apiLogin()
+        const api = await apiLoginAs(PLAYER_USERNAME, PLAYER_PASSWORD)
         try {
             const libRes = await api.get(`${API_V1}/songs/library`)
             const songs = (await libRes.json()) as { uuid: string; properties?: { trackName?: string } }[]
@@ -328,7 +329,7 @@ test.describe('player bar', () => {
     test('queue_sources persists across reload (cross-session)', async ({ page }) => {
         const lib = new LibraryPage(page)
         const player = new PlayerBar(page)
-        const api = await apiLogin()
+        const api = await apiLoginAs(PLAYER_USERNAME, PLAYER_PASSWORD)
         try {
         await lib.goto()
         await lib.waitForSongs()
@@ -449,7 +450,7 @@ test.describe('player bar', () => {
     test('shuffle preserved when inserting next song', async ({ page }) => {
         const lib = new LibraryPage(page)
         const player = new PlayerBar(page)
-        const api = await apiLogin()
+        const api = await apiLoginAs(PLAYER_USERNAME, PLAYER_PASSWORD)
         try {
             const libRes = await api.get(`${API_V1}/songs/library`)
             const songs = (await libRes.json()) as { uuid: string }[]
@@ -487,7 +488,7 @@ test.describe('player bar', () => {
 
     test('shuffle preserved when removing from queue', async ({ page }) => {
         const player = new PlayerBar(page)
-        const api = await apiLogin()
+        const api = await apiLoginAs(PLAYER_USERNAME, PLAYER_PASSWORD)
         try {
             const libRes = await api.get(`${API_V1}/songs/library`)
             const songs = (await libRes.json()) as { uuid: string }[]
@@ -530,7 +531,7 @@ test.describe('player bar', () => {
     test('Queued pill appears on manually inserted song', async ({ page }) => {
         const lib = new LibraryPage(page)
         const player = new PlayerBar(page)
-        const api = await apiLogin()
+        const api = await apiLoginAs(PLAYER_USERNAME, PLAYER_PASSWORD)
         const libRes = await api.get(`${API_V1}/songs/library`)
         const songs = (await libRes.json()) as { uuid: string }[]
         test.skip(songs.length < 2, 'need at least 2 songs in library')

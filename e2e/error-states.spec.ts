@@ -1,11 +1,13 @@
 import { routes, editSongRoute, downloadSongQuery, downloadAlbumQuery } from './routes'
 import { test, expect } from '@playwright/test'
-import { login, apiLoginAs, API_V1, USERNAME, PASSWORD } from './helpers'
+import { login, apiLoginAs, API_V1, ERROR_USERNAME, ERROR_PASSWORD } from './helpers'
 import { EditorPage, CommonPage, LibraryPage, DownloadPage, PlayerBar } from './pages'
+
+test.use({ storageState: 'e2e/.auth/error-user.json' })
 
 test.describe('error states — page boundaries', () => {
     test.beforeEach(async ({ page }) => {
-        await login(page)
+        await login(page, ERROR_USERNAME, ERROR_PASSWORD)
     })
 
     test('import page shows QueryError when jobs API fails', async ({ page }) => {
@@ -129,7 +131,7 @@ test.describe('error states — page boundaries', () => {
 
 test.describe('error states — mutations', () => {
     test.beforeEach(async ({ page }) => {
-        await login(page)
+        await login(page, ERROR_USERNAME, ERROR_PASSWORD)
     })
 
     test('remove from library shows error on failure', async ({ page }) => {
@@ -187,7 +189,7 @@ test.describe('error states — mutations', () => {
 
 test.describe('error states — editor', () => {
     test.beforeEach(async ({ page }) => {
-        await login(page)
+        await login(page, ERROR_USERNAME, ERROR_PASSWORD)
     })
 
     test('save to library shows toast on failure', async ({ page }) => {
@@ -297,7 +299,7 @@ test.describe('error states — editor', () => {
 
 test.describe('error states — library', () => {
     test.beforeEach(async ({ page }) => {
-        await login(page)
+        await login(page, ERROR_USERNAME, ERROR_PASSWORD)
     })
 
     test('library shows QueryError when API fails', async ({ page }) => {
@@ -317,7 +319,7 @@ test.describe('error states — library', () => {
 
 test.describe('error states — explore', () => {
     test.beforeEach(async ({ page }) => {
-        await login(page)
+        await login(page, ERROR_USERNAME, ERROR_PASSWORD)
     })
 
     test('explore shows QueryError when API fails', async ({ page }) => {
@@ -332,7 +334,7 @@ test.describe('error states — explore', () => {
 
 test.describe('error states — info', () => {
     test.beforeEach(async ({ page }) => {
-        await login(page)
+        await login(page, ERROR_USERNAME, ERROR_PASSWORD)
     })
 
     test('info page shows QueryError when version API fails', async ({ page }) => {
@@ -347,7 +349,7 @@ test.describe('error states — info', () => {
 
 test.describe('error states — download', () => {
     test.beforeEach(async ({ page }) => {
-        await login(page)
+        await login(page, ERROR_USERNAME, ERROR_PASSWORD)
     })
 
     test('song search shows QueryError when API fails', async ({ page }) => {
@@ -382,7 +384,7 @@ test.describe('error states — download', () => {
 
 test.describe('error states — song card actions', () => {
     test.beforeEach(async ({ page }) => {
-        await login(page)
+        await login(page, ERROR_USERNAME, ERROR_PASSWORD)
     })
 
     test('share link shows toast on failure', async ({ page }) => {
@@ -478,7 +480,7 @@ test.describe('error states — song card actions', () => {
     test('add to playlist shows toast on failure', async ({ page }) => {
         const common = new CommonPage(page)
         const library = new LibraryPage(page)
-        const api = await apiLoginAs(USERNAME, PASSWORD)
+        const api = await apiLoginAs(ERROR_USERNAME, ERROR_PASSWORD)
         try {
             const created = await api.post(`${API_V1}/playlists`, { data: { name: 'e2e-err-pl', icon: 'music' } })
             const pl = await created.json()
@@ -507,7 +509,7 @@ test.describe('error states — song card actions', () => {
 
 test.describe('error states — bulk operations', () => {
     test.beforeEach(async ({ page }) => {
-        await login(page)
+        await login(page, ERROR_USERNAME, ERROR_PASSWORD)
     })
 
     test('bulk remove from library shows toast on failure', async ({ page }) => {
@@ -571,7 +573,7 @@ test.describe('error states — bulk operations', () => {
     test('bulk add to playlist shows toast on failure', async ({ page }) => {
         const common = new CommonPage(page)
         const library = new LibraryPage(page)
-        const api = await apiLoginAs(USERNAME, PASSWORD)
+        const api = await apiLoginAs(ERROR_USERNAME, ERROR_PASSWORD)
         try {
             const created = await api.post(`${API_V1}/playlists`, { data: { name: 'e2e-bulk-err', icon: 'music' } })
             const pl = await created.json()
@@ -602,7 +604,7 @@ test.describe('error states — bulk operations', () => {
 
 test.describe('error states — admin mutations', () => {
     test.beforeEach(async ({ page }) => {
-        await login(page)
+        await login(page, ERROR_USERNAME, ERROR_PASSWORD)
     })
 
     test('invite user shows error on failure', async ({ page }) => {
@@ -635,7 +637,7 @@ test.describe('error states — admin mutations', () => {
 
 test.describe('error states — player', () => {
     test.beforeEach(async ({ page }) => {
-        await login(page)
+        await login(page, ERROR_USERNAME, ERROR_PASSWORD)
     })
 
     test('audio playback failure shows toast', async ({ page }) => {

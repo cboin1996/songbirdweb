@@ -1,9 +1,9 @@
 import { routes } from './routes'
 import { test, expect } from '@playwright/test'
-import { login, apiLogin, API_V1 } from './helpers'
+import { login, apiLoginAs, API_V1, SYNC_USERNAME, SYNC_PASSWORD } from './helpers'
 
 async function apiReturnsUpdatedAt(): Promise<boolean> {
-    const api = await apiLogin()
+    const api = await apiLoginAs(SYNC_USERNAME, SYNC_PASSWORD)
     try {
         const r = await api.get(`${API_V1}/player/state`)
         if (!r.ok()) return false
@@ -16,13 +16,14 @@ async function apiReturnsUpdatedAt(): Promise<boolean> {
 
 test.describe('player state sync', () => {
     test.describe.configure({ mode: 'serial' })
+    test.use({ storageState: 'e2e/.auth/sync-user.json' })
 
     test.beforeEach(async ({ page }) => {
-        await login(page)
+        await login(page, SYNC_USERNAME, SYNC_PASSWORD)
     })
 
     test('tier 1: server newer auto-loads without prompt', async ({ page }) => {
-        const api = await apiLogin()
+        const api = await apiLoginAs(SYNC_USERNAME, SYNC_PASSWORD)
         try {
             const libRes = await api.get(`${API_V1}/songs/library`)
             const songs = (await libRes.json()) as { uuid: string }[]
@@ -60,7 +61,7 @@ test.describe('player state sync', () => {
 
     test('tier 2: local newer shows sync prompt', async ({ page }) => {
         test.skip(!await apiReturnsUpdatedAt(), 'API does not return updated_at')
-        const api = await apiLogin()
+        const api = await apiLoginAs(SYNC_USERNAME, SYNC_PASSWORD)
         try {
             const libRes = await api.get(`${API_V1}/songs/library`)
             const songs = (await libRes.json()) as { uuid: string }[]
@@ -98,7 +99,7 @@ test.describe('player state sync', () => {
 
     test('sync prompt: "Load from other device" applies server state', async ({ page }) => {
         test.skip(!await apiReturnsUpdatedAt(), 'API does not return updated_at')
-        const api = await apiLogin()
+        const api = await apiLoginAs(SYNC_USERNAME, SYNC_PASSWORD)
         try {
             const libRes = await api.get(`${API_V1}/songs/library`)
             const songs = (await libRes.json()) as { uuid: string; properties?: { trackName?: string } }[]
@@ -144,7 +145,7 @@ test.describe('player state sync', () => {
 
     test('sync prompt: "Keep mine" dismisses and persists local state', async ({ page }) => {
         test.skip(!await apiReturnsUpdatedAt(), 'API does not return updated_at')
-        const api = await apiLogin()
+        const api = await apiLoginAs(SYNC_USERNAME, SYNC_PASSWORD)
         try {
             const libRes = await api.get(`${API_V1}/songs/library`)
             const songs = (await libRes.json()) as { uuid: string }[]
@@ -189,7 +190,7 @@ test.describe('player state sync', () => {
     })
 
     test('no prompt when queues match', async ({ page }) => {
-        const api = await apiLogin()
+        const api = await apiLoginAs(SYNC_USERNAME, SYNC_PASSWORD)
         try {
             const libRes = await api.get(`${API_V1}/songs/library`)
             const songs = (await libRes.json()) as { uuid: string }[]
@@ -213,8 +214,6 @@ test.describe('player state sync', () => {
                 }))
             }, songs[0].uuid)
 
-            // Re-PUT right before reload to guard against parallel tests overwriting server state
-            await api.put(`${API_V1}/player/state`, { data: matchingState })
             await page.reload()
             await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 10000 })
             // No sync prompt, no sync toast

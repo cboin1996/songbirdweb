@@ -1,6 +1,6 @@
 import { routes } from './routes'
 import { test, expect } from '@playwright/test'
-import { login, apiLogin } from './helpers'
+import { login, apiLoginAs, SETTINGS_USERNAME, SETTINGS_PASSWORD } from './helpers'
 
 const API_BASE = `${process.env.E2E_API_BASE_URL ?? `http://${process.env.NEXT_PUBLIC_API_HOST ?? 'localhost'}:8000`}/v1`
 const TEST_USER = 'test_pw_user'
@@ -46,7 +46,9 @@ test.describe('settings - change password', () => {
         const users = Array.isArray(usersBody) ? usersBody : usersBody.users
         const leftover = users.find((u: any) => u.username === TEST_USER)
         if (leftover) {
-            const del = await request.delete(`${API_BASE}/admin/users/${leftover.id}`)
+            const del = await request.delete(`${API_BASE}/admin/users/${leftover.id}`, {
+                data: { password: process.env.TEST_PASSWORD! },
+            })
             if (!del.ok()) throw new Error(`Failed to delete leftover user: ${del.status()}`)
         }
 
@@ -63,7 +65,9 @@ test.describe('settings - change password', () => {
         await request.post(`${API_BASE}/auth/login`, {
             data: { username: process.env.TEST_USERNAME!, password: process.env.TEST_PASSWORD! },
         })
-        await request.delete(`${API_BASE}/admin/users/${testUserId}`)
+        await request.delete(`${API_BASE}/admin/users/${testUserId}`, {
+            data: { password: process.env.TEST_PASSWORD! },
+        })
     })
 
     test('wrong current password shows error', async ({ page }) => {
@@ -107,14 +111,16 @@ test.describe('settings - change password', () => {
 })
 
 test.describe('settings - audio format', () => {
+    test.use({ storageState: 'e2e/.auth/settings-user.json' })
+
     test.beforeEach(async () => {
-        const api = await apiLogin()
+        const api = await apiLoginAs(SETTINGS_USERNAME, SETTINGS_PASSWORD)
         await api.put('/v1/settings', { data: { audio_format: 'mp3' } })
         await api.dispose()
     })
 
     test('defaults to MP3', async ({ page }) => {
-        await login(page)
+        await login(page, SETTINGS_USERNAME, SETTINGS_PASSWORD)
         await page.goto(routes.settings)
         const mp3 = page.getByRole('button', { name: 'MP3' })
         await expect(mp3).toBeVisible()
@@ -122,7 +128,7 @@ test.describe('settings - audio format', () => {
     })
 
     test('switch to M4A persists across reload', async ({ page }) => {
-        await login(page)
+        await login(page, SETTINGS_USERNAME, SETTINGS_PASSWORD)
         await page.goto(routes.settings)
 
         const m4a = page.getByRole('button', { name: 'M4A' })
@@ -134,7 +140,7 @@ test.describe('settings - audio format', () => {
     })
 
     test('switch back to MP3', async ({ page }) => {
-        await login(page)
+        await login(page, SETTINGS_USERNAME, SETTINGS_PASSWORD)
         await page.goto(routes.settings)
 
         await page.getByRole('button', { name: 'M4A' }).click()
@@ -148,7 +154,7 @@ test.describe('settings - audio format', () => {
     })
 
     test('format preference included in download request body', async ({ page }) => {
-        await login(page)
+        await login(page, SETTINGS_USERNAME, SETTINGS_PASSWORD)
         await page.goto(routes.settings)
         await page.getByRole('button', { name: 'M4A' }).click()
         await expect(page.getByRole('button', { name: 'M4A' })).toHaveClass(/bg-sky-500/)

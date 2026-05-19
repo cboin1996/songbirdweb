@@ -32,6 +32,20 @@ const IMPORT_USER = process.env.E2E_IMPORT_USERNAME!
 const IMPORT_PASS = process.env.E2E_IMPORT_PASSWORD!
 const QUEUE_USER = process.env.E2E_QUEUE_USERNAME!
 const QUEUE_PASS = process.env.E2E_QUEUE_PASSWORD!
+const PLAYER_USER = process.env.E2E_PLAYER_USERNAME!
+const PLAYER_PASS = process.env.E2E_PLAYER_PASSWORD!
+const SYNC_USER = process.env.E2E_SYNC_USERNAME!
+const SYNC_PASS = process.env.E2E_SYNC_PASSWORD!
+const DOWNLOAD_USER = process.env.E2E_DOWNLOAD_USERNAME!
+const DOWNLOAD_PASS = process.env.E2E_DOWNLOAD_PASSWORD!
+const SETTINGS_USER = process.env.E2E_SETTINGS_USERNAME!
+const SETTINGS_PASS = process.env.E2E_SETTINGS_PASSWORD!
+const LIBRARY_USER = process.env.E2E_LIBRARY_USERNAME!
+const LIBRARY_PASS = process.env.E2E_LIBRARY_PASSWORD!
+const SEARCH_USER = process.env.E2E_SEARCH_USERNAME!
+const SEARCH_PASS = process.env.E2E_SEARCH_PASSWORD!
+const ERROR_USER = process.env.E2E_ERROR_USERNAME!
+const ERROR_PASS = process.env.E2E_ERROR_PASSWORD!
 
 // Songs to import into the test user's library. no-tags.mp3 is intentionally
 // excluded — it's used by import.spec.ts to test the failed-import path.
@@ -135,6 +149,13 @@ async function globalSetup() {
     if (!BULK_USER || !BULK_PASS) throw new Error('E2E_BULK_USERNAME and E2E_BULK_PASSWORD must be set')
     if (!IMPORT_USER || !IMPORT_PASS) throw new Error('E2E_IMPORT_USERNAME and E2E_IMPORT_PASSWORD must be set')
     if (!QUEUE_USER || !QUEUE_PASS) throw new Error('E2E_QUEUE_USERNAME and E2E_QUEUE_PASSWORD must be set')
+    if (!PLAYER_USER || !PLAYER_PASS) throw new Error('E2E_PLAYER_USERNAME and E2E_PLAYER_PASSWORD must be set')
+    if (!SYNC_USER || !SYNC_PASS) throw new Error('E2E_SYNC_USERNAME and E2E_SYNC_PASSWORD must be set')
+    if (!DOWNLOAD_USER || !DOWNLOAD_PASS) throw new Error('E2E_DOWNLOAD_USERNAME and E2E_DOWNLOAD_PASSWORD must be set')
+    if (!SETTINGS_USER || !SETTINGS_PASS) throw new Error('E2E_SETTINGS_USERNAME and E2E_SETTINGS_PASSWORD must be set')
+    if (!LIBRARY_USER || !LIBRARY_PASS) throw new Error('E2E_LIBRARY_USERNAME and E2E_LIBRARY_PASSWORD must be set')
+    if (!SEARCH_USER || !SEARCH_PASS) throw new Error('E2E_SEARCH_USERNAME and E2E_SEARCH_PASSWORD must be set')
+    if (!ERROR_USER || !ERROR_PASS) throw new Error('E2E_ERROR_USERNAME and E2E_ERROR_PASSWORD must be set')
 
     // --- Admin: create all test users if missing ---
     const admin = await request.newContext({ baseURL: API_BASE })
@@ -155,6 +176,13 @@ async function globalSetup() {
         { username: BULK_USER, password: BULK_PASS },
         { username: IMPORT_USER, password: IMPORT_PASS },
         { username: QUEUE_USER, password: QUEUE_PASS },
+        { username: PLAYER_USER, password: PLAYER_PASS },
+        { username: SYNC_USER, password: SYNC_PASS },
+        { username: DOWNLOAD_USER, password: DOWNLOAD_PASS },
+        { username: SETTINGS_USER, password: SETTINGS_PASS },
+        { username: LIBRARY_USER, password: LIBRARY_PASS },
+        { username: SEARCH_USER, password: SEARCH_PASS },
+        { username: ERROR_USER, password: ERROR_PASS },
     ]
 
     for (const u of allTestUsers) {
@@ -167,13 +195,15 @@ async function globalSetup() {
         }
     }
 
-    // Ensure main test user has admin role (needed for admin.spec.ts).
+    // Ensure test user and error user have admin role (needed for admin.spec.ts and error-states admin tests).
     const usersBody = (await (await admin.get(`${API_V1}/admin/users`)).json()) as any
     const usersAfter = Array.isArray(usersBody) ? usersBody : usersBody.users
-    const testUserRecord = usersAfter.find((u: any) => u.username === TEST_USER)
-    if (testUserRecord && testUserRecord.role !== 'admin') {
-        await admin.patch(`${API_V1}/admin/users/${testUserRecord.id}`, { data: { role: 'admin' } })
-        console.log(`[global-setup] promoted ${TEST_USER} to admin`)
+    for (const name of [TEST_USER, ERROR_USER]) {
+        const record = usersAfter.find((u: any) => u.username === name)
+        if (record && record.role !== 'admin') {
+            await admin.patch(`${API_V1}/admin/users/${record.id}`, { data: { role: 'admin' } })
+            console.log(`[global-setup] promoted ${name} to admin`)
+        }
     }
     await admin.dispose()
 
@@ -184,6 +214,13 @@ async function globalSetup() {
     await seedUser(BULK_USER, BULK_PASS, 'bulk-user.json')
     await seedUser(IMPORT_USER, IMPORT_PASS, 'import-user.json')
     await seedUser(QUEUE_USER, QUEUE_PASS, 'queue-user.json')
+    await seedUser(PLAYER_USER, PLAYER_PASS, 'player-user.json')
+    await seedUser(SYNC_USER, SYNC_PASS, 'sync-user.json')
+    await seedUser(DOWNLOAD_USER, DOWNLOAD_PASS, 'download-user.json')
+    await seedUser(SETTINGS_USER, SETTINGS_PASS, 'settings-user.json')
+    await seedUser(LIBRARY_USER, LIBRARY_PASS, 'library-user.json')
+    await seedUser(SEARCH_USER, SEARCH_PASS, 'search-user.json')
+    await seedUser(ERROR_USER, ERROR_PASS, 'error-user.json')
 }
 
 export default globalSetup

@@ -1,14 +1,15 @@
 import { routes, downloadSongQuery, downloadAlbumQuery, downloadUrlQuery } from './routes'
 import { test, expect, Page } from '@playwright/test'
-import { USERNAME, PASSWORD, login, ignoreError } from './helpers'
+import { DOWNLOAD_USERNAME, DOWNLOAD_PASSWORD, login, ignoreError, apiLoginAs, API_V1 } from './helpers'
 import { DownloadPage, PlayerBar } from './pages'
 
 
 test.describe('download page', () => {
     test.describe.configure({ mode: 'serial' })
+    test.use({ storageState: 'e2e/.auth/download-user.json' })
 
     test.beforeEach(async ({ page }) => {
-        await login(page)
+        await login(page, DOWNLOAD_USERNAME, DOWNLOAD_PASSWORD)
     })
 
     test('unauthenticated user is redirected to root', async ({ page }) => {
@@ -128,7 +129,7 @@ test.describe('download page', () => {
         test.slow()
 
         const dl = new DownloadPage(page)
-        const api = await import('./helpers').then(h => h.apiLogin())
+        const api = await apiLoginAs(DOWNLOAD_USERNAME, DOWNLOAD_PASSWORD)
         let songUuid: string | null = null
 
         try {
@@ -170,7 +171,7 @@ test.describe('download page', () => {
         test.slow()
 
         const dl = new DownloadPage(page)
-        const api = await import('./helpers').then(h => h.apiLogin())
+        const api = await apiLoginAs(DOWNLOAD_USERNAME, DOWNLOAD_PASSWORD)
         let songUuid: string | null = null
 
         try {
@@ -214,7 +215,7 @@ test.describe('download page', () => {
         test.skip(!!process.env.CI, 'requires yt-dlp + network — local only')
         test.slow()
 
-        const api = await import('./helpers').then(h => h.apiLogin())
+        const api = await apiLoginAs(DOWNLOAD_USERNAME, DOWNLOAD_PASSWORD)
         let songUuid: string | null = null
 
         try {
@@ -250,7 +251,7 @@ test.describe('download page', () => {
             test.slow()
 
             const dl = new DownloadPage(page)
-            const api = await import('./helpers').then(h => h.apiLogin())
+            const api = await apiLoginAs(DOWNLOAD_USERNAME, DOWNLOAD_PASSWORD)
             let songUuid: string | null = null
 
             try {

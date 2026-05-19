@@ -84,11 +84,19 @@ Tests read from `.env.local` at repo root:
 
 | Var                       | Purpose                                                        |
 |---------------------------|----------------------------------------------------------------|
-| `TEST_USERNAME` / `TEST_PASSWORD` | Shared read-only test user                            |
-| `E2E_ADMIN_USERNAME` / `_PASSWORD` | Admin spec                                           |
-| `E2E_EDITOR_USERNAME` / `_PASSWORD` | Per-suite isolation for editor mutations            |
-| `E2E_BULK_USERNAME` / `_PASSWORD`   | Per-suite isolation for bulk-select mutations       |
-| `E2E_IMPORT_USERNAME` / `_PASSWORD` | Per-suite isolation for import mutations            |
+| `TEST_USERNAME` / `TEST_PASSWORD` | Shared read-only test user (admin, info, nav, login, offline, share, smoke, playlist) |
+| `E2E_ADMIN_USERNAME` / `_PASSWORD` | Admin for global-setup user provisioning             |
+| `E2E_EDITOR_USERNAME` / `_PASSWORD` | editor.spec.ts                                     |
+| `E2E_BULK_USERNAME` / `_PASSWORD`   | bulk-select.spec.ts                                |
+| `E2E_IMPORT_USERNAME` / `_PASSWORD` | import.spec.ts                                     |
+| `E2E_QUEUE_USERNAME` / `_PASSWORD`  | queue.spec.ts, search.spec.ts (queue search block) |
+| `E2E_PLAYER_USERNAME` / `_PASSWORD` | player.spec.ts                                     |
+| `E2E_SYNC_USERNAME` / `_PASSWORD`   | player-sync.spec.ts                                |
+| `E2E_DOWNLOAD_USERNAME` / `_PASSWORD` | download.spec.ts                                 |
+| `E2E_SETTINGS_USERNAME` / `_PASSWORD` | settings.spec.ts (audio format block)            |
+| `E2E_LIBRARY_USERNAME` / `_PASSWORD` | library.spec.ts                                   |
+| `E2E_SEARCH_USERNAME` / `_PASSWORD`  | search.spec.ts (library search block)             |
+| `E2E_ERROR_USERNAME` / `_PASSWORD`   | error-states.spec.ts                              |
 | `NEXT_PUBLIC_API_BASE_URL`        | Empty in dev (browser uses relative URLs through Next proxy) |
 | `E2E_API_BASE_URL`                | Override when API is on a different host                |
 
@@ -122,22 +130,31 @@ UI for setup.
 
 ## State isolation
 
-**Read-only specs** share the main test user — library is seeded with 9 fixture songs
-in `global-setup.ts` and is NOT wiped between tests. Write specs that tolerate existing
-library data.
+**Most specs get their own isolated user** provisioned in `global-setup.ts`, each with
+a seeded library of 9 fixture songs and its own storageState file. This prevents
+cross-spec interference when tests run in parallel across 4 workers.
 
-**Destructive specs** (`editor.spec.ts`, `bulk-select.spec.ts`, `import.spec.ts`) get
-their own user provisioned in `global-setup.ts`, each with its own seeded library and
-storageState file. This is the per-suite isolation pass from `REFACTOR_PLAN.md` Phase
-3.
+**Read-only specs** (admin, info, navigation, login, offline, share, smoke, playlist)
+share the main test user since they don't mutate server state that other specs depend on.
+
+**Write specs** that mutate player state, settings, or library contents get dedicated
+users: player, sync, download, settings, library, search, error-states, editor,
+bulk-select, import, queue.
+
+To add a new isolated user:
+1. Add env vars to `.env.local`, `.github/workflows/test.yml`
+2. Add constants to `global-setup.ts` and `helpers.ts`
+3. Register + seed in `globalSetup()`
+4. Use `test.use({ storageState: 'e2e/.auth/<name>-user.json' })` in the spec
 
 User-scoped data created during a test (drafts, playlists, share tokens) should be
-prefixed with `pw-test-` and purged in `afterAll`:
+prefixed with `e2e-` and purged in `afterAll`:
 
 ```ts
 test.afterAll(async () => {
-    const api = await apiLogin()
-    await purgePlaylistsByPrefix(api, 'pw-test-')
+    const api = await apiLoginAs(MY_USERNAME, MY_PASSWORD)
+    await purgePlaylistsByPrefix(api, 'e2e-')
+    await api.dispose()
 })
 ```
 
@@ -149,5 +166,5 @@ test.afterAll(async () => {
 - Don't assert on toast / animation timing — race-prone
 - New helpers go in `helpers.ts`, not inline in specs
 
-In-progress refactor phases (testid pass, page object models, fixme triage) are tracked
-in [the E2E refactor epic](https://github.com/cboin1996/songbirdweb/issues/10).
+Per-spec user isolation eliminates the main source of flakiness (parallel specs stomping
+shared player state, settings, and library contents).

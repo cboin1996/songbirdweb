@@ -1,16 +1,17 @@
 import { test, expect } from '@playwright/test'
-import { login, apiLogin, API_V1, ignoreError, QUEUE_USERNAME, QUEUE_PASSWORD, apiLoginAs } from './helpers'
+import { login, apiLoginAs, API_V1, ignoreError, SEARCH_USERNAME, SEARCH_PASSWORD, QUEUE_USERNAME, QUEUE_PASSWORD } from './helpers'
 import { LibraryPage, PlayerBar } from './pages'
 
 test.describe('library search', () => {
     test.describe.configure({ mode: 'serial' })
+    test.use({ storageState: 'e2e/.auth/search-user.json' })
 
     test.beforeEach(async ({ page }) => {
-        await login(page)
+        await login(page, SEARCH_USERNAME, SEARCH_PASSWORD)
     })
 
     test('search by artist filters songs', async ({ page }) => {
-        const api = await apiLogin()
+        const api = await apiLoginAs(SEARCH_USERNAME, SEARCH_PASSWORD)
         const res = await api.get(`${API_V1}/songs/library`)
         const songs: any[] = res.ok() ? await res.json() : []
         await api.dispose()
@@ -32,7 +33,7 @@ test.describe('library search', () => {
     })
 
     test('search by track name filters songs', async ({ page }) => {
-        const api = await apiLogin()
+        const api = await apiLoginAs(SEARCH_USERNAME, SEARCH_PASSWORD)
         const res = await api.get(`${API_V1}/songs/library`)
         const songs: any[] = res.ok() ? await res.json() : []
         await api.dispose()
@@ -79,7 +80,7 @@ test.describe('library search', () => {
     })
 
     test('Play All with search filter only queues matched songs', async ({ page }) => {
-        const api = await apiLogin()
+        const api = await apiLoginAs(SEARCH_USERNAME, SEARCH_PASSWORD)
         const res = await api.get(`${API_V1}/songs/library`)
         const songs: any[] = res.ok() ? await res.json() : []
         await api.dispose()
@@ -115,6 +116,7 @@ test.describe('library search', () => {
 
 test.describe('queue search', () => {
     test.describe.configure({ mode: 'serial' })
+    test.use({ storageState: 'e2e/.auth/queue-user.json' })
 
     test.beforeEach(async ({ page }) => {
         await login(page, QUEUE_USERNAME, QUEUE_PASSWORD)
