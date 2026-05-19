@@ -42,10 +42,10 @@ export default function Search() {
     const debouncedText = useDebouncedValue(text, 300)
     const { playNow, current } = usePlayer()
 
-    const { data: indexResults = [] } = useQuery({
+    const { data: indexResults = [], isFetching: indexFetching } = useQuery({
         queryKey: ['index-search', debouncedText],
         queryFn: () => fetchPropertiesFromIndex(debouncedText),
-        enabled: mode === 'song' && debouncedText.trim().length >= 2,
+        enabled: mode === 'song' && debouncedText.trim().length >= 1,
         placeholderData: keepPreviousData,
         retry: false,
     })
@@ -56,7 +56,8 @@ export default function Search() {
     })
     const libraryIds = useMemo(() => new Set(libraryEntries.map(e => e.song_id)), [libraryEntries])
 
-    const showResults = mode === 'song' && text.trim().length >= 2
+    const showResults = mode === 'song' && text.trim().length >= 1
+    const debounceSettled = text.trim() === debouncedText.trim()
     const internalResults: DownloadedSong[] = showResults ? (indexResults ?? []).slice(0, 6) : []
 
     const itunesVisible = pathname !== routes.download
@@ -157,7 +158,7 @@ export default function Search() {
                     </button>
                 </div>
             </form>
-            {internalResults.length > 0 && (
+            {showResults && (internalResults.length > 0 ? (
                 <div data-testid="instant-results" className="px-2 pb-3">
                     <p className="text-gray-400 text-sm pb-2">{"In Songbird's Library"}</p>
                     <div className={isDesktop ? "grid grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-6" : "flex flex-col"}>
@@ -174,17 +175,28 @@ export default function Search() {
                             />
                         ))}
                     </div>
-                    {text.trim().length >= 2 && !itunesVisible && (
+                    {!itunesVisible && (
                         <button
                             type="button"
                             onClick={() => { const el = inputRef.current; if (el) { el.form?.requestSubmit() } }}
                             className="text-xs text-sky-500 hover:text-sky-400 px-1 pt-2 text-left"
                         >
-                            also search iTunes for &ldquo;{text.trim()}&rdquo; →
+                            {`also search iTunes for "${text.trim()}" →`}
                         </button>
                     )}
                 </div>
-            )}
+            ) : !itunesVisible && debounceSettled && !indexFetching ? (
+                <p className="text-gray-400 text-sm px-2 py-3">
+                    {"no matches in library · "}
+                    <button
+                        type="button"
+                        onClick={() => { const el = inputRef.current; if (el) { el.form?.requestSubmit() } }}
+                        className="text-sky-500 hover:text-sky-400"
+                    >
+                        {`search iTunes for "${text.trim()}" →`}
+                    </button>
+                </p>
+            ) : null)}
         </>
     )
 }
