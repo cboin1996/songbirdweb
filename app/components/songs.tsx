@@ -66,6 +66,8 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
             queryClient.setQueryData<LibraryEntry[]>(queryKeys.library, prev =>
                 [...(prev ?? []), { song_id: readySong.songId!, added_at: new Date().toISOString(), last_position: 0, last_played_at: null }]
             )
+            queryClient.invalidateQueries({ queryKey: ['index-search'] })
+            queryClient.invalidateQueries({ queryKey: queryKeys.librarySongs })
             onLibraryAdd({ uuid: readySong.songId!, properties: readySong.properties })
             dismiss()
         } catch {
@@ -100,6 +102,7 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
             if (result.cached) {
                 const existing = songs.find(s => s.songId === songId) ?? { ...song, songId }
                 setReadySong(existing)
+                queryClient.invalidateQueries({ queryKey: ['index-search'] })
                 setStatus('ready')
                 return
             }
@@ -109,6 +112,7 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
             const updated = { ...song, songId }
             setSongs(prev => prev.map((s, i) => i === activeIndex ? updated : s))
             setReadySong(updated)
+            queryClient.invalidateQueries({ queryKey: ['index-search'] })
             setStatus('ready')
         } catch {
             setStatus('error'); setErrorMsg('download failed')

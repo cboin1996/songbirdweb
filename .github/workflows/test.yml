@@ -9,20 +9,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Lint disabled until ESLint flat-config migration. `next lint` is deprecated
-  # and prompts interactively in CI when no eslint config exists.
-  # lint:
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - uses: actions/setup-node@v4
-  #       with:
-  #         node-version: 22
-  #         cache: 'npm'
-  #     - name: Install dependencies
-  #       run: make install
-  #     - name: Lint
-  #       run: make lint
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+      - name: Install dependencies
+        run: make install
+      - name: Lint
+        run: make lint
 
   test:
     runs-on: ubuntu-latest
@@ -102,6 +100,20 @@ jobs:
           E2E_IMPORT_PASSWORD: e2e-ImportPass-1
           E2E_QUEUE_USERNAME: e2e-queue
           E2E_QUEUE_PASSWORD: e2e-QueuePass-1
+          E2E_PLAYER_USERNAME: e2e-player
+          E2E_PLAYER_PASSWORD: e2e-PlayerPass-1
+          E2E_SYNC_USERNAME: e2e-sync
+          E2E_SYNC_PASSWORD: e2e-SyncPass-1
+          E2E_DOWNLOAD_USERNAME: e2e-download
+          E2E_DOWNLOAD_PASSWORD: e2e-DownloadPass-1
+          E2E_SETTINGS_USERNAME: e2e-settings
+          E2E_SETTINGS_PASSWORD: e2e-SettingsPass-1
+          E2E_LIBRARY_USERNAME: e2e-library
+          E2E_LIBRARY_PASSWORD: e2e-LibraryPass-1
+          E2E_SEARCH_USERNAME: e2e-search
+          E2E_SEARCH_PASSWORD: e2e-SearchPass-1
+          E2E_ERROR_USERNAME: e2e-error
+          E2E_ERROR_PASSWORD: e2e-ErrorPass-1
         run: make ${{ matrix.make_target }}
 
       - name: Upload Playwright report

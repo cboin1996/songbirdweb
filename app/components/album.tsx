@@ -3,7 +3,7 @@ import { AlbumProps, DownloadedSong, fetchSong } from "../lib/data";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FaDownload } from "react-icons/fa";
 
-export default function Album({ album, selected, onClick }: { album: AlbumProps, selected: boolean, onClick: any }) {
+export default function Album({ album, selected, onClick }: { album: AlbumProps, selected: boolean, onClick: () => void }) {
     return (
         <button onClick={onClick} disabled={selected} className="dark:disabled:bg-gray-800 dark:hover:bg-gray-900 disabled:bg-gray-300 hover:bg-gray-200 rounded-md p-2">
             <div className="flew-row flex rounded-lg">

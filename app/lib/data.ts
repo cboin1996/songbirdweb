@@ -58,7 +58,7 @@ export class FetchError extends Error {
   }
 }
 
-async function buildFetchOptions(method: string, body?: any): Promise<RequestInit> {
+async function buildFetchOptions(method: string, body?: unknown): Promise<RequestInit> {
   const isServer = typeof window === 'undefined';
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
 
@@ -78,7 +78,7 @@ async function buildFetchOptions(method: string, body?: any): Promise<RequestIni
 async function fetchData<T>(args: {
   url: string;
   method: string;
-  body?: any;
+  body?: unknown;
   rawBody?: BodyInit;
   responseType?: ResponseTypes;
   silentStatuses?: number[];

@@ -1,4 +1,10 @@
 APP_NAME=songbirdweb
+
+.PHONY: setup
+setup:
+	npm ci
+	git config core.hooksPath .githooks
+
 .PHONY: env
 env:
 # check ENV env var has been set

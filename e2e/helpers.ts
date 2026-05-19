@@ -11,6 +11,20 @@ export const IMPORT_USERNAME = process.env.E2E_IMPORT_USERNAME!
 export const IMPORT_PASSWORD = process.env.E2E_IMPORT_PASSWORD!
 export const QUEUE_USERNAME = process.env.E2E_QUEUE_USERNAME!
 export const QUEUE_PASSWORD = process.env.E2E_QUEUE_PASSWORD!
+export const PLAYER_USERNAME = process.env.E2E_PLAYER_USERNAME!
+export const PLAYER_PASSWORD = process.env.E2E_PLAYER_PASSWORD!
+export const SYNC_USERNAME = process.env.E2E_SYNC_USERNAME!
+export const SYNC_PASSWORD = process.env.E2E_SYNC_PASSWORD!
+export const DOWNLOAD_USERNAME = process.env.E2E_DOWNLOAD_USERNAME!
+export const DOWNLOAD_PASSWORD = process.env.E2E_DOWNLOAD_PASSWORD!
+export const SETTINGS_USERNAME = process.env.E2E_SETTINGS_USERNAME!
+export const SETTINGS_PASSWORD = process.env.E2E_SETTINGS_PASSWORD!
+export const LIBRARY_USERNAME = process.env.E2E_LIBRARY_USERNAME!
+export const LIBRARY_PASSWORD = process.env.E2E_LIBRARY_PASSWORD!
+export const SEARCH_USERNAME = process.env.E2E_SEARCH_USERNAME!
+export const SEARCH_PASSWORD = process.env.E2E_SEARCH_PASSWORD!
+export const ERROR_USERNAME = process.env.E2E_ERROR_USERNAME!
+export const ERROR_PASSWORD = process.env.E2E_ERROR_PASSWORD!
 // .env.local sets NEXT_PUBLIC_API_BASE_URL='' (empty) so the browser uses
 // relative URLs in dev. Tests call the API directly from outside the browser
 // and need an absolute URL — use `||` so empty string also falls through.

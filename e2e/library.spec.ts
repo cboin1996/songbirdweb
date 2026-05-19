@@ -1,14 +1,15 @@
 import { routes } from './routes'
 import { test, expect, Page } from '@playwright/test'
-import { USERNAME, PASSWORD, login, ignoreError, apiLogin, API_V1 } from './helpers'
+import { LIBRARY_USERNAME, LIBRARY_PASSWORD, login, ignoreError, apiLoginAs, API_V1 } from './helpers'
 import { LibraryPage, PlayerBar } from './pages'
 
 
 test.describe('library page', () => {
     test.describe.configure({ mode: 'serial' })
+    test.use({ storageState: 'e2e/.auth/library-user.json' })
 
     test.beforeEach(async ({ page }) => {
-        await login(page)
+        await login(page, LIBRARY_USERNAME, LIBRARY_PASSWORD)
     })
 
     test('page loads and shows song cards', async ({ page }) => {
@@ -163,7 +164,7 @@ test.describe('library page', () => {
     // === Tier 1 sort/group ordering ===
 
     test('songs view: "#" group sorts last when present', async ({ page }) => {
-        const api = await apiLogin()
+        const api = await apiLoginAs(LIBRARY_USERNAME, LIBRARY_PASSWORD)
         const res = await api.get(`${API_V1}/songs/library`)
         const songs = res.ok() ? await res.json() : []
         const hasHash = Array.isArray(songs) && songs.some((s: any) => {
@@ -185,7 +186,7 @@ test.describe('library page', () => {
     })
 
     test('artists view: "#" group sorts last when present', async ({ page }) => {
-        const api = await apiLogin()
+        const api = await apiLoginAs(LIBRARY_USERNAME, LIBRARY_PASSWORD)
         const res = await api.get(`${API_V1}/songs/library`)
         const songs = res.ok() ? await res.json() : []
         const hasHash = Array.isArray(songs) && songs.some((s: any) => {
@@ -206,7 +207,7 @@ test.describe('library page', () => {
     })
 
     test('albums view: "#" group sorts last when present', async ({ page }) => {
-        const api = await apiLogin()
+        const api = await apiLoginAs(LIBRARY_USERNAME, LIBRARY_PASSWORD)
         const res = await api.get(`${API_V1}/songs/library`)
         const songs = res.ok() ? await res.json() : []
         const hasHash = Array.isArray(songs) && songs.some((s: any) => {
@@ -226,7 +227,7 @@ test.describe('library page', () => {
     })
 
     test('genres view: "Unknown" header sorts last when present', async ({ page }) => {
-        const api = await apiLogin()
+        const api = await apiLoginAs(LIBRARY_USERNAME, LIBRARY_PASSWORD)
         const res = await api.get(`${API_V1}/songs/library`)
         const songs = res.ok() ? await res.json() : []
         const hasUnknown = Array.isArray(songs) && songs.some((s: any) => {
@@ -246,7 +247,7 @@ test.describe('library page', () => {
     })
 
     test('albums view: name+artist fallback grouping (>1 album when library is non-trivial)', async ({ page }) => {
-        const api = await apiLogin()
+        const api = await apiLoginAs(LIBRARY_USERNAME, LIBRARY_PASSWORD)
         const res = await api.get(`${API_V1}/songs/library`)
         const songs = res.ok() ? await res.json() : []
         await api.dispose()

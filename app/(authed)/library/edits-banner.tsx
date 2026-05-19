@@ -98,7 +98,7 @@ export default function EditsBanner() {
                 <button
                   onClick={() => handleDelete(d.song_id)}
                   title="discard draft"
-                  className="shrink-0 text-gray-300 hover:text-red-400 dark:text-gray-600 dark:hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 p-2 -m-1 touch-manipulation"
+                  className="shrink-0 text-gray-300 hover:text-red-400 dark:text-gray-600 dark:hover:text-red-400 transition-colors md:opacity-0 md:group-hover:opacity-100 p-2 -m-1 touch-manipulation"
                 >
                   <FaTimes size={11} />
                 </button>
