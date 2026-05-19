@@ -728,7 +728,8 @@ export default function EditorModal({
       const handleColor = isTrim ? '#0369a1'
         : isCut ? '#b91c1c'
         : (paramsRef.current.fades.find(f => f.id === region.id.slice(5))?.type === 'in' ? '#0369a1' : '#92400e')
-      const handleW = navigator.maxTouchPoints > 0 ? '4px' : '10px'
+      const isTouch = navigator.maxTouchPoints > 0
+      const handleW = isTouch ? '12px' : '10px'
       el.querySelectorAll<HTMLElement>('[part*="region-handle"]').forEach(h => {
         const isLeft = h.getAttribute('part')?.includes('left') ?? false
         Object.assign(h.style, {
@@ -742,11 +743,10 @@ export default function EditorModal({
           justifyContent: 'center',
           zIndex: '10',
         })
-        // Grip bar
         const grip = document.createElement('div')
         Object.assign(grip.style, {
-          width: '2px',
-          height: '20px',
+          width: isTouch ? '3px' : '2px',
+          height: isTouch ? '26px' : '20px',
           borderRadius: '1px',
           backgroundColor: handleColor,
           opacity: '0.8',
@@ -2416,7 +2416,7 @@ export default function EditorModal({
             {/* original waveform */}
             {origLoadError && <QueryError error={origLoadError} retry={onRetryAudio} context="original audio" />}
             <div
-              className={`rounded-lg border transition-colors cursor-pointer ${activeWaveform === 'orig' ? 'border-sky-500/40' : activeRootSongId && activeRootSongId !== activeSongId ? 'border-amber-400/30' : 'border-gray-100 dark:border-gray-800'}`}
+              className={`rounded-lg border transition-colors cursor-pointer select-none ${activeWaveform === 'orig' ? 'border-sky-500/40' : activeRootSongId && activeRootSongId !== activeSongId ? 'border-amber-400/30' : 'border-gray-100 dark:border-gray-800'}`}
               onClick={() => switchToWaveform('orig')}
             >
               <div className="flex items-center justify-between gap-2 px-2 pt-2">
@@ -2483,7 +2483,7 @@ export default function EditorModal({
             {/* edit waveform with fade overlays */}
             {wsLoadError && <QueryError error={wsLoadError} retry={onRetryAudio} context="edited audio" />}
             <div
-              className={`rounded-lg border transition-colors ${activeWaveform === 'edit' ? 'border-sky-500/40' : 'border-gray-100 dark:border-gray-800'}`}
+              className={`rounded-lg border transition-colors select-none ${activeWaveform === 'edit' ? 'border-sky-500/40' : 'border-gray-100 dark:border-gray-800'}`}
               onClick={() => switchToWaveform('edit')}
             >
               <div className="flex items-center gap-2 px-2 pt-2">
