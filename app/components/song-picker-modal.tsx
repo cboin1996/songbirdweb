@@ -140,10 +140,10 @@ export default function SongPickerModal({
     if (!open) return null
 
     const body = (
-        <div data-testid={testId} className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center">
+        <div data-testid={testId} className="fixed inset-x-0 top-0 bottom-[var(--player-bar-h,88px)] sm:inset-0 z-[80] flex items-end sm:items-center justify-center">
             {/* backdrop */}
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-            <div className="relative z-10 w-full sm:w-[480px] max-h-[85svh] sm:max-h-[85vh] mb-[var(--player-bar-h,88px)] sm:mb-0 flex flex-col bg-white dark:bg-gray-900 rounded-t-2xl sm:rounded-2xl shadow-2xl overflow-hidden">
+            <div className="relative z-10 w-full sm:w-[480px] max-h-[85svh] sm:max-h-[85vh] flex flex-col bg-white dark:bg-gray-900 rounded-t-2xl sm:rounded-2xl shadow-2xl overflow-hidden">
                 {/* header */}
                 <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-gray-800 shrink-0">
                     <span className="font-semibold text-sm flex-1 min-w-0 truncate">{title}</span>
