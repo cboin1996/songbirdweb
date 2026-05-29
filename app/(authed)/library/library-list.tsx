@@ -178,6 +178,7 @@ export default function LibraryList() {
     const [bulkLoading, setBulkLoading] = useState(false)
     const [bulkPlaylistPicking, setBulkPlaylistPicking] = useState(false)
     const [albumModal, setAlbumModal] = useState<LibraryAlbum | null>(null)
+    const [albumPlaylistOpen, setAlbumPlaylistOpen] = useState(false)
     const [activeLetter, setActiveLetter] = useState<string | null>(null)
     const [scrubLetter, setScrubLetter] = useState<string | null>(null)
     const scrubbing = useRef(false)
@@ -598,6 +599,19 @@ export default function LibraryList() {
         const ctx = { label: album.collectionName, href: `${routes.library}?view=albums&album=${album.collectionId}`, id: ctxId }
         const queue = album.songs.filter(s => s.properties).map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached, source: ctx }))
         play({ uuid: first.uuid, properties: first.properties, last_position: first.last_position, last_played_at: first.last_played_at, artwork_cached: first.artwork_cached, source: ctx }, queue, ctx)
+    }
+
+    async function handleAlbumAddToPlaylist(playlistId: string) {
+        if (!albumModal) return
+        setAlbumPlaylistOpen(false)
+        const songIds = albumModal.songs.map(s => s.uuid)
+        try {
+            await bulkAddSongsToPlaylist(playlistId, songIds)
+            await refreshPlaylists()
+            showToast(`added ${songIds.length} song${songIds.length !== 1 ? 's' : ''} to playlist`)
+        } catch {
+            showToast('failed to add to playlist', true)
+        }
     }
 
     function enterSelectMode(songId?: string) {
@@ -1182,12 +1196,36 @@ export default function LibraryList() {
                 </div>
             )}
 
-            {/* album modal (read-only) */}
+            {/* album modal */}
             <SongPickerModal
                 open={!!albumModal}
-                onClose={() => setAlbumModal(null)}
+                onClose={() => { setAlbumModal(null); setAlbumPlaylistOpen(false) }}
                 title={albumModal?.collectionName ?? ''}
-                titleActions={undefined}
+                titleActions={
+                    playlists.length > 0 ? (
+                        <div className="relative">
+                            <button
+                                onClick={() => setAlbumPlaylistOpen(p => !p)}
+                                className="text-xs text-sky-500 hover:text-sky-400 font-medium px-2 py-1 rounded"
+                            >
+                                + playlist
+                            </button>
+                            {albumPlaylistOpen && (
+                                <div className="absolute right-0 top-full mt-1 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl overflow-hidden min-w-[160px] z-10">
+                                    {playlists.map(pl => (
+                                        <button
+                                            key={pl.id}
+                                            onClick={() => handleAlbumAddToPlaylist(pl.id)}
+                                            className="w-full text-left px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 touch-manipulation"
+                                        >
+                                            {pl.name}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    ) : undefined
+                }
                 songs={albumModal?.songs.map(s => ({ uuid: s.uuid, properties: s.properties, artwork_cached: s.artwork_cached })) ?? []}
                 emptyState="no songs"
                 testId="album-modal"

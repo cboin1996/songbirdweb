@@ -58,7 +58,7 @@ export async function middleware(request: NextRequest) {
       const requestHeaders = new Headers(request.headers)
       requestHeaders.set('cookie', `access_token=${newToken}; ${cookieStr}`)
       const response = NextResponse.next({ request: { headers: requestHeaders } })
-      response.cookies.set('access_token', newToken, { httpOnly: true, sameSite: 'lax', path: '/' })
+      response.cookies.set('access_token', newToken, { httpOnly: true, sameSite: 'lax', path: '/', maxAge: 15 * 60 })
       return response
     }
   }
