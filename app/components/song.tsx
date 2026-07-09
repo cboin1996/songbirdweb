@@ -121,7 +121,8 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
 
     function handleTouchStart(e: React.TouchEvent) {
         if (!song.songId || !onLongPress) return
-        const { clientX, clientY } = e.touches[0]
+        const clientX = e.touches[0]?.clientX ?? 0
+        const clientY = e.touches[0]?.clientY ?? 0
         longPressTimer.current = setTimeout(() => {
             longPressTimer.current = null
             onLongPress(song.songId!, { clientX, clientY })
