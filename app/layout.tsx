@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import ServiceWorkerRegistrar from "./components/sw-register";
@@ -15,6 +15,10 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+export const viewport: Viewport = {
+  viewportFit: 'cover',
+}
+
 export const metadata: Metadata = {
   title: "songbirdweb",
   description: "web ui for downloading formatted songs, for free!",
@@ -29,7 +33,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased p-2 pb-24`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased p-2 pb-[calc(6rem+env(safe-area-inset-bottom,0px))]`}
       >
         <QueryProvider>
           <OfflineBanner />
