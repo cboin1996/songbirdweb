@@ -1263,7 +1263,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                     </div>
                                 </div>
                             </div>
-                            <div data-testid="player-progress" className="flex px-4 pb-3">
+                            <div data-testid="player-progress" className="flex px-4">
                                 <ProgressBar current={currentTime} duration={duration} buffered={buffered} onSeek={handleSeek} />
                             </div>
                         </div>
