@@ -31,7 +31,7 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
     selectMode?: boolean,
     isSelected?: boolean,
     onSelect?: (songId: string, shiftKey?: boolean) => void,
-    onLongPress?: (songId: string) => void,
+    onLongPress?: (songId: string, pos: { clientX: number; clientY: number }) => void,
     showSource?: boolean,
     hasDraft?: boolean,
     isEligible?: boolean,
@@ -119,11 +119,13 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
         }
     }
 
-    function handleTouchStart() {
+    function handleTouchStart(e: React.TouchEvent) {
         if (!song.songId || !onLongPress) return
+        const clientX = e.touches[0]?.clientX ?? 0
+        const clientY = e.touches[0]?.clientY ?? 0
         longPressTimer.current = setTimeout(() => {
             longPressTimer.current = null
-            onLongPress(song.songId!)
+            onLongPress(song.songId!, { clientX, clientY })
         }, 500)
     }
 
@@ -254,7 +256,7 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
                     Download
                 </button>
                 <button onClick={() => { closeKebab(); insertNext({ uuid: song.songId!, properties: song.properties, artwork_cached: song.artworkCached, source: pageSource() }) }}
-                    disabled={isCurrentSong || !online}
+                    disabled={isCurrentSong}
                     className="whitespace-nowrap block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation">
                     Play next
                 </button>

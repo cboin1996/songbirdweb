@@ -184,9 +184,12 @@ export default function LibraryList() {
     const scrubbing = useRef(false)
     const barRef = useRef<HTMLDivElement>(null)
     const listContainerRef = useRef<HTMLDivElement>(null)
-    const dragState = useRef<{ startId: string; lastId: string; committed: boolean; startY: number; addMode: boolean } | null>(null)
+    const dragState = useRef<{ startId: string; lastId: string; committed: boolean; startY: number; addMode: boolean; initialSelected: Set<string>; seeded: boolean } | null>(null)
+    const pendingDragSeed = useRef<{ songId: string; clientX: number; clientY: number } | null>(null)
     const selectedIdsRef = useRef(selectedIds)
     useEffect(() => { selectedIdsRef.current = selectedIds }, [selectedIds])
+    const lastSelectedIdRef = useRef(lastSelectedId)
+    useEffect(() => { lastSelectedIdRef.current = lastSelectedId }, [lastSelectedId])
 
     useEffect(() => {
         const handler = () => {
@@ -655,18 +658,26 @@ export default function LibraryList() {
 
         const allIds = [...songGrouped.values()].flat().map(s => s.uuid)
 
+        // If select mode was entered via long-press, seed dragState so the ongoing
+        // touch continues as a drag-select without requiring a lift-and-retouch.
+        const seed = pendingDragSeed.current
+        if (seed) {
+            pendingDragSeed.current = null
+            dragState.current = { startId: seed.songId, lastId: seed.songId, committed: false, startY: seed.clientY, addMode: true, initialSelected: new Set(selectedIdsRef.current), seeded: true }
+        }
+
         function songIdAt(x: number, y: number): string | null {
             const el = document.elementFromPoint(x, y)
             return el?.closest<HTMLElement>('[data-song-id]')?.dataset.songId ?? null
         }
 
-        function applyRange(fromId: string, toId: string, addMode: boolean) {
+        function applyRange(fromId: string, toId: string, addMode: boolean, base: Set<string>) {
             const from = allIds.indexOf(fromId)
             const to = allIds.indexOf(toId)
             if (from === -1 || to === -1) return
             const [lo, hi] = from < to ? [from, to] : [to, from]
-            setSelectedIds(prev => {
-                const next = new Set(prev)
+            setSelectedIds(() => {
+                const next = new Set(base)
                 for (let i = lo; i <= hi; i++) addMode ? next.add(allIds[i]) : next.delete(allIds[i])
                 return next
             })
@@ -674,9 +685,13 @@ export default function LibraryList() {
 
         function onTouchStart(e: TouchEvent) {
             const t = e.touches[0]
+            // Only initiate drag-select when touch starts in the checkbox zone (left ~52px).
+            // Touches elsewhere fall through to native scroll.
+            const containerLeft = container!.getBoundingClientRect().left
+            if (t.clientX - containerLeft > 52) return
             const id = songIdAt(t.clientX, t.clientY)
             if (!id) return
-            dragState.current = { startId: id, lastId: id, committed: false, startY: t.clientY, addMode: !selectedIdsRef.current.has(id) }
+            dragState.current = { startId: id, lastId: id, committed: false, startY: t.clientY, addMode: !selectedIdsRef.current.has(id), initialSelected: new Set(selectedIdsRef.current), seeded: false }
         }
 
         function onTouchMove(e: TouchEvent) {
@@ -684,15 +699,19 @@ export default function LibraryList() {
             if (!state) return
             const t = e.touches[0]
             if (!state.committed) {
-                if (Math.abs(t.clientY - state.startY) < 8) return
+                const currentId = songIdAt(t.clientX, t.clientY)
+                const ready = state.seeded
+                    ? currentId !== null && currentId !== state.startId
+                    : Math.abs(t.clientY - state.startY) >= 8
+                if (!ready) return
                 state.committed = true
-                applyRange(state.startId, state.startId, state.addMode)
+                applyRange(state.startId, state.startId, state.addMode, state.initialSelected)
                 setLastSelectedId(state.startId)
             }
             e.preventDefault()
             const id = songIdAt(t.clientX, t.clientY)
             if (id && id !== state.lastId) {
-                applyRange(state.startId, id, state.addMode)
+                applyRange(state.startId, id, state.addMode, state.initialSelected)
                 state.lastId = id
                 setLastSelectedId(id)
             }
@@ -716,10 +735,11 @@ export default function LibraryList() {
     function handleSelect(songId: string, shiftKey = false) {
         setSelectedIds(prev => {
             const next = new Set(prev)
-            if (shiftKey && lastSelectedId) {
+            const anchor = lastSelectedIdRef.current
+            if (shiftKey && anchor) {
                 const flat = [...songGrouped.values()].flat()
                 const ids = flat.map(s => s.uuid)
-                const fromIdx = ids.indexOf(lastSelectedId)
+                const fromIdx = ids.indexOf(anchor)
                 const toIdx = ids.indexOf(songId)
                 if (fromIdx !== -1 && toIdx !== -1) {
                     const [lo, hi] = fromIdx < toIdx ? [fromIdx, toIdx] : [toIdx, fromIdx]
@@ -1082,7 +1102,7 @@ export default function LibraryList() {
                                     selectMode={selectMode}
                                     isSelected={selectedIds.has(song.uuid)}
                                     onSelect={(id, shiftKey) => handleSelect(id, shiftKey)}
-                                    onLongPress={(id) => { if (!selectMode) enterSelectMode(id) }}
+                                    onLongPress={(id, pos) => { if (!selectMode) { const containerLeft = listContainerRef.current?.getBoundingClientRect().left ?? 0; if (pos.clientX - containerLeft <= 52) pendingDragSeed.current = { songId: id, ...pos }; enterSelectMode(id) } }}
                                     hasDraft={draftIds.has(song.uuid)}
                                     isEligible={eligibleIds.has(song.uuid)}
                                 />
@@ -1095,7 +1115,7 @@ export default function LibraryList() {
 
             {/* Bulk action bar */}
             {selectMode && selectedIds.size > 0 && (
-                <div className="fixed bottom-24 left-0 right-0 z-50 flex justify-center px-4 pointer-events-none">
+                <div className="fixed left-0 right-0 z-50 flex justify-center px-4 pointer-events-none" style={{ bottom: 'var(--player-bar-h, 6rem)' }}>
                     <div className="pointer-events-auto bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-2xl px-3 py-3 flex flex-wrap gap-2 items-center justify-center">
                         {bulkLoading ? (
                             <span className="text-sm text-gray-500">Working…</span>

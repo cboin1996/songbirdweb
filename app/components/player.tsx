@@ -424,10 +424,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     }
 
     function insertNext(song: PlayableSong, silent = false) {
-        if (queueRef.current.some(s => s.uuid === song.uuid)) {
-            if (!silent) showToast('Already in queue')
-            return
-        }
+
         const q = [...queueRef.current]
         const insertAt = queueIndexRef.current + 1 + manualNextRef.current.length
         q.splice(insertAt, 0, song)
@@ -1183,7 +1180,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                     )}
 
                     <div ref={playerBarRef} data-testid="player-bar" className="fixed bottom-0 left-0 right-0 z-50 bg-[var(--background)]/90 backdrop-blur-md border-t border-gray-100 dark:border-gray-800">
-                        <div className="flex flex-col">
+                        <div className="flex flex-col" style={{ paddingLeft: 'env(safe-area-inset-left, 0px)', paddingRight: 'env(safe-area-inset-right, 0px)', paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
                             {/* Mobile: single row. Desktop: three-column layout */}
                             <div className="flex items-center gap-3 px-4 pt-3 pb-1.5 md:grid md:grid-cols-[1fr_auto_1fr]">
                                 {/* Left: artwork + track info */}
@@ -1266,7 +1263,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                     </div>
                                 </div>
                             </div>
-                            <div data-testid="player-progress" className="flex px-4 pb-3">
+                            <div data-testid="player-progress" className="flex px-4">
                                 <ProgressBar current={currentTime} duration={duration} buffered={buffered} onSeek={handleSeek} />
                             </div>
                         </div>
