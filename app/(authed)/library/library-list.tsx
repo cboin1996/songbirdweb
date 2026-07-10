@@ -13,7 +13,7 @@ import Song from "../../components/song"
 import { usePlayer } from "../../components/player"
 import { routes } from "../../lib/routes"
 import { EVENTS } from "../../lib/events"
-import { FaPlay, FaPause, FaCloudDownloadAlt, FaMusic } from "react-icons/fa"
+import { FaPlay, FaPause, FaCloudDownloadAlt, FaCloudUploadAlt, FaMusic, FaBookmark, FaDownload, FaListUl } from "react-icons/fa"
 import { useToast } from "../../components/toast"
 import PlaylistsView from "./playlists-view"
 import EditsBanner from "./edits-banner"
@@ -1116,46 +1116,49 @@ export default function LibraryList() {
             {/* Bulk action bar */}
             {selectMode && selectedIds.size > 0 && (
                 <div className="fixed left-0 right-0 z-50 flex justify-center px-4 pointer-events-none" style={{ bottom: 'var(--player-bar-h, 6rem)' }}>
-                    <div className="pointer-events-auto bg-surface border border-gray-200 dark:border-gray-700 rounded-2xl shadow-2xl px-3 py-3 flex flex-wrap gap-2 items-center justify-center">
+                    <div className="pointer-events-auto bg-[var(--background)]/90 backdrop-blur-md border border-gray-100 dark:border-gray-800 rounded-2xl shadow-lg px-3 py-3 flex flex-wrap gap-2 items-center justify-center">
                         {bulkLoading ? (
                             <span className="text-sm text-gray-500">Working…</span>
                         ) : (
                             <>
                                 <button
                                     onClick={handleBulkRemoveFromLibrary}
-                                    className="px-3 py-2 rounded-xl text-sm font-medium bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 active:bg-red-200 touch-manipulation min-h-[44px]"
+                                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 active:bg-red-200 touch-manipulation min-h-[44px]"
                                 >
+                                    <FaBookmark size={11} />
                                     Remove
                                 </button>
                                 <button
                                     onClick={bulkSaveOffline}
-                                    className="px-3 py-2 rounded-xl text-sm font-medium bg-sky-50 dark:bg-sky-950/40 text-sky-600 dark:text-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900/50 active:bg-sky-200 touch-manipulation min-h-[44px]"
+                                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium bg-sky-50 dark:bg-sky-950/40 text-sky-600 dark:text-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900/50 active:bg-sky-200 touch-manipulation min-h-[44px]"
                                 >
-                                    <span className="hidden sm:inline">Save offline</span>
-                                    <span className="sm:hidden">Offline</span>
-                                </button>
-                                <button
-                                    onClick={bulkDownload}
-                                    className="px-3 py-2 rounded-xl text-sm font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 active:bg-gray-300 touch-manipulation min-h-[44px]"
-                                >
-                                    Download
+                                    <FaCloudDownloadAlt size={13} />
+                                    Offline
                                 </button>
                                 {[...selectedIds].some(id => cachedIds.has(id)) && (
                                     <button
                                         onClick={bulkRemoveOffline}
-                                        className="px-3 py-2 rounded-xl text-sm font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 active:bg-gray-300 touch-manipulation min-h-[44px]"
+                                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium bg-sky-50 dark:bg-sky-950/40 text-sky-600 dark:text-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900/50 active:bg-sky-200 touch-manipulation min-h-[44px]"
                                     >
-                                        <span className="hidden sm:inline">Remove offline</span>
-                                        <span className="sm:hidden">Rm offline</span>
+                                        <FaCloudUploadAlt size={13} />
+                                        Rm offline
                                     </button>
                                 )}
+                                <button
+                                    onClick={bulkDownload}
+                                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 active:bg-gray-300 touch-manipulation min-h-[44px]"
+                                >
+                                    <FaDownload size={11} />
+                                    Download
+                                </button>
                                 {playlists.length > 0 && (
                                     <div className="relative">
                                         <button
                                             onClick={() => setBulkPlaylistPicking(p => !p)}
-                                            className="px-4 py-2 rounded-xl text-sm font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 active:bg-gray-300 touch-manipulation min-h-[44px]"
+                                            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 active:bg-gray-300 touch-manipulation min-h-[44px]"
                                         >
-                                            + Playlist
+                                            <FaListUl size={11} />
+                                            Playlist
                                         </button>
                                         {bulkPlaylistPicking && (
                                             <div className="absolute bottom-full mb-2 right-0 bg-surface border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl overflow-hidden min-w-[160px]">
