@@ -1116,7 +1116,7 @@ export default function LibraryList() {
             {/* Bulk action bar */}
             {selectMode && selectedIds.size > 0 && (
                 <div className="fixed left-0 right-0 z-50 flex justify-center px-4 pointer-events-none" style={{ bottom: 'var(--player-bar-h, 6rem)' }}>
-                    <div className="pointer-events-auto bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-2xl px-3 py-3 flex flex-wrap gap-2 items-center justify-center">
+                    <div className="pointer-events-auto bg-surface border border-gray-200 dark:border-gray-700 rounded-2xl shadow-2xl px-3 py-3 flex flex-wrap gap-2 items-center justify-center">
                         {bulkLoading ? (
                             <span className="text-sm text-gray-500">Working…</span>
                         ) : (
@@ -1158,7 +1158,7 @@ export default function LibraryList() {
                                             + Playlist
                                         </button>
                                         {bulkPlaylistPicking && (
-                                            <div className="absolute bottom-full mb-2 right-0 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl overflow-hidden min-w-[160px]">
+                                            <div className="absolute bottom-full mb-2 right-0 bg-surface border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl overflow-hidden min-w-[160px]">
                                                 {playlists.map(pl => (
                                                     <button
                                                         key={pl.id}
@@ -1231,7 +1231,7 @@ export default function LibraryList() {
                                 + playlist
                             </button>
                             {albumPlaylistOpen && (
-                                <div className="absolute right-0 top-full mt-1 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl overflow-hidden min-w-[160px] z-10">
+                                <div className="absolute right-0 top-full mt-1 bg-surface border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl overflow-hidden min-w-[160px] z-10">
                                     {playlists.map(pl => (
                                         <button
                                             key={pl.id}

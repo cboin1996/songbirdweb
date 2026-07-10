@@ -1035,7 +1035,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             {children}
             {syncPrompt && (
                 <div data-testid="sync-prompt" className="fixed inset-0 z-[70] flex items-end justify-center bg-black/40">
-                    <div className="w-full max-w-md bg-white dark:bg-gray-900 rounded-t-2xl p-6 shadow-2xl">
+                    <div className="w-full max-w-md bg-surface rounded-t-2xl p-6 shadow-2xl">
                         <p className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-1">Player out of sync</p>
                         <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">Your local player state differs from another device. Which would you like to keep?</p>
                         <div className="flex gap-3">
@@ -1064,7 +1064,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                         <div
                             data-testid="player-queue-panel"
                             style={{ bottom: 'var(--player-bar-h, 88px)' }}
-                            className="fixed z-[60] left-0 right-0 bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-800 flex flex-col max-h-[45vh] shadow-2xl
+                            className="fixed z-[60] left-0 right-0 bg-surface border-t border-gray-100 dark:border-gray-800 flex flex-col max-h-[45vh] shadow-2xl
                                        md:left-auto md:right-4 md:w-[360px] md:max-h-[min(520px,70vh)] md:rounded-2xl md:border md:border-gray-200 md:dark:border-gray-700"
                         >
                             {/* header */}

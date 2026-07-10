@@ -3,19 +3,22 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --surface: #ffffff;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #030712; /* Tailwind gray-950 — matches sticky navbar/header backdrops */
+    --background: #030712; /* gray-950 */
     --foreground: #ededed;
+    --surface: #111827;   /* gray-900 — elevated surfaces (sheets, panels, dropdowns) */
   }
 }
 
