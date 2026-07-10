@@ -18,7 +18,7 @@
   :root {
     --background: #030712; /* gray-950 */
     --foreground: #ededed;
-    --surface: #111827;   /* gray-900 — elevated surfaces (sheets, panels, dropdowns) */
+    --surface: #030712;   /* gray-950 — matches app background */
   }
 }
 
