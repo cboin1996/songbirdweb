@@ -78,7 +78,7 @@ export default function EditsBanner() {
       </button>
 
       {open && (
-        <div className="absolute top-full left-0 mt-1 z-50 min-w-64 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl overflow-hidden">
+        <div className="absolute top-full left-0 mt-1 z-50 min-w-64 bg-surface border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl overflow-hidden">
           {drafts.map(d => {
             const days = daysLeft(d.updated_at)
             const exp = expiryDate(d.updated_at)
