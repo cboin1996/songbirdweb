@@ -1010,9 +1010,26 @@ export default function LibraryList() {
                 : viewMode === 'genres'
                 ? [...genreGrouped.entries()].map(([genre, group]) => (
                     <div key={genre} ref={el => { sectionRefs.current[genre] = el }} data-letter={letterKey(genre)} className="scroll-mt-24 cv-auto">
-                        <div className="md:sticky md:top-24 z-30 bg-background px-1 py-0.5 mb-1">
+                        <div className="md:sticky md:top-24 z-30 bg-background px-1 py-0.5 mb-1 flex items-center gap-2">
                             <span className="text-sm font-bold text-sky-500">{genre}</span>
-                            <span className="ml-2 text-xs text-gray-400">{group.length}</span>
+                            <span className="text-xs text-gray-400">{group.length}</span>
+                            <button
+                                onClick={() => {
+                                    const baseHref = `${routes.library}?view=genres`
+                                    const ctx = { label: genre, href: baseHref, id: `genre:${genre}` }
+                                    const songs = group.filter(s => s.properties)
+                                    const first = songs[0]
+                                    if (!first?.properties) return
+                                    const queue = songs.map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached, source: ctx }))
+                                    play({ uuid: first.uuid, properties: first.properties, last_position: first.last_position, last_played_at: first.last_played_at, artwork_cached: first.artwork_cached, source: ctx }, queue, ctx)
+                                }}
+                                className="ml-1 p-1 shrink-0"
+                            >
+                                {playContext?.id === `genre:${genre}` && isPlaying
+                                    ? <FaPause size={9} className="text-sky-500" />
+                                    : <FaPlay size={9} className={playContext?.id === `genre:${genre}` ? 'text-sky-500' : 'text-gray-300 dark:text-gray-600'} />
+                                }
+                            </button>
                         </div>
                         <div className={isDesktop
                             ? "grid grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-2 md:gap-6 mb-6"
