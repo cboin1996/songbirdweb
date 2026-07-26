@@ -189,6 +189,55 @@ test.describe('player state sync', () => {
         }
     })
 
+    test('visibility resync: server newer auto-applies after stale tab', async ({ page }) => {
+        test.skip(!await apiReturnsUpdatedAt(), 'API does not return updated_at')
+        const api = await apiLoginAs(SYNC_USERNAME, SYNC_PASSWORD)
+        try {
+            const libRes = await api.get(`${API_V1}/songs/library`)
+            const songs = (await libRes.json()) as { uuid: string }[]
+            test.skip(songs.length < 2, 'need at least 2 library songs')
+
+            // Load page with song[0]
+            await api.put(`${API_V1}/player/state`, {
+                data: {
+                    shuffle: false, repeat: 'off',
+                    queue: [songs[0].uuid], queue_index: 0,
+                    manual_next: [], current_song_uuid: songs[0].uuid,
+                },
+            })
+            await page.reload()
+            await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 10000 })
+
+            // Zero out the stale threshold so any hide→show triggers resync
+            await page.evaluate(() => {
+                (window as unknown as Record<string, unknown>).__playerStaleThresholdMs = 0
+            })
+
+            // Push page to background (triggers real visibilitychange: hidden)
+            const newTab = await page.context().newPage()
+            await newTab.goto('about:blank')
+
+            // Another device updates server to song[1]
+            await api.put(`${API_V1}/player/state`, {
+                data: {
+                    shuffle: false, repeat: 'off',
+                    queue: [songs[1].uuid], queue_index: 0,
+                    manual_next: [], current_song_uuid: songs[1].uuid,
+                },
+            })
+
+            // Bring original page back to foreground (triggers real visibilitychange: visible)
+            await newTab.close()
+            await page.bringToFront()
+
+            // Server is newer — should auto-apply without prompt
+            await expect(page.locator('text=Player synced from another device')).toBeVisible({ timeout: 5000 })
+            await expect(page.getByTestId('sync-prompt')).toHaveCount(0)
+        } finally {
+            await api.dispose()
+        }
+    })
+
     test('no prompt when queues match', async ({ page }) => {
         const api = await apiLoginAs(SYNC_USERNAME, SYNC_PASSWORD)
         try {

@@ -5,7 +5,7 @@ import { useVirtualList } from "../lib/use-virtual-list"
 import Image from "next/image"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { FaPause, FaPlay, FaStepBackward, FaStepForward, FaRandom, FaRedo, FaList, FaTimes, FaVolumeUp, FaVolumeMute, FaBars, FaMusic } from "react-icons/fa"
+import { FaPause, FaPlay, FaStepBackward, FaStepForward, FaRandom, FaRedo, FaList, FaTimes, FaVolumeUp, FaVolumeMute, FaBars, FaMusic, FaChevronDown } from "react-icons/fa"
 import { filterSongs } from "../lib/use-filtered-songs"
 import SearchInput from "./search-input"
 import Spinner from "./spinner"
@@ -196,6 +196,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     const [playContext, setPlayContext] = useState<PlayContext | null>(null)
     const [showQueue, setShowQueue] = useState(false)
+    const [showExpanded, setShowExpanded] = useState(false)
     const [queueSearch, setQueueSearch] = useState('')
     const [volume, setVolume] = useState(() => {
         if (typeof window === 'undefined') return 1
@@ -360,6 +361,34 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             pendingPosition.current = song.last_position ?? 0
             const src = await resolveAudioSrc(song.uuid)
             applyAudioSrc(audio, src)
+        }
+    }
+
+    async function reconcilePlayerState(serverState: PlayerState) {
+        if (hasUserPlayedRef.current) return
+        let localState: (PlayerState & { saved_at?: string }) | undefined
+        try {
+            const raw = localStorage.getItem('playerState')
+            if (raw) localState = JSON.parse(raw)
+        } catch {}
+        if (!localState) {
+            await applyPlayerState(serverState)
+            return
+        }
+        const queuesMatch = serverState.current_song_uuid === localState.current_song_uuid
+            && JSON.stringify(serverState.queue) === JSON.stringify(localState.queue)
+        if (queuesMatch) {
+            await applyPlayerState(serverState)
+            return
+        }
+        const serverTime = serverState.updated_at ? new Date(serverState.updated_at).getTime() : Infinity
+        const localTime = localState.saved_at ? new Date(localState.saved_at).getTime() : 0
+        if (localTime > serverTime) {
+            setSyncPrompt({ serverState, localState })
+            await applyPlayerState(localState)
+        } else {
+            showToast('Player synced from another device')
+            await applyPlayerState(serverState)
         }
     }
 
@@ -838,15 +867,30 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     }, [])
 
-    // Sync React state with actual audio state when app returns to foreground
+    // Sync React state with actual audio state when app returns to foreground;
+    // re-fetch server state if tab was hidden long enough to go stale
     useEffect(() => {
-        function onVisibilityChange() {
-            if (document.visibilityState !== 'visible') return
+        let hiddenAt: number | null = null
+
+        async function onVisibilityChange() {
+            if (document.visibilityState !== 'visible') {
+                hiddenAt = Date.now()
+                return
+            }
             const audio = audioRef.current
-            if (!audio) return
-            setIsPlaying(!audio.paused)
-            setCurrentTime(audio.currentTime)
-            if (isFinite(audio.duration)) setDuration(audio.duration)
+            if (audio) {
+                setIsPlaying(!audio.paused)
+                setCurrentTime(audio.currentTime)
+                if (isFinite(audio.duration)) setDuration(audio.duration)
+            }
+            const wasHiddenMs = hiddenAt !== null ? Date.now() - hiddenAt : 0
+            hiddenAt = null
+            const threshold = (window as unknown as { __playerStaleThresholdMs?: number }).__playerStaleThresholdMs ?? 0
+            if (wasHiddenMs < threshold) return
+            if (!navigator.onLine) return
+            const serverState = await fetchPlayerState().catch(() => undefined)
+            if (!serverState) return
+            await reconcilePlayerState(serverState)
         }
         document.addEventListener('visibilitychange', onVisibilityChange)
         return () => document.removeEventListener('visibilitychange', onVisibilityChange)
@@ -931,34 +975,16 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         Promise.all([fetchPlayerState(), fetchLibrarySongs()]).then(async ([serverState, libSongs]) => {
             const libMap = new Map((libSongs ?? []).map(s => [s.uuid, s]))
             libMapRef.current = libMap
-
-            let localState: (PlayerState & { saved_at?: string }) | undefined
-            try {
-                const raw = localStorage.getItem('playerState')
-                if (raw) localState = JSON.parse(raw)
-            } catch {}
-
-            const queuesMatch = serverState && localState
-                && serverState.current_song_uuid === localState.current_song_uuid
-                && JSON.stringify(serverState.queue) === JSON.stringify(localState.queue)
-
-            let state: PlayerState | undefined
-            if (serverState && localState && !queuesMatch) {
-                const serverTime = serverState.updated_at ? new Date(serverState.updated_at).getTime() : Infinity
-                const localTime = localState.saved_at ? new Date(localState.saved_at).getTime() : 0
-                if (localTime > serverTime) {
-                    setSyncPrompt({ serverState, localState })
-                    state = localState
-                } else {
-                    showToast('Player synced from another device')
-                    state = serverState
-                }
+            if (serverState) {
+                await reconcilePlayerState(serverState)
             } else {
-                state = serverState ?? localState
+                let localState: PlayerState | undefined
+                try {
+                    const raw = localStorage.getItem('playerState')
+                    if (raw) localState = JSON.parse(raw)
+                } catch {}
+                if (localState && !hasUserPlayedRef.current) await applyPlayerState(localState)
             }
-
-            if (!state || hasUserPlayedRef.current) return
-            await applyPlayerState(state)
         }).catch(() => {})
     }, [])
 
@@ -1053,6 +1079,54 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                             >
                                 Keep mine
                             </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {showExpanded && current && p && (
+                <div className="fixed inset-0 z-[65] flex flex-col bg-[var(--background)]" style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
+                    <div className="flex items-center justify-between px-5 pt-5 pb-2 shrink-0">
+                        <button onClick={() => setShowExpanded(false)} className="p-2 -ml-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors">
+                            <FaChevronDown size={18} />
+                        </button>
+                        <span className="text-xs text-gray-400 uppercase tracking-widest font-medium">Now Playing</span>
+                        <div className="w-10" />
+                    </div>
+                    <div className="flex-1 flex items-center justify-center px-10 min-h-0">
+                        {(() => { const a = songArtworkUrl(current.uuid, current.artwork_cached, p.artworkUrl100, 600); return a
+                            ? <Image src={a} alt="" width={480} height={480} className="rounded-2xl w-full max-w-sm aspect-square object-cover shadow-2xl" unoptimized={!!current.artwork_cached} />
+                            : <div className="w-full max-w-sm aspect-square rounded-2xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center"><FaMusic size={64} className="text-gray-300 dark:text-gray-600" /></div>
+                        })()}
+                    </div>
+                    <div className="px-8 pt-5 pb-2 shrink-0">
+                        <p className="text-xl font-bold truncate">{p.trackName || 'Unknown title'}</p>
+                        <p className="text-sky-500 truncate mt-0.5">{p.artistName || 'Unknown artist'}</p>
+                    </div>
+                    <div className="px-8 py-2 shrink-0">
+                        <div className="flex justify-between text-xs text-gray-400 mb-1.5">
+                            <span>{fmt(currentTime)}</span>
+                            <span>{fmt(duration)}</span>
+                        </div>
+                        <ProgressBar current={currentTime} duration={duration} buffered={buffered} onSeek={handleSeek} />
+                    </div>
+                    <div className="flex items-center justify-center gap-7 px-8 py-4 shrink-0">
+                        <button aria-pressed={shuffle} onClick={toggleShuffle} className={`shrink-0 ${shuffle ? activeClass : idleClass}`}><FaRandom size={16} /></button>
+                        <button onClick={skipPrev} disabled={!hasQueue} className={`shrink-0 disabled:opacity-30 ${idleClass}`}><FaStepBackward size={20} /></button>
+                        <button onClick={isPlaying ? pause : resume} className={`shrink-0 ${idleClass}`}>
+                            {isBuffering && isPlaying ? <Spinner size={32} /> : isPlaying ? <FaPause size={28} /> : <FaPlay size={28} />}
+                        </button>
+                        <button onClick={skipNext} disabled={!hasQueue} className={`shrink-0 disabled:opacity-30 ${idleClass}`}><FaStepForward size={20} /></button>
+                        <button onClick={toggleRepeat} className={`shrink-0 relative ${repeat !== 'off' ? activeClass : idleClass}`}>
+                            <FaRedo size={16} />
+                            {repeat === 'one' && <span className="absolute -top-1.5 -right-1.5 text-[8px] font-bold leading-none">1</span>}
+                        </button>
+                    </div>
+                    <div className="flex items-center gap-2 px-8 pb-4 shrink-0">
+                        <button onClick={() => setVolume(v => v > 0 ? 0 : 1)} className={idleClass}>
+                            {volume === 0 ? <FaVolumeMute size={14} /> : <FaVolumeUp size={14} />}
+                        </button>
+                        <div className="flex-1">
+                            <Slider value={volume} min={0} max={1} step={0.02} onChange={setVolume} label="volume" />
                         </div>
                     </div>
                 </div>
@@ -1185,7 +1259,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                             <div className="flex items-center gap-3 px-4 pt-3 pb-1.5 md:grid md:grid-cols-[1fr_auto_1fr]">
                                 {/* Left: artwork + track info */}
                                 <div className="flex items-center gap-3 min-w-0 flex-1 md:flex-initial">
-                                    {(() => { const a = songArtworkUrl(current?.uuid, current?.artwork_cached, p.artworkUrl100, 200); return a ? <Image src={a} alt="" width={44} height={44} className="rounded shrink-0 w-11 h-11 md:w-9 md:h-9" unoptimized={!!current?.artwork_cached} /> : null })()}
+                                    {(() => { const a = songArtworkUrl(current?.uuid, current?.artwork_cached, p.artworkUrl100, 200); return a ? <button onClick={() => setShowExpanded(true)} className="shrink-0 focus:outline-none"><Image src={a} alt="" width={44} height={44} className="rounded w-11 h-11 md:w-9 md:h-9" unoptimized={!!current?.artwork_cached} /></button> : null })()}
                                     {(() => {
                                         const ctx = current?.source ?? playContext
                                         return ctx ? (
