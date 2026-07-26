@@ -350,7 +350,7 @@ export default function LibraryList() {
         for (const song of displaySongs) {
             const p = song.properties
             if (!p) continue
-            const artist = p.collectionArtistName ?? p.artistName ?? ''
+            const artist = p.collectionArtistName || p.artistName || ''
             // Fall back to name+artist when collectionId is missing (raw imports lack iTunes IDs).
             const key = p.collectionId || `${p.collectionName ?? ''}::${artist}`
             if (!albumMap.has(key)) {
@@ -364,9 +364,11 @@ export default function LibraryList() {
             }
             albumMap.get(key)!.songs.push(song)
         }
-        // sort songs within each album by track number
+        // sort songs within each album by track number, then re-derive best artist
         for (const album of albumMap.values()) {
             album.songs.sort((a, b) => (a.properties?.discNumber ?? 1) - (b.properties?.discNumber ?? 1) || (a.properties?.trackNumber ?? 0) - (b.properties?.trackNumber ?? 0))
+            const bestProps = album.songs.find(s => s.properties?.collectionArtistName || s.properties?.artistName)?.properties
+            if (bestProps) album.artistName = bestProps.collectionArtistName || bestProps.artistName || ''
         }
         // sort albums alphabetically then group A-Z
         const albums = [...albumMap.values()].sort((a, b) => {
