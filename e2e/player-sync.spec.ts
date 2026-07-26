@@ -197,7 +197,8 @@ test.describe('player state sync', () => {
             const songs = (await libRes.json()) as { uuid: string }[]
             test.skip(songs.length < 2, 'need at least 2 library songs')
 
-            // Load page with song[0]
+            // Load page with song[0] — clear local state first so reconcile doesn't
+            // race against saved_at left by a previous test in this serial chain
             await api.put(`${API_V1}/player/state`, {
                 data: {
                     shuffle: false, repeat: 'off',
@@ -205,6 +206,8 @@ test.describe('player state sync', () => {
                     manual_next: [], current_song_uuid: songs[0].uuid,
                 },
             })
+            await page.goto(routes.library)
+            await page.evaluate(() => localStorage.removeItem('playerState'))
             await page.reload()
             await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 10000 })
 
