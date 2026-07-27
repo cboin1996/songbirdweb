@@ -2945,7 +2945,7 @@ export default function EditorModal({
       {/* unified region context menu — trim = add/paste/select-all; cut/fade = copy/cut/paste/remove */}
       {regionContextMenu && (
         <div
-          className="fixed z-[70] bg-surface border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl py-1 min-w-[160px] text-sm"
+          className="fixed z-[70] bg-surface border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl py-1 min-w-[160px] text-sm"
           style={{ left: regionContextMenu.x, top: regionContextMenu.y }}
           onClick={e => e.stopPropagation()}
           onMouseLeave={() => setRegionContextMenu(null)}
@@ -3016,7 +3016,7 @@ export default function EditorModal({
           onClick={() => setRestoreConfirm(null)}
         >
           <div
-            className="bg-surface border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl max-w-sm w-full p-6 flex flex-col gap-4"
+            className="bg-surface border border-gray-200 dark:border-gray-700 rounded-2xl shadow-2xl max-w-sm w-full p-6 flex flex-col gap-4"
             onClick={e => e.stopPropagation()}
           >
             <div>

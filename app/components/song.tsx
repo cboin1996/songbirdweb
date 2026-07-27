@@ -246,7 +246,7 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
             <div className="fixed inset-0 z-40" onClick={() => setKebabOpen(false)} />
             <div
                 data-testid="song-kebab-menu"
-                className="fixed z-50 bg-surface border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl py-1"
+                className="fixed z-50 bg-surface border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl py-1"
                 style={{ top: kebabPos.top, right: kebabPos.right }}
                 onClick={e => e.stopPropagation()}
             >

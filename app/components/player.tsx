@@ -5,7 +5,7 @@ import { useVirtualList } from "../lib/use-virtual-list"
 import Image from "next/image"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { FaPause, FaPlay, FaStepBackward, FaStepForward, FaRandom, FaRedo, FaList, FaTimes, FaVolumeUp, FaVolumeMute, FaBars, FaMusic } from "react-icons/fa"
+import { FaPause, FaPlay, FaStepBackward, FaStepForward, FaRandom, FaRedo, FaList, FaTimes, FaVolumeUp, FaVolumeMute, FaBars, FaMusic, FaChevronDown } from "react-icons/fa"
 import { filterSongs } from "../lib/use-filtered-songs"
 import SearchInput from "./search-input"
 import Spinner from "./spinner"
@@ -97,6 +97,8 @@ export function usePlayer() {
     return useContext(PlayerContext)
 }
 
+const QUEUE_ROW_H = 52
+
 function fmt(s: number) {
     if (!isFinite(s) || s < 0) return '0:00'
     const m = Math.floor(s / 60)
@@ -180,6 +182,178 @@ function ProgressBar({ current, duration, buffered, onSeek }: {
     )
 }
 
+const QUEUE_STYLES = {
+    panel: {
+        px: '',
+        drag: 'text-gray-300 dark:text-gray-600',
+        activeRow: 'bg-sky-50 dark:bg-sky-950/30',
+        hoverRow: 'hover:bg-gray-50 dark:hover:bg-gray-800/50',
+        activeTrack: 'text-sky-500',
+        normalTrack: '',
+        artist: 'text-xs text-gray-400 truncate',
+        activePing: 'text-sky-500',
+        artFallback: 'bg-gray-100 dark:bg-gray-800',
+        artIcon: 'text-gray-400',
+        badge: 'bg-sky-100 dark:bg-sky-950/50 text-sky-600 dark:text-sky-400',
+        source: 'text-xs text-gray-400 hover:text-sky-500 truncate max-w-[80px] shrink-0',
+        remove: 'shrink-0 text-gray-300 dark:text-gray-600 hover:text-red-400 transition-colors p-2 -m-1 touch-manipulation',
+        empty: 'text-gray-400 text-xs py-6 text-center',
+    },
+    overlay: {
+        px: 'px-2',
+        drag: 'text-gray-300 dark:text-gray-600',
+        activeRow: 'bg-sky-50 dark:bg-sky-950/30',
+        hoverRow: 'hover:bg-gray-50 dark:hover:bg-gray-800/50',
+        activeTrack: 'text-sky-500 dark:text-sky-400',
+        normalTrack: '',
+        artist: 'text-xs text-gray-400 truncate',
+        activePing: 'text-sky-500 dark:text-sky-400',
+        artFallback: 'bg-gray-100 dark:bg-gray-800',
+        artIcon: 'text-gray-400',
+        badge: 'bg-sky-100 dark:bg-sky-950/50 text-sky-600 dark:text-sky-400',
+        source: 'text-xs text-gray-400 hover:text-sky-500 truncate max-w-[80px] shrink-0',
+        remove: 'shrink-0 text-gray-300 dark:text-gray-600 hover:text-red-400 transition-colors p-2 -m-1 touch-manipulation',
+        empty: 'text-gray-400 text-xs py-6 text-center',
+    },
+} as const
+
+interface QueueRowListProps {
+    containerRef: React.RefObject<HTMLDivElement | null>
+    items: Array<{ song: PlayableSong; qi: number }>
+    start: number; end: number; totalHeight: number; offsetTop: number
+    currentUuid: string | null
+    isPlaying: boolean
+    dragFromRef: React.MutableRefObject<number | null>
+    draggedQi: number | null
+    setDraggedQi: (n: number | null) => void
+    queueDropTarget: number | null
+    setQueueDropTarget: (n: number | null) => void
+    manualNextIds: Set<string>
+    queueSearch: string
+    setQueueSearch: (s: string) => void
+    showSearch: boolean
+    searchTestId?: string
+    emptyTestId?: string
+    reorderQueue: (from: number, to: number) => void
+    removeFromQueue: (qi: number) => void
+    onPlayAt: (qi: number) => void
+    onPause: () => void
+    onResume: () => void
+    onSourceNav: () => void
+    variant: 'panel' | 'overlay'
+}
+
+function QueueRowList({
+    containerRef, items, start, end, totalHeight, offsetTop,
+    currentUuid, isPlaying, dragFromRef, draggedQi, setDraggedQi,
+    queueDropTarget, setQueueDropTarget, manualNextIds,
+    queueSearch, setQueueSearch, showSearch, searchTestId, emptyTestId,
+    reorderQueue, removeFromQueue, onPlayAt, onPause, onResume, onSourceNav,
+    variant,
+}: QueueRowListProps) {
+    const s = QUEUE_STYLES[variant]
+
+    function handlePointerMove(e: React.PointerEvent) {
+        const from = dragFromRef.current
+        if (from === null) return
+        const el = document.elementFromPoint(e.clientX, e.clientY)
+        const row = el?.closest('[data-dpos]') as HTMLElement | null
+        if (!row) return
+        const dpos = parseInt(row.dataset.dpos!)
+        if (dpos === from) { setQueueDropTarget(null); return }
+        setQueueDropTarget(dpos > from ? dpos + 1 : dpos)
+    }
+
+    function handlePointerUp() {
+        if (dragFromRef.current !== null && queueDropTarget !== null && dragFromRef.current !== queueDropTarget) {
+            reorderQueue(dragFromRef.current, queueDropTarget)
+        }
+        dragFromRef.current = null; setDraggedQi(null); setQueueDropTarget(null)
+    }
+
+    return (
+        <>
+            {showSearch && (
+                <div className="shrink-0 pb-2">
+                    <SearchInput value={queueSearch} onChange={setQueueSearch} placeholder="search queue…" testId={searchTestId ?? 'queue-search'} />
+                </div>
+            )}
+            <div
+                ref={containerRef}
+                className="overflow-y-auto flex-1"
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerUp}
+                onPointerLeave={handlePointerUp}
+            >
+                {queueSearch && items.length === 0 && (
+                    <p data-testid={emptyTestId ?? 'queue-search-empty'} className={s.empty}>no songs match &ldquo;{queueSearch}&rdquo;</p>
+                )}
+                <div style={{ height: totalHeight }}>
+                    <div style={{ paddingTop: offsetTop }}>
+                        {items.slice(start, end).map(({ song, qi }, i) => {
+                            const dpos = start + i
+                            const isActive = song.uuid === currentUuid
+                            const sp = song.properties
+                            const isBeingDragged = draggedQi === dpos
+                            const isDropTarget = queueDropTarget === dpos && !isBeingDragged
+                            const isDropAfter = queueDropTarget === dpos + 1 && dpos === items.length - 1 && !isBeingDragged
+                            const art = songArtworkUrl(song.uuid, song.artwork_cached, sp?.artworkUrl100, 200)
+                            return (
+                                <div
+                                    key={`${song.uuid}-${qi}`}
+                                    data-qi={qi}
+                                    data-dpos={dpos}
+                                    style={{ height: QUEUE_ROW_H }}
+                                    className={`flex items-center gap-3 ${s.px} border-t-2 border-b-2 transition-colors select-none ${isDropTarget ? 'border-t-sky-500' : 'border-t-transparent'} ${isDropAfter ? 'border-b-sky-500' : 'border-b-transparent'} ${isBeingDragged ? 'opacity-40' : ''} ${isActive ? s.activeRow : s.hoverRow}`}
+                                >
+                                    <span
+                                        data-testid={variant === 'panel' ? 'queue-drag-handle' : undefined}
+                                        className={`${s.drag} cursor-grab active:cursor-grabbing shrink-0 touch-none select-none p-2 -m-2`}
+                                        onPointerDown={e => { e.preventDefault(); dragFromRef.current = dpos; setDraggedQi(dpos); setQueueDropTarget(null) }}
+                                    >
+                                        <FaBars size={14} />
+                                    </span>
+                                    <button
+                                        onClick={() => isActive ? (isPlaying ? onPause() : onResume()) : onPlayAt(qi)}
+                                        className="flex items-center gap-3 flex-1 text-left min-w-0"
+                                    >
+                                        {art
+                                            ? <Image src={art} alt="" width={36} height={36} className="rounded shrink-0 object-cover" unoptimized={!!song.artwork_cached} />
+                                            : <div className={`w-9 h-9 rounded shrink-0 ${s.artFallback} flex items-center justify-center`}><FaMusic size={11} className={s.artIcon} /></div>
+                                        }
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-1.5">
+                                                <p className={`text-sm font-medium truncate ${isActive ? s.activeTrack : s.normalTrack}`}>{sp?.trackName ?? '—'}</p>
+                                                {manualNextIds.has(song.uuid) && (
+                                                    <span className={`text-[10px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0 ${s.badge}`}>Queued</span>
+                                                )}
+                                            </div>
+                                            <p className={s.artist}>{sp?.artistName ?? '—'}</p>
+                                        </div>
+                                        {isActive && (isPlaying ? <FaPause size={9} className={`${s.activePing} shrink-0`} /> : <FaPlay size={9} className={`${s.activePing} shrink-0`} />)}
+                                    </button>
+                                    {song.source && (
+                                        <Link href={song.source.href} onClick={e => { e.stopPropagation(); onSourceNav() }} className={s.source}>
+                                            {song.source.label}
+                                        </Link>
+                                    )}
+                                    <button
+                                        data-testid={variant === 'panel' ? 'queue-remove' : undefined}
+                                        onClick={() => removeFromQueue(qi)}
+                                        className={s.remove}
+                                    >
+                                        <FaTimes size={10} />
+                                    </button>
+                                </div>
+                            )
+                        })}
+                    </div>
+                </div>
+            </div>
+        </>
+    )
+}
+
 export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const audioRef = useRef<HTMLAudioElement>(null)
     const playerBarRef = useRef<HTMLDivElement>(null)
@@ -196,6 +370,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     const [playContext, setPlayContext] = useState<PlayContext | null>(null)
     const [showQueue, setShowQueue] = useState(false)
+    const [showExpanded, setShowExpanded] = useState(false)
+    const [expandedTab, setExpandedTab] = useState<'nowplaying' | 'queue'>('nowplaying')
     const [queueSearch, setQueueSearch] = useState('')
     const [volume, setVolume] = useState(() => {
         if (typeof window === 'undefined') return 1
@@ -222,6 +398,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const [audioSrc, setAudioSrc] = useState('')
     const dragFromRef = useRef<number | null>(null)
     const queueContainerRef = useRef<HTMLDivElement>(null)
+    const expandedQueueContainerRef = useRef<HTMLDivElement>(null)
     const [queueDropTarget, setQueueDropTarget] = useState<number | null>(null)
     const [draggedQi, setDraggedQi] = useState<number | null>(null)
     const [manualNextIds, setManualNextIds] = useState<Set<string>>(new Set())
@@ -360,6 +537,35 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             pendingPosition.current = song.last_position ?? 0
             const src = await resolveAudioSrc(song.uuid)
             applyAudioSrc(audio, src)
+        }
+    }
+
+    async function reconcilePlayerState(serverState: PlayerState) {
+        if (hasUserPlayedRef.current) return
+        if (audioRef.current && !audioRef.current.paused) return
+        let localState: (PlayerState & { saved_at?: string }) | undefined
+        try {
+            const raw = localStorage.getItem('playerState')
+            if (raw) localState = JSON.parse(raw)
+        } catch {}
+        if (!localState) {
+            await applyPlayerState(serverState)
+            return
+        }
+        const queuesMatch = serverState.current_song_uuid === localState.current_song_uuid
+            && JSON.stringify(serverState.queue) === JSON.stringify(localState.queue)
+        if (queuesMatch) {
+            await applyPlayerState(serverState)
+            return
+        }
+        const serverTime = serverState.updated_at ? new Date(serverState.updated_at).getTime() : Infinity
+        const localTime = localState.saved_at ? new Date(localState.saved_at).getTime() : 0
+        if (localTime > serverTime) {
+            setSyncPrompt({ serverState, localState })
+            await applyPlayerState(localState)
+        } else {
+            showToast('Player synced from another device')
+            await applyPlayerState(serverState)
         }
     }
 
@@ -838,15 +1044,30 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     }, [])
 
-    // Sync React state with actual audio state when app returns to foreground
+    // Sync React state with actual audio state when app returns to foreground;
+    // re-fetch server state if tab was hidden long enough to go stale
     useEffect(() => {
-        function onVisibilityChange() {
-            if (document.visibilityState !== 'visible') return
+        let hiddenAt: number | null = null
+
+        async function onVisibilityChange() {
+            if (document.visibilityState !== 'visible') {
+                hiddenAt = Date.now()
+                return
+            }
             const audio = audioRef.current
-            if (!audio) return
-            setIsPlaying(!audio.paused)
-            setCurrentTime(audio.currentTime)
-            if (isFinite(audio.duration)) setDuration(audio.duration)
+            if (audio) {
+                setIsPlaying(!audio.paused)
+                setCurrentTime(audio.currentTime)
+                if (isFinite(audio.duration)) setDuration(audio.duration)
+            }
+            const wasHiddenMs = hiddenAt !== null ? Date.now() - hiddenAt : 0
+            hiddenAt = null
+            const threshold = (window as unknown as { __playerStaleThresholdMs?: number }).__playerStaleThresholdMs ?? 0
+            if (wasHiddenMs < threshold) return
+            if (!navigator.onLine) return
+            const serverState = await fetchPlayerState().catch(() => undefined)
+            if (!serverState) return
+            await reconcilePlayerState(serverState)
         }
         document.addEventListener('visibilitychange', onVisibilityChange)
         return () => document.removeEventListener('visibilitychange', onVisibilityChange)
@@ -909,6 +1130,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         function onKeyDown(e: KeyboardEvent) {
             const tag = (e.target as HTMLElement).tagName
             if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement).isContentEditable) return
+            if (e.key === 'Escape') { setShowExpanded(false); return }
             const audio = audioRef.current
             if (!audio || !currentRef.current) return
             if (e.code === 'Space') {
@@ -931,34 +1153,16 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         Promise.all([fetchPlayerState(), fetchLibrarySongs()]).then(async ([serverState, libSongs]) => {
             const libMap = new Map((libSongs ?? []).map(s => [s.uuid, s]))
             libMapRef.current = libMap
-
-            let localState: (PlayerState & { saved_at?: string }) | undefined
-            try {
-                const raw = localStorage.getItem('playerState')
-                if (raw) localState = JSON.parse(raw)
-            } catch {}
-
-            const queuesMatch = serverState && localState
-                && serverState.current_song_uuid === localState.current_song_uuid
-                && JSON.stringify(serverState.queue) === JSON.stringify(localState.queue)
-
-            let state: PlayerState | undefined
-            if (serverState && localState && !queuesMatch) {
-                const serverTime = serverState.updated_at ? new Date(serverState.updated_at).getTime() : Infinity
-                const localTime = localState.saved_at ? new Date(localState.saved_at).getTime() : 0
-                if (localTime > serverTime) {
-                    setSyncPrompt({ serverState, localState })
-                    state = localState
-                } else {
-                    showToast('Player synced from another device')
-                    state = serverState
-                }
+            if (serverState) {
+                await reconcilePlayerState(serverState)
             } else {
-                state = serverState ?? localState
+                let localState: PlayerState | undefined
+                try {
+                    const raw = localStorage.getItem('playerState')
+                    if (raw) localState = JSON.parse(raw)
+                } catch {}
+                if (localState && !hasUserPlayedRef.current) await applyPlayerState(localState)
             }
-
-            if (!state || hasUserPlayedRef.current) return
-            await applyPlayerState(state)
         }).catch(() => {})
     }, [])
 
@@ -967,7 +1171,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         try { localStorage.setItem('playerVolume', String(volume)) } catch {}
     }, [volume])
 
-    const QUEUE_ROW_H = 52
     const queueDisplayItemsAll = useMemo(
         () => shuffle && shuffleOrder.length === queue.length
             ? shuffleOrder.map(qi => ({ song: queue[qi], qi }))
@@ -981,6 +1184,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         return queueDisplayItemsAll.filter(i => matchedIds.has(i.song.uuid))
     }, [queueDisplayItemsAll, queueSearch])
     const { start, end, totalHeight, offsetTop } = useVirtualList(queueContainerRef, queueDisplayItems.length, QUEUE_ROW_H, 3, showQueue)
+    const { start: eqStart, end: eqEnd, totalHeight: eqTotalHeight, offsetTop: eqOffsetTop } = useVirtualList(expandedQueueContainerRef, queueDisplayItems.length, QUEUE_ROW_H, 3, showExpanded && expandedTab === 'queue')
 
     useEffect(() => {
         if (!showQueue || !queueContainerRef.current || !current) return
@@ -988,6 +1192,22 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         if (idx >= 0) queueContainerRef.current.scrollTop = Math.max(0, idx * QUEUE_ROW_H - 88)
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [showQueue, current?.uuid])
+
+    useEffect(() => {
+        if (!(showExpanded && expandedTab === 'queue') || !expandedQueueContainerRef.current || !current) return
+        const idx = queueDisplayItems.findIndex(({ song }) => song.uuid === current.uuid)
+        if (idx >= 0) expandedQueueContainerRef.current.scrollTop = Math.max(0, idx * QUEUE_ROW_H - 88)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [showExpanded, expandedTab, current?.uuid])
+
+    useEffect(() => {
+        if (!showExpanded) setExpandedTab('nowplaying')
+    }, [showExpanded])
+
+    useEffect(() => {
+        document.body.style.overflow = showExpanded ? 'hidden' : ''
+        return () => { document.body.style.overflow = '' }
+    }, [showExpanded])
 
     useEffect(() => {
         const el = playerBarRef.current
@@ -1057,13 +1277,134 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                     </div>
                 </div>
             )}
+            {showExpanded && current && p && (
+                <div
+                    className="fixed inset-0 z-[65] bg-[var(--background)]"
+                >
+                    {/* Panel */}
+                    <div
+                        data-testid="player-expanded"
+                        className="relative w-full h-full overflow-hidden flex flex-col bg-[var(--background)] landscape:flex-row"
+                        style={{
+                            paddingLeft: 'env(safe-area-inset-left, 0px)',
+                            paddingRight: 'env(safe-area-inset-right, 0px)',
+                        }}
+                        onClick={e => e.stopPropagation()}
+                    >
+                        {/* Art / Queue column */}
+                        <div className="flex-1 min-h-0 flex flex-col p-8 pb-4
+                                        landscape:w-[45%] landscape:flex-none landscape:h-full landscape:p-8">
+                            {expandedTab === 'queue' ? (
+                                <QueueRowList
+                                    variant="overlay"
+                                    containerRef={expandedQueueContainerRef}
+                                    items={queueDisplayItems}
+                                    start={eqStart} end={eqEnd} totalHeight={eqTotalHeight} offsetTop={eqOffsetTop}
+                                    currentUuid={current.uuid}
+                                    isPlaying={isPlaying}
+                                    dragFromRef={dragFromRef}
+                                    draggedQi={draggedQi} setDraggedQi={setDraggedQi}
+                                    queueDropTarget={queueDropTarget} setQueueDropTarget={setQueueDropTarget}
+                                    manualNextIds={manualNextIds}
+                                    queueSearch={queueSearch} setQueueSearch={setQueueSearch}
+                                    showSearch={queue.length > 5}
+                                    reorderQueue={reorderQueue}
+                                    removeFromQueue={removeFromQueue}
+                                    onPlayAt={qi => { playAt(qi); setExpandedTab('nowplaying') }}
+                                    onPause={pause}
+                                    onResume={resume}
+                                    onSourceNav={() => setShowExpanded(false)}
+                                />
+                            ) : (
+                                <div className="flex-1 flex items-center justify-center">
+                                    {(() => {
+                                        const a = songArtworkUrl(current.uuid, current.artwork_cached, p.artworkUrl100, 600)
+                                        return a
+                                            ? <Image src={a} alt="" width={480} height={480} className="rounded-lg w-full max-w-[72vmin] md:max-w-[360px] aspect-square object-cover shadow-2xl" unoptimized={!!current.artwork_cached} />
+                                            : <div className="w-full max-w-[72vmin] md:max-w-[360px] aspect-square rounded-lg bg-gray-100 dark:bg-gray-800 flex items-center justify-center"><FaMusic size={64} className="text-gray-400" /></div>
+                                    })()}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Controls column */}
+                        <div
+                            className="shrink-0 flex flex-col px-7
+                                       landscape:flex-1 landscape:justify-center landscape:overflow-y-auto landscape:py-6"
+                            style={{ paddingBottom: 'max(1.75rem, env(safe-area-inset-bottom, 1.75rem))' }}
+                        >
+                            {/* Header */}
+                            <div className="flex items-center justify-between py-3 mb-1">
+                                <button onClick={() => setShowExpanded(false)} className="p-2 -ml-2 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors touch-manipulation" aria-label="Close">
+                                    <FaChevronDown size={18} />
+                                </button>
+                                <span className="text-xs uppercase tracking-widest font-medium text-gray-400 dark:text-gray-500">Now Playing</span>
+                                <button
+                                    onClick={() => setExpandedTab(t => t === 'queue' ? 'nowplaying' : 'queue')}
+                                    className={`p-2 -mr-2 transition-colors touch-manipulation ${expandedTab === 'queue' ? 'text-sky-500 dark:text-sky-400' : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'}`}
+                                    aria-label="Toggle queue"
+                                >
+                                    <FaList size={16} />
+                                </button>
+                            </div>
+
+                            {/* Track info */}
+                            <div className="mb-4">
+                                <p className="text-xl font-bold truncate">{p.trackName || 'Unknown title'}</p>
+                                <p className="text-sky-500 dark:text-sky-400 truncate mt-0.5">{p.artistName || 'Unknown artist'}</p>
+                                {p.collectionName && (
+                                    <p className="text-sm text-gray-500 dark:text-gray-400 truncate mt-0.5">{p.collectionName}</p>
+                                )}
+                                {playContext && (
+                                    <Link href={playContext.href} onClick={() => setShowExpanded(false)} className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors mt-0.5 block truncate">
+                                        from {playContext.label}
+                                    </Link>
+                                )}
+                            </div>
+
+                            {/* Progress */}
+                            <div className="mb-1">
+                                <ProgressBar current={currentTime} duration={duration} buffered={buffered} onSeek={handleSeek} />
+                            </div>
+
+                            {/* Transport */}
+                            <div className="flex items-center justify-center gap-7 py-3">
+                                <button aria-pressed={shuffle} onClick={toggleShuffle} className={`shrink-0 transition-colors ${shuffle ? 'text-sky-500 dark:text-sky-400' : 'text-gray-400 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white'}`}><FaRandom size={16} /></button>
+                                <button onClick={skipPrev} disabled={!hasQueue} className="shrink-0 disabled:opacity-30 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors touch-manipulation"><FaStepBackward size={22} /></button>
+                                <button onClick={isPlaying ? pause : resume} className="shrink-0 hover:text-sky-500 dark:hover:text-sky-400 transition-colors touch-manipulation">
+                                    {isBuffering && isPlaying ? <Spinner size={32} /> : isPlaying ? <FaPause size={28} /> : <FaPlay size={28} />}
+                                </button>
+                                <button onClick={skipNext} disabled={!hasQueue} className="shrink-0 disabled:opacity-30 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors touch-manipulation"><FaStepForward size={22} /></button>
+                                <button onClick={toggleRepeat} className={`shrink-0 relative transition-colors ${repeat !== 'off' ? 'text-sky-500 dark:text-sky-400' : 'text-gray-400 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white'}`}>
+                                    <FaRedo size={16} />
+                                    {repeat === 'one' && <span className="absolute -top-1.5 -right-1.5 text-[8px] font-bold leading-none">1</span>}
+                                </button>
+                            </div>
+
+                            {/* Volume */}
+                            <div className="flex items-center gap-3 pt-1">
+                                <button onClick={() => setVolume(v => v > 0 ? 0 : 1)} className="text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors touch-manipulation">
+                                    {volume === 0 ? <FaVolumeMute size={14} /> : <FaVolumeUp size={14} />}
+                                </button>
+                                <div className="flex-1">
+                                    <Slider value={volume} min={0} max={1} step={0.02} onChange={setVolume} label="volume" />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
             {current && p && !isEditorPage && (
                 <>
                     {/* Queue panel */}
                     {showQueue && queue.length > 0 && (
                         <div
                             data-testid="player-queue-panel"
-                            style={{ bottom: 'var(--player-bar-h, 88px)' }}
+                            style={{
+                                bottom: 'var(--player-bar-h, 88px)',
+                                paddingLeft: 'env(safe-area-inset-left, 0px)',
+                                paddingRight: 'env(safe-area-inset-right, 0px)',
+                            }}
                             className="fixed z-[60] left-0 right-0 bg-surface border-t border-gray-100 dark:border-gray-800 flex flex-col max-h-[45vh] shadow-2xl
                                        md:left-auto md:right-4 md:w-[360px] md:max-h-[min(520px,70vh)] md:rounded-2xl md:border md:border-gray-200 md:dark:border-gray-700"
                         >
@@ -1088,93 +1429,30 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                         </button>
                                     </div>
                                 </div>
-                                {queue.length > 5 && (
-                                    <div className="px-4 pb-3">
-                                        <SearchInput value={queueSearch} onChange={setQueueSearch} placeholder="search queue…" testId="queue-search" />
-                                    </div>
-                                )}
                             </div>
-                            {/* virtual scroll rows */}
-                            <div
-                                ref={queueContainerRef}
-                                className="overflow-y-auto flex-1"
-                                onPointerMove={e => {
-                                    const from = dragFromRef.current
-                                    if (from === null) return
-                                    const el = document.elementFromPoint(e.clientX, e.clientY)
-                                    const row = el?.closest('[data-dpos]') as HTMLElement | null
-                                    if (!row) return
-                                    const dpos = parseInt(row.dataset.dpos!)
-                                    if (dpos === from) { setQueueDropTarget(null); return }
-                                    setQueueDropTarget(dpos > from ? dpos + 1 : dpos)
-                                }}
-                                onPointerUp={() => {
-                                    if (dragFromRef.current !== null && queueDropTarget !== null && dragFromRef.current !== queueDropTarget) {
-                                        reorderQueue(dragFromRef.current, queueDropTarget)
-                                    }
-                                    dragFromRef.current = null
-                                    setDraggedQi(null)
-                                    setQueueDropTarget(null)
-                                }}
-                                onPointerLeave={() => {
-                                    dragFromRef.current = null
-                                    setDraggedQi(null)
-                                    setQueueDropTarget(null)
-                                }}
-                            >
-                                {queueSearch && queueDisplayItems.length === 0 && (
-                                    <p data-testid="queue-search-empty" className="text-gray-400 text-xs py-6 text-center">no songs match &ldquo;{queueSearch}&rdquo;</p>
-                                )}
-                                <div style={{ height: totalHeight }}>
-                                    <div style={{ paddingTop: offsetTop }}>
-                                        {queueDisplayItems.slice(start, end).map(({ song, qi }, i) => {
-                                            const dpos = start + i
-                                            const isActive = song.uuid === current.uuid
-                                            const sp = song.properties
-                                            const isBeingDragged = draggedQi === dpos
-                                            const isDropTarget = queueDropTarget === dpos && !isBeingDragged
-                                            const isDropAfter = queueDropTarget === dpos + 1 && dpos === queueDisplayItems.length - 1 && !isBeingDragged
-                                            return (
-                                                <div
-                                                    key={`${song.uuid}-${qi}`}
-                                                    data-qi={qi}
-                                                    data-dpos={dpos}
-                                                    style={{ height: QUEUE_ROW_H }}
-                                                    className={`flex items-center gap-3 px-4 border-t-2 border-b-2 transition-colors select-none ${isDropTarget ? 'border-t-sky-500' : 'border-t-transparent'} ${isDropAfter ? 'border-b-sky-500' : 'border-b-transparent'} ${isBeingDragged ? 'opacity-40' : ''} ${isActive ? 'bg-sky-50 dark:bg-sky-950/30' : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'}`}
-                                                >
-                                                    <span
-                                                        data-testid="queue-drag-handle"
-                                                        className="text-gray-300 dark:text-gray-600 cursor-grab active:cursor-grabbing shrink-0 touch-none select-none p-2 -m-2"
-                                                        onPointerDown={e => { e.preventDefault(); dragFromRef.current = dpos; setDraggedQi(dpos); setQueueDropTarget(null) }}
-                                                    >
-                                                        <FaBars size={14} />
-                                                    </span>
-                                                    <button onClick={() => { if (isActive) { isPlaying ? pause() : resume() } else { playAt(qi) } }} className="flex items-center gap-3 flex-1 text-left min-w-0">
-                                                        {(() => { const a = songArtworkUrl(song.uuid, song.artwork_cached, sp?.artworkUrl100, 200); return a ? <Image src={a} alt="" width={36} height={36} className="rounded shrink-0 object-cover" unoptimized={!!song.artwork_cached} /> : <div className="w-9 h-9 rounded shrink-0 bg-gray-100 dark:bg-gray-800 flex items-center justify-center"><FaMusic size={11} className="text-gray-400" /></div> })()}
-                                                        <div className="flex-1 min-w-0">
-                                                            <div className="flex items-center gap-1.5">
-                                                                <p className={`text-sm font-medium truncate ${isActive ? 'text-sky-500' : ''}`}>{sp?.trackName ?? '—'}</p>
-                                                                {manualNextIds.has(song.uuid) && (
-                                                                    <span className="text-[10px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded bg-sky-100 dark:bg-sky-950/50 text-sky-600 dark:text-sky-400 shrink-0">Queued</span>
-                                                                )}
-                                                            </div>
-                                                            <p className="text-xs text-gray-400 truncate">{sp?.artistName ?? '—'}</p>
-                                                        </div>
-                                                        {isActive && (isPlaying ? <FaPause size={9} className="text-sky-500 shrink-0" /> : <FaPlay size={9} className="text-sky-500 shrink-0" />)}
-                                                    </button>
-                                                    {song.source && (
-                                                        <Link href={song.source.href} onClick={e => { e.stopPropagation(); setShowQueue(false) }} className="text-xs text-gray-400 hover:text-sky-500 truncate max-w-[80px] shrink-0">
-                                                            {song.source.label}
-                                                        </Link>
-                                                    )}
-                                                    <button data-testid="queue-remove" onClick={() => removeFromQueue(qi)} className="shrink-0 text-gray-300 dark:text-gray-600 hover:text-red-400 transition-colors p-2 -m-1 touch-manipulation">
-                                                        <FaTimes size={10} />
-                                                    </button>
-                                                </div>
-                                            )
-                                        })}
-                                    </div>
-                                </div>
+                            <div className="px-4 flex flex-col flex-1 min-h-0">
+                                <QueueRowList
+                                    variant="panel"
+                                    containerRef={queueContainerRef}
+                                    items={queueDisplayItems}
+                                    start={start} end={end} totalHeight={totalHeight} offsetTop={offsetTop}
+                                    currentUuid={current.uuid}
+                                    isPlaying={isPlaying}
+                                    dragFromRef={dragFromRef}
+                                    draggedQi={draggedQi} setDraggedQi={setDraggedQi}
+                                    queueDropTarget={queueDropTarget} setQueueDropTarget={setQueueDropTarget}
+                                    manualNextIds={manualNextIds}
+                                    queueSearch={queueSearch} setQueueSearch={setQueueSearch}
+                                    showSearch={queue.length > 5}
+                                    searchTestId="queue-search"
+                                    emptyTestId="queue-search-empty"
+                                    reorderQueue={reorderQueue}
+                                    removeFromQueue={removeFromQueue}
+                                    onPlayAt={playAt}
+                                    onPause={pause}
+                                    onResume={resume}
+                                    onSourceNav={() => setShowQueue(false)}
+                                />
                             </div>
                         </div>
                     )}
@@ -1183,19 +1461,28 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                         <div className="flex flex-col" style={{ paddingLeft: 'env(safe-area-inset-left, 0px)', paddingRight: 'env(safe-area-inset-right, 0px)', paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
                             {/* Mobile: single row. Desktop: three-column layout */}
                             <div className="flex items-center gap-3 px-4 pt-3 pb-1.5 md:grid md:grid-cols-[1fr_auto_1fr]">
-                                {/* Left: artwork + track info */}
-                                <div className="flex items-center gap-3 min-w-0 flex-1 md:flex-initial">
-                                    {(() => { const a = songArtworkUrl(current?.uuid, current?.artwork_cached, p.artworkUrl100, 200); return a ? <Image src={a} alt="" width={44} height={44} className="rounded shrink-0 w-11 h-11 md:w-9 md:h-9" unoptimized={!!current?.artwork_cached} /> : null })()}
+                                {/* Left: artwork + track info — entire section opens expanded player */}
+                                <div
+                                    data-testid="player-expand"
+                                    className="flex items-center gap-3 min-w-0 flex-1 md:flex-initial cursor-pointer touch-manipulation select-none"
+                                    onClick={() => setShowExpanded(true)}
+                                >
+                                    <div data-testid="player-expand-art" className="shrink-0">
+                                        {(() => { const a = songArtworkUrl(current?.uuid, current?.artwork_cached, p.artworkUrl100, 200); return a
+                                            ? <Image src={a} alt="" width={44} height={44} className="rounded w-11 h-11 md:w-9 md:h-9 pointer-events-none" unoptimized={!!current?.artwork_cached} />
+                                            : <div className="w-11 h-11 md:w-9 md:h-9 rounded bg-gray-100 dark:bg-gray-800 flex items-center justify-center pointer-events-none"><FaMusic size={14} className="text-gray-400" /></div>
+                                        })()}
+                                    </div>
                                     {(() => {
                                         const ctx = current?.source ?? playContext
                                         return ctx ? (
-                                            <Link href={ctx.href} onClick={() => setShowQueue(false)} className="flex flex-col min-w-0 flex-1 group">
+                                            <Link href={ctx.href} onClick={e => { e.stopPropagation(); setShowQueue(false) }} className="flex flex-col min-w-0 flex-1 group">
                                                 <span data-testid="player-track-name" className="text-sm md:text-xs font-medium truncate group-hover:text-sky-500 transition-colors">{p.trackName || 'Unknown title'}</span>
                                                 <span className="text-sm md:text-xs text-sky-500 truncate">{p.artistName || 'Unknown artist'}</span>
                                                 <span className="text-xs text-gray-400 truncate hidden md:block">from {ctx.label}</span>
                                             </Link>
                                         ) : (
-                                            <div className="flex flex-col min-w-0 flex-1">
+                                            <div className="flex flex-col min-w-0 flex-1 pointer-events-none">
                                                 <span data-testid="player-track-name" className="text-sm md:text-xs font-medium truncate">{p.trackName || 'Unknown title'}</span>
                                                 <span className="text-sm md:text-xs text-sky-500 truncate">{p.artistName || 'Unknown artist'}</span>
                                             </div>

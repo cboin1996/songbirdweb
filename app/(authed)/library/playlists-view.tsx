@@ -334,7 +334,7 @@ export default function PlaylistsView({
                     <div className="fixed inset-0 z-40" onClick={() => setMenuPl(null)} />
                     <div
                         data-testid="context-menu"
-                        className="fixed z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl py-1"
+                        className="fixed z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl py-1"
                         style={{ top: menuPos.top, left: menuPos.left }}
                     >
                         <button
