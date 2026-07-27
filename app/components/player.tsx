@@ -1376,29 +1376,33 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                 <ProgressBar current={currentTime} duration={duration} buffered={buffered} onSeek={handleSeek} />
                             </div>
 
-                            {/* Transport */}
-                            <div className="flex items-center justify-center gap-7 py-3">
-                                <button aria-pressed={shuffle} onClick={toggleShuffle} className={`shrink-0 transition-colors ${shuffle ? 'text-sky-500 dark:text-sky-400' : 'text-gray-400 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white'}`}><FaRandom size={16} /></button>
-                                <button onClick={skipPrev} disabled={!hasQueue} className="shrink-0 disabled:opacity-30 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors touch-manipulation"><FaStepBackward size={22} /></button>
-                                <button onClick={isPlaying ? pause : resume} className="shrink-0 hover:text-sky-500 dark:hover:text-sky-400 transition-colors touch-manipulation">
-                                    {isBuffering && isPlaying ? <Spinner size={32} /> : isPlaying ? <FaPause size={28} /> : <FaPlay size={28} />}
-                                </button>
-                                <button onClick={skipNext} disabled={!hasQueue} className="shrink-0 disabled:opacity-30 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors touch-manipulation"><FaStepForward size={22} /></button>
-                                <button onClick={toggleRepeat} className={`shrink-0 relative transition-colors ${repeat !== 'off' ? 'text-sky-500 dark:text-sky-400' : 'text-gray-400 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white'}`}>
-                                    <FaRedo size={16} />
-                                    {repeat === 'one' && <span className="absolute -top-1.5 -right-1.5 text-[8px] font-bold leading-none">1</span>}
-                                </button>
-                            </div>
-
-                            {/* Volume — hidden on iOS; audio.volume is read-only, hardware controls it */}
-                            {supportsVolumeControl && <div className="flex items-center gap-3 pt-1">
-                                <button onClick={() => setVolume(v => v > 0 ? 0 : 1)} className="text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors touch-manipulation">
-                                    {volume === 0 ? <FaVolumeMute size={14} /> : <FaVolumeUp size={14} />}
-                                </button>
-                                <div className="flex-1">
-                                    <Slider value={volume} min={0} max={1} step={0.02} onChange={setVolume} label="volume" />
+                            {/* Transport + volume inline */}
+                            <div className="flex items-center py-3">
+                                <div className="flex-1" />
+                                <div className="flex items-center gap-7">
+                                    <button aria-pressed={shuffle} onClick={toggleShuffle} className={`shrink-0 transition-colors ${shuffle ? 'text-sky-500 dark:text-sky-400' : 'text-gray-400 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white'}`}><FaRandom size={16} /></button>
+                                    <button onClick={skipPrev} disabled={!hasQueue} className="shrink-0 disabled:opacity-30 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors touch-manipulation"><FaStepBackward size={22} /></button>
+                                    <button onClick={isPlaying ? pause : resume} className="shrink-0 hover:text-sky-500 dark:hover:text-sky-400 transition-colors touch-manipulation">
+                                        {isBuffering && isPlaying ? <Spinner size={32} /> : isPlaying ? <FaPause size={28} /> : <FaPlay size={28} />}
+                                    </button>
+                                    <button onClick={skipNext} disabled={!hasQueue} className="shrink-0 disabled:opacity-30 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors touch-manipulation"><FaStepForward size={22} /></button>
+                                    <button onClick={toggleRepeat} className={`shrink-0 relative transition-colors ${repeat !== 'off' ? 'text-sky-500 dark:text-sky-400' : 'text-gray-400 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white'}`}>
+                                        <FaRedo size={16} />
+                                        {repeat === 'one' && <span className="absolute -top-1.5 -right-1.5 text-[8px] font-bold leading-none">1</span>}
+                                    </button>
                                 </div>
-                            </div>}
+                                {/* Volume — hidden on iOS; audio.volume is read-only, hardware controls it */}
+                                <div className="flex-1 flex items-center justify-end gap-1.5">
+                                    {supportsVolumeControl && <>
+                                        <button onClick={() => setVolume(v => v > 0 ? 0 : 1)} className="shrink-0 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors touch-manipulation">
+                                            {volume === 0 ? <FaVolumeMute size={12} /> : <FaVolumeUp size={12} />}
+                                        </button>
+                                        <div className="w-20">
+                                            <Slider value={volume} min={0} max={1} step={0.02} onChange={setVolume} label="volume" />
+                                        </div>
+                                    </>}
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
