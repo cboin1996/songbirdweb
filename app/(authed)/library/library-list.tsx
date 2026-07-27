@@ -1017,8 +1017,10 @@ export default function LibraryList() {
                             <span className="text-xs text-gray-400">{group.length}</span>
                             <button
                                 onClick={() => {
+                                    const ctxId = `genre:${genre}`
+                                    if (playContext?.id === ctxId) { isPlaying ? pause() : resume(); return }
                                     const baseHref = `${routes.library}?view=genres`
-                                    const ctx = { label: genre, href: baseHref, id: `genre:${genre}` }
+                                    const ctx = { label: genre, href: baseHref, id: ctxId }
                                     const songs = group.filter(s => s.properties)
                                     const first = songs[0]
                                     if (!first?.properties) return
