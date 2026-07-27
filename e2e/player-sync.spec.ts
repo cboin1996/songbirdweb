@@ -210,6 +210,8 @@ test.describe('player state sync', () => {
             await page.evaluate(() => localStorage.removeItem('playerState'))
             await page.reload()
             await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 10000 })
+            // Wait for the 2s debounced state save so localStorage is populated before resync
+            await page.waitForFunction(() => !!localStorage.getItem('playerState'), { timeout: 5000 })
 
             // Zero out the stale threshold so any hide→show triggers resync
             await page.evaluate(() => {
