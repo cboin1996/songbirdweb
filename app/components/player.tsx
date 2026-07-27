@@ -538,6 +538,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             const src = await resolveAudioSrc(song.uuid)
             applyAudioSrc(audio, src)
         }
+
+        // Persist baseline so future reconcile can compare timestamps
+        try {
+            localStorage.setItem('playerState', JSON.stringify({
+                ...state,
+                saved_at: state.updated_at ?? new Date().toISOString(),
+            }))
+        } catch {}
     }
 
     async function reconcilePlayerState(serverState: PlayerState) {
