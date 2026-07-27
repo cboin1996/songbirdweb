@@ -1467,10 +1467,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                     className="flex items-center gap-3 min-w-0 flex-1 md:flex-initial cursor-pointer touch-manipulation select-none"
                                     onClick={() => setShowExpanded(true)}
                                 >
-                                    {(() => { const a = songArtworkUrl(current?.uuid, current?.artwork_cached, p.artworkUrl100, 200); return a
-                                        ? <Image src={a} alt="" width={44} height={44} className="rounded shrink-0 w-11 h-11 md:w-9 md:h-9 pointer-events-none" unoptimized={!!current?.artwork_cached} />
-                                        : <div className="w-11 h-11 md:w-9 md:h-9 rounded shrink-0 bg-gray-100 dark:bg-gray-800 flex items-center justify-center pointer-events-none"><FaMusic size={14} className="text-gray-400" /></div>
-                                    })()}
+                                    <div data-testid="player-expand-art" className="shrink-0">
+                                        {(() => { const a = songArtworkUrl(current?.uuid, current?.artwork_cached, p.artworkUrl100, 200); return a
+                                            ? <Image src={a} alt="" width={44} height={44} className="rounded w-11 h-11 md:w-9 md:h-9 pointer-events-none" unoptimized={!!current?.artwork_cached} />
+                                            : <div className="w-11 h-11 md:w-9 md:h-9 rounded bg-gray-100 dark:bg-gray-800 flex items-center justify-center pointer-events-none"><FaMusic size={14} className="text-gray-400" /></div>
+                                        })()}
+                                    </div>
                                     {(() => {
                                         const ctx = current?.source ?? playContext
                                         return ctx ? (

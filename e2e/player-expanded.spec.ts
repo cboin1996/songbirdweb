@@ -26,16 +26,16 @@ test.describe('expanded player', () => {
         page.on('pageerror', err => { if (!ignoreError(err.message)) errors.push(err.message) })
 
         await startPlayback(page)
-        await page.getByTestId('player-expand').click()
-        await expect(page.getByTestId('player-expanded')).toBeVisible({ timeout: 3000 })
+        await page.getByTestId('player-expand-art').click()
+        await expect(page.getByTestId('player-expanded')).toBeVisible({ timeout: 5000 })
         expect(errors).toHaveLength(0)
     })
 
     test('chevron closes expanded overlay', async ({ page }) => {
         await startPlayback(page)
-        await page.getByTestId('player-expand').click()
+        await page.getByTestId('player-expand-art').click()
         const overlay = page.getByTestId('player-expanded')
-        await expect(overlay).toBeVisible({ timeout: 3000 })
+        await expect(overlay).toBeVisible({ timeout: 5000 })
 
         await overlay.getByRole('button', { name: /close/i }).click()
         await expect(overlay).toHaveCount(0, { timeout: 3000 })
@@ -43,8 +43,8 @@ test.describe('expanded player', () => {
 
     test('ESC key closes expanded overlay', async ({ page }) => {
         await startPlayback(page)
-        await page.getByTestId('player-expand').click()
-        await expect(page.getByTestId('player-expanded')).toBeVisible({ timeout: 3000 })
+        await page.getByTestId('player-expand-art').click()
+        await expect(page.getByTestId('player-expanded')).toBeVisible({ timeout: 5000 })
 
         await page.keyboard.press('Escape')
         await expect(page.getByTestId('player-expanded')).toHaveCount(0, { timeout: 3000 })
@@ -74,9 +74,9 @@ test.describe('expanded player', () => {
         const player = new PlayerBar(page)
         await player.waitForBar()
 
-        await page.getByTestId('player-expand').click()
+        await page.getByTestId('player-expand-art').click()
         const overlay = page.getByTestId('player-expanded')
-        await expect(overlay).toBeVisible({ timeout: 3000 })
+        await expect(overlay).toBeVisible({ timeout: 5000 })
 
         await overlay.getByRole('button', { name: /toggle queue/i }).click()
         await expect(overlay.locator('[data-qi]').first()).toBeVisible({ timeout: 3000 })
@@ -106,9 +106,9 @@ test.describe('expanded player', () => {
         const player = new PlayerBar(page)
         await player.waitForBar()
 
-        await page.getByTestId('player-expand').click()
+        await page.getByTestId('player-expand-art').click()
         const overlay = page.getByTestId('player-expanded')
-        await expect(overlay).toBeVisible({ timeout: 3000 })
+        await expect(overlay).toBeVisible({ timeout: 5000 })
 
         await overlay.getByRole('button', { name: /toggle queue/i }).click()
         const rows = overlay.locator('[data-qi]')

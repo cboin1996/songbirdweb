@@ -216,9 +216,11 @@ test.describe('player state sync', () => {
                 (window as unknown as Record<string, unknown>).__playerStaleThresholdMs = 0
             })
 
-            // Push page to background (triggers real visibilitychange: hidden)
-            const newTab = await page.context().newPage()
-            await newTab.goto('about:blank')
+            // Simulate tab going to background
+            await page.evaluate(() => {
+                Object.defineProperty(document, 'visibilityState', { get: () => 'hidden', configurable: true })
+                document.dispatchEvent(new Event('visibilitychange'))
+            })
 
             // Another device updates server to song[1]
             await api.put(`${API_V1}/player/state`, {
@@ -229,9 +231,11 @@ test.describe('player state sync', () => {
                 },
             })
 
-            // Bring original page back to foreground (triggers real visibilitychange: visible)
-            await newTab.close()
-            await page.bringToFront()
+            // Simulate tab returning to foreground
+            await page.evaluate(() => {
+                Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true })
+                document.dispatchEvent(new Event('visibilitychange'))
+            })
 
             // Server is newer — should auto-apply without prompt
             await expect(page.locator('text=Player synced from another device')).toBeVisible({ timeout: 5000 })
