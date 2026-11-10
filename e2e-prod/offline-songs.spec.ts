@@ -453,9 +453,8 @@ test.describe('Offline saving and playback', () => {
     await clearLocalAudio(page)
     await page.reload()
     await lib.waitForSongs()
-    const restoredId = await restoredSongId(page)
 
-    const asked = await recordDownloads(page, route => route.fulfill({ status: 401, body: 'token expired' }))
+    const asked = await recordDownloads(page, route => route.fulfill({ status: 401, body: 'token expired' }), { saveOnly: true })
     // The seven-day refresh token is gone too, so there is no way back. The
     // page's first refresh, made before the first song because a page cannot
     // know how old its token is, still succeeds: this test is about the
@@ -481,9 +480,9 @@ test.describe('Offline saving and playback', () => {
     await expect.poll(() => askedAtRedirect, { timeout: 30000 }).not.toBeNull()
     // Exactly one song asked, not the whole library: the rest were never
     // attempted, so they are not sitting in the failed list waiting for a retry
-    // that cannot work. The player's own song is left out of the count: it may ask
-    // for itself too, and is not part of the save.
-    expect(askedAtRedirect!.filter(id => id !== restoredId)).toHaveLength(1)
+    // that cannot work. Only the save's own requests are counted; the player may
+    // ask for its own song too, and that may be the same song.
+    expect(askedAtRedirect!).toHaveLength(1)
   })
 
   test('save all offline refreshes before each song instead of waiting for a 401', async ({ page }) => {
@@ -510,7 +509,11 @@ test.describe('Offline saving and playback', () => {
     // Both go through to the real API, in the order the page sends them.
     const events: string[] = []
     await page.route('**/v1/auth/refresh', route => { events.push('refresh'); return route.continue() })
-    await recordDownloads(page, route => { events.push('song'); return route.continue() })
+    await recordDownloads(page, route => {
+      // The player's own audio request is not a save: only the fetches are songs.
+      if (route.request().resourceType() === 'fetch') events.push('song')
+      return route.continue()
+    })
 
     await page.getByTestId('save-all-offline').click()
     await expect.poll(() => events.filter(e => e === 'song').length, { timeout: 60000 }).toBe(ids.length)
@@ -564,9 +567,8 @@ test.describe('Offline saving and playback', () => {
     await clearLocalAudio(page)
     await page.reload()
     await lib.waitForSongs()
-    const restoredId = await restoredSongId(page)
 
-    const asked = await recordDownloads(page, route => route.fulfill({ status: 401, body: 'refused' }))
+    const asked = await recordDownloads(page, route => route.fulfill({ status: 401, body: 'refused' }), { saveOnly: true })
     // The refresh is left alone: the real API accepts it, so the token is good
     // and still every download is refused. Nothing a later song does will differ.
 
@@ -580,6 +582,6 @@ test.describe('Offline saving and playback', () => {
     await expect.poll(() => askedAtRedirect, { timeout: 30000 }).not.toBeNull()
     // Exactly one song was tried. Not "fewer than the library": one, so a retry
     // of the rest is not preceded by a refresh and a refused request per song.
-    expect(askedAtRedirect!.filter(id => id !== restoredId)).toHaveLength(1)
+    expect(askedAtRedirect!).toHaveLength(1)
   })
 })

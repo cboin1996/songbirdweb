@@ -223,15 +223,19 @@ export function recordDownloadRequests(page: Page): string[] {
 }
 
 // Intercepts song downloads, recording the id of each. `respond` decides the
-// answer (default: let it through).
+// answer (default: let it through) and applies to every download. `saveOnly`
+// records only the saves' own fetches: the player's audio element asks for its
+// own song too, and which song that is depends on the user's saved state, so a
+// test counting what a save attempted cannot tell the two apart by id.
 export async function recordDownloads(
     page: Page,
     respond: (route: Route) => Promise<void> = route => route.continue(),
+    opts: { saveOnly?: boolean } = {},
 ): Promise<Set<string>> {
     const asked = new Set<string>()
     await page.route('**/v1/download/**', async route => {
         const m = route.request().url().match(DOWNLOAD_ID)
-        if (m) asked.add(m[1])
+        if (m && (!opts.saveOnly || route.request().resourceType() === 'fetch')) asked.add(m[1])
         await respond(route)
     })
     return asked
