@@ -1,6 +1,6 @@
 import { routes, editSongRoute, downloadSongQuery, downloadAlbumQuery } from './routes'
 import { test, expect } from '@playwright/test'
-import { login, apiLoginAs, API_V1, ERROR_USERNAME, ERROR_PASSWORD } from './helpers'
+import { login, apiLoginAs, expectStable, API_V1, ERROR_USERNAME, ERROR_PASSWORD, libraryIds } from './helpers'
 import { EditorPage, CommonPage, LibraryPage, DownloadPage, PlayerBar } from './pages'
 
 test.use({ storageState: 'e2e/.auth/error-user.json' })
@@ -409,8 +409,13 @@ test.describe('error states — song card actions', () => {
         await page.goto(routes.library)
         await library.waitForSongs()
 
+        // Only the kebab's own fetch, not the audio element: the player shares
+        // this endpoint, and a restored queue failing here would put its own
+        // toast up in place of the one under test.
         await page.route('**/v1/download/*', route =>
-            route.fulfill({ status: 500, body: 'Internal Server Error' })
+            route.request().resourceType() === 'media'
+                ? route.continue()
+                : route.fulfill({ status: 500, body: 'Internal Server Error' })
         )
 
         const card = library.songCards.first()
@@ -425,8 +430,11 @@ test.describe('error states — song card actions', () => {
         await page.goto(routes.library)
         await library.waitForSongs()
 
+        // Audio requests pass through — see the note on the download test above.
         await page.route('**/v1/download/*', route =>
-            route.fulfill({ status: 500, body: 'Internal Server Error' })
+            route.request().resourceType() === 'media'
+                ? route.continue()
+                : route.fulfill({ status: 500, body: 'Internal Server Error' })
         )
 
         const card = library.songCards.first()
@@ -640,7 +648,7 @@ test.describe('error states — player', () => {
         await login(page, ERROR_USERNAME, ERROR_PASSWORD)
     })
 
-    test('audio playback failure shows toast', async ({ page }) => {
+    test('audio playback failure on a one-song queue stops instead of looping', async ({ page }) => {
         const common = new CommonPage(page)
         const library = new LibraryPage(page)
         await page.goto(routes.library)
@@ -650,8 +658,275 @@ test.describe('error states — player', () => {
             route.fulfill({ status: 404, body: 'Not Found' })
         )
 
+        // Clicking a card queues that song alone, so the failure limit is one:
+        // there is nothing to skip to, and the old code reloaded the same song
+        // forever because repeat defaults to all.
         await library.songCards.first().click()
-        await expect(common.toastError).toContainText('skipped', { timeout: 10000 })
+        await expect(common.toastError).toContainText('playback stopped', { timeout: 15000 })
+    })
+
+    test('audio playback failure skips a bounded number of songs, then stops', async ({ page }) => {
+        const common = new CommonPage(page)
+        const library = new LibraryPage(page)
+        const player = new PlayerBar(page)
+        await page.goto(routes.library)
+        await library.waitForSongs()
+
+        // Counting toasts cannot measure the cascade: the provider holds exactly
+        // one toast and each new one replaces the last, so the DOM never shows
+        // more than one. Count requests to the download endpoint instead.
+        let downloads = 0
+        page.on('request', r => { if (r.url().includes('/v1/download/')) downloads += 1 })
+        const firstId = (await libraryIds(page))[0]
+        const stopSaved = page.waitForRequest(r =>
+            r.method() === 'PUT' && r.url().includes('/v1/player/state'), { timeout: 30000 })
+        // Spaced out so the cascade cannot outrun the assertions below.
+        await page.route('**/v1/download/*', async route => {
+            await new Promise(r => setTimeout(r, 200))
+            await route.fulfill({ status: 404, body: 'Not Found' })
+        })
+
+        // Play All queues the whole library, so the limit is five and the walk is
+        // observable: intermediate failures keep their per-song "skipped" toast.
+        await library.playAllBtn.click()
+        const started = await player.getTrackName()
+        expect(started).not.toBe('')
+        await expect(common.toastError).toContainText('skipped', { timeout: 15000 })
+        // The walk is bounded and ends in one explicit stop. Before the fix it
+        // wrapped and never ended, because repeat defaults to all.
+        await expect(common.toastError).toContainText('playback stopped', { timeout: 20000 })
+
+        // Stable: nothing starts trying again on its own. Asserting the play
+        // control alone would race the loop, which clears the playing flag
+        // between loads.
+        await expectStable(() => downloads, 4000)
+        await expect(player.playPause).toHaveAttribute('title', 'play')
+        // Landed back on the song it started from, not wherever the walk ended.
+        await expect(player.trackName).toHaveText(started)
+        // And the server was told so: the walk had saved the song it was on, and
+        // a reload would otherwise open on that one.
+        const saved = await stopSaved
+        expect(saved.postDataJSON().current_song_uuid).toBe(firstId)
+    })
+
+    test('playback recovers when the user presses play after the stop', async ({ page }) => {
+        const common = new CommonPage(page)
+        const library = new LibraryPage(page)
+        const player = new PlayerBar(page)
+        await page.goto(routes.library)
+        await library.waitForSongs()
+
+        let blocked = true
+        await page.route('**/v1/download/*', async route => {
+            if (!blocked) return route.continue()
+            await new Promise(r => setTimeout(r, 200))
+            await route.fulfill({ status: 404, body: 'Not Found' })
+        })
+
+        await library.playAllBtn.click()
+        await expect(common.toastError).toContainText('playback stopped', { timeout: 25000 })
+
+        // Nothing but the user leaves the stopped state; pressing play reloads the
+        // errored element.
+        blocked = false
+        await player.playPause.click()
+        await expect(player.playPause).toHaveAttribute('title', 'pause', { timeout: 15000 })
+        await expect.poll(
+            () => page.evaluate(() => document.querySelector('audio')?.currentTime ?? 0),
+            { timeout: 15000 },
+        ).toBeGreaterThan(0.5)
+    })
+
+    test('a 401 on the stream refreshes the session and the same song carries on', async ({ page }) => {
+        const common = new CommonPage(page)
+        const library = new LibraryPage(page)
+        const player = new PlayerBar(page)
+        await page.goto(routes.library)
+        await library.waitForSongs()
+
+        // No proactive refresh: the only refresh this test can see is the one the
+        // failed stream triggers. Without this the page's own first-play refresh
+        // could be the one counted, or could be joined by the retry and hide it.
+        await page.evaluate(() => { (window as unknown as { __tokenRefreshStaleMs: number }).__tokenRefreshStaleMs = Infinity })
+
+        // The token stays expired until a refresh has actually happened, as a
+        // real expiry would. A one-shot 401 is not enough: the first play holds
+        // its first failure and reloads the source once for free, which would
+        // recover without ever refreshing.
+        let served401 = false
+        let refreshes = 0
+        page.on('response', r => {
+            if (r.url().includes('/v1/auth/refresh')) refreshes += 1
+        })
+        await page.route('**/v1/download/*', async route => {
+            if (refreshes === 0) {
+                served401 = true
+                return route.fulfill({ status: 401, body: 'token expired' })
+            }
+            return route.continue()
+        })
+
+        await library.playAllBtn.click()
+        const started = await player.getTrackName()
+        expect(started).not.toBe('')
+
+        // The expiry costs one refresh and a reload of the same song, which then
+        // plays on from where it was: not a skip, not a stop.
+        await expect.poll(
+            () => page.evaluate(() => document.querySelector('audio')?.currentTime ?? 0),
+            { timeout: 15000 },
+        ).toBeGreaterThan(0.5)
+        expect(served401).toBe(true)
+        expect(refreshes).toBe(1)
+        // Still on the same song and still playing it, not skipped past or stopped.
+        await expect(player.trackName).toHaveText(started)
+        await expect(player.playPause).toHaveAttribute('title', 'pause')
+    })
+
+    test('a dead session on the stream sends the user to sign in instead of walking the queue', async ({ page }) => {
+        const library = new LibraryPage(page)
+        await page.goto(routes.library)
+        await library.waitForSongs()
+
+        // The restored song can still be fetching ranges of itself, and a refusal
+        // that lands on one of those redirects before the test is ready to see it.
+        // Wait for the restore to hand it its stream (it does so after the page's
+        // own fetch of the saved state, and a detach any earlier is undone by it),
+        // cut it loose, and arm the refusals only when the click is about to
+        // happen.
+        await expect.poll(
+            () => page.evaluate(() => document.querySelector('audio')?.getAttribute('src') ?? ''),
+            { timeout: 5000 },
+        ).not.toBe('').catch(() => { /* a user with no saved state has nothing to detach */ })
+        await page.evaluate(() => {
+            const audio = document.querySelector('audio')
+            if (!audio) return
+            audio.pause()
+            audio.removeAttribute('src')
+            audio.load()
+        })
+        let armed = false
+        // Songs asked for, not requests made: the browser may fetch one stream more
+        // than once (a probe, a range, the held-error reload), and that is not the
+        // queue being walked.
+        const songsAsked = new Set<string>()
+        page.on('request', r => {
+            const m = armed ? r.url().match(/\/v1\/download\/([^/?]+)/) : null
+            if (m) songsAsked.add(m[1])
+        })
+        await page.route('**/v1/download/*', route =>
+            armed ? route.fulfill({ status: 401, body: 'token expired' }) : route.continue())
+        // The refresh token is gone: no song in the queue can play.
+        await page.route('**/v1/auth/refresh', route =>
+            armed ? route.fulfill({ status: 401, body: 'expired' }) : route.continue())
+
+        // The trip to the login page, watched on the context because the page is
+        // navigating away. The session cookie is really still valid, so the
+        // middleware bounces it straight back; the request is what shows intent.
+        let songsAtRedirect: number | null = null
+        let redirectUrl = ''
+        page.context().on('request', req => {
+            if (armed && songsAtRedirect === null && /\/\?next=/.test(req.url())) {
+                songsAtRedirect = songsAsked.size
+                redirectUrl = req.url()
+            }
+        })
+
+        // The click starts a chain that ends in a navigation, and the page it lands
+        // on fails the same way and navigates again. A real click waits for the
+        // page to settle, before and after, and in that loop never gets to return;
+        // dispatching the event just hands it to the button.
+        armed = true
+        await library.playAllBtn.dispatchEvent('click')
+
+        await expect.poll(() => songsAtRedirect, { timeout: 15000 }).not.toBeNull()
+        // The first song's failure was enough. Walking the queue to the failure
+        // limit would have asked for five songs before saying anything, and then
+        // blamed the connection.
+        expect(songsAtRedirect).toBe(1)
+        // The page is gone before a toast could be read, so the login page is told why.
+        expect(redirectUrl).toContain('expired=1')
+    })
+
+    test('a failure on the last song of a queue that does not repeat stops instead of going quiet', async ({ page }) => {
+        const common = new CommonPage(page)
+        const library = new LibraryPage(page)
+        const player = new PlayerBar(page)
+        await page.goto(routes.library)
+        await library.waitForSongs()
+        const ids = await libraryIds(page)
+        expect(ids.length).toBeGreaterThanOrEqual(3)
+        const lastId = ids[ids.length - 1]
+
+        // Only the last song fails, so the walk to it is ordinary playback.
+        await page.route(`**/v1/download/${lastId}**`, route =>
+            route.fulfill({ status: 404, body: 'Not Found' })
+        )
+
+        await library.playAllBtn.click()
+        await player.waitForTrackName()
+        // Repeat is off, so the last song has nowhere to skip to. (Default is all.)
+        for (let i = 0; i < 3 && (await player.repeat.getAttribute('title')) !== 'repeat: off'; i++) {
+            await player.repeat.click()
+        }
+        await expect(player.repeat).toHaveAttribute('title', 'repeat: off')
+
+        // Step to the end by hand.
+        for (let i = 0; i < ids.length - 1; i++) {
+            const before = await player.getTrackName()
+            await player.next.click()
+            await expect(player.trackName).not.toHaveText(before, { timeout: 10000 })
+        }
+
+        // The failure of the last song is the whole cascade: "skipped" would be a
+        // lie, and silence would leave the player claiming to play.
+        await expect(common.toastError).toContainText('playback stopped', { timeout: 20000 })
+        await expect(player.playPause).toHaveAttribute('title', 'play')
+    })
+
+    test('a song that plays through restores the full failure budget', async ({ page }) => {
+        const common = new CommonPage(page)
+        const library = new LibraryPage(page)
+        await page.goto(routes.library)
+        await library.waitForSongs()
+
+        // Shorten the ten-second progress window so the test does not wait it out.
+        await page.evaluate(() => { (window as unknown as { __playerProgressResetSec: number }).__playerProgressResetSec = 1 })
+
+        const firstId = await library.songCards.first().getAttribute('data-song-id')
+        expect(firstId).toBeTruthy()
+        // Which songs the walk reached, deduped: each one is requested twice (the
+        // load and its one retry), and a Set makes the count independent of that.
+        const requested: string[] = []
+        page.on('request', r => {
+            const m = r.url().match(/\/v1\/download\/([^/?]+)/)
+            if (m) requested.push(m[1])
+        })
+        let blockAll = false
+        await page.route('**/v1/download/*', async route => {
+            if (blockAll || route.request().url().includes(firstId!)) {
+                await new Promise(r => setTimeout(r, 150))
+                return route.fulfill({ status: 404, body: 'Not Found' })
+            }
+            return route.continue()
+        })
+
+        // First song fails and is skipped, so the budget is down one. The second
+        // song plays past the progress window, which puts it back.
+        await library.playAllBtn.click()
+        await expect(common.toastError).toContainText('skipped', { timeout: 20000 })
+        await expect.poll(
+            () => page.evaluate(() => document.querySelector('audio')?.currentTime ?? 0),
+            { timeout: 25000 },
+        ).toBeGreaterThan(1.3)
+
+        // End of track is not a user-initiated start, so the budget the next walk
+        // spends is whatever the progress reset left — five songs, not four.
+        blockAll = true
+        const mark = requested.length
+        await page.evaluate(() => document.querySelector('audio')!.dispatchEvent(new Event('ended')))
+        await expect(common.toastError).toContainText('playback stopped', { timeout: 25000 })
+        expect(new Set(requested.slice(mark)).size).toBe(5)
     })
 
 })

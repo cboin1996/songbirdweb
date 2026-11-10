@@ -46,6 +46,8 @@ const SEARCH_USER = process.env.E2E_SEARCH_USERNAME!
 const SEARCH_PASS = process.env.E2E_SEARCH_PASSWORD!
 const ERROR_USER = process.env.E2E_ERROR_USERNAME!
 const ERROR_PASS = process.env.E2E_ERROR_PASSWORD!
+const OFFLINE_USER = process.env.E2E_OFFLINE_USERNAME!
+const OFFLINE_PASS = process.env.E2E_OFFLINE_PASSWORD!
 
 // Songs to import into the test user's library. no-tags.mp3 is intentionally
 // excluded — it's used by import.spec.ts to test the failed-import path.
@@ -156,6 +158,7 @@ async function globalSetup() {
     if (!LIBRARY_USER || !LIBRARY_PASS) throw new Error('E2E_LIBRARY_USERNAME and E2E_LIBRARY_PASSWORD must be set')
     if (!SEARCH_USER || !SEARCH_PASS) throw new Error('E2E_SEARCH_USERNAME and E2E_SEARCH_PASSWORD must be set')
     if (!ERROR_USER || !ERROR_PASS) throw new Error('E2E_ERROR_USERNAME and E2E_ERROR_PASSWORD must be set')
+    if (!OFFLINE_USER || !OFFLINE_PASS) throw new Error('E2E_OFFLINE_USERNAME and E2E_OFFLINE_PASSWORD must be set')
 
     // --- Admin: create all test users if missing ---
     const admin = await request.newContext({ baseURL: API_BASE })
@@ -183,6 +186,7 @@ async function globalSetup() {
         { username: LIBRARY_USER, password: LIBRARY_PASS },
         { username: SEARCH_USER, password: SEARCH_PASS },
         { username: ERROR_USER, password: ERROR_PASS },
+        { username: OFFLINE_USER, password: OFFLINE_PASS },
     ]
 
     for (const u of allTestUsers) {
@@ -223,6 +227,7 @@ async function globalSetup() {
         seedUser(LIBRARY_USER, LIBRARY_PASS, 'library-user.json'),
         seedUser(SEARCH_USER, SEARCH_PASS, 'search-user.json'),
         seedUser(ERROR_USER, ERROR_PASS, 'error-user.json'),
+        seedUser(OFFLINE_USER, OFFLINE_PASS, 'offline-user.json'),
     ])
 }
 

@@ -281,4 +281,102 @@ test.describe('player queue', () => {
             await api.dispose()
         }
     })
+
+    // The panel indexes the queue with each entry of the saved shuffle order, so
+    // an index that is not there took the whole app down the moment the panel
+    // opened. Saved state comes from the server and from other devices.
+    test('a corrupt saved shuffle order does not take the queue panel down', async ({ page }) => {
+        const errors: string[] = []
+        page.on('pageerror', err => { if (!ignoreError(err.message)) errors.push(err.message) })
+        const player = new PlayerBar(page)
+        const api = await apiLoginAs(QUEUE_USERNAME, QUEUE_PASSWORD)
+        try {
+            const songs = (await (await api.get(`${API_V1}/songs/library`)).json()) as { uuid: string }[]
+            test.skip(songs.length < 3, 'need at least 3 library songs')
+
+            // Right length, one index past the end and one slot unaccounted for.
+            const order = songs.map((_, i) => i)
+            order[order.length - 1] = songs.length
+            await api.put(`${API_V1}/player/state`, {
+                data: {
+                    shuffle: true, repeat: 'off',
+                    queue: songs.map(s => s.uuid), queue_index: 0,
+                    shuffle_order: order, shuffle_position: 0,
+                },
+            })
+
+            await page.goto(routes.library)
+            await player.waitForBar(10000)
+            await player.openQueue()
+
+            await expect.poll(() => player.queueRows().count(), { timeout: 5000 }).toBe(songs.length)
+            expect(errors, `Page errors: ${errors.join('\n')}`).toHaveLength(0)
+        } finally {
+            await api.dispose()
+        }
+    })
+
+    // A "play next" song that is removed from the queue has to leave the manual
+    // list too. The list's length sets where the next "play next" lands, so a stale
+    // entry put it past the end and left the shuffle order naming a slot that does
+    // not exist.
+    test('"Play next" after removing a "Play next" song keeps the shuffle order valid', async ({ page }) => {
+        const errors: string[] = []
+        page.on('pageerror', err => { if (!ignoreError(err.message)) errors.push(err.message) })
+        const lib = new LibraryPage(page)
+        const player = new PlayerBar(page)
+        const api = await apiLoginAs(QUEUE_USERNAME, QUEUE_PASSWORD)
+        try {
+            const songs = (await (await api.get(`${API_V1}/songs/library`)).json()) as { uuid: string }[]
+            test.skip(songs.length < 3, 'need at least 3 library songs')
+
+            // Playing the last song of the queue, with one library song left out
+            // of it to be queued by hand.
+            const queued = songs.slice(0, -1)
+            const extra = songs[songs.length - 1]
+            await api.put(`${API_V1}/player/state`, {
+                data: {
+                    shuffle: true, repeat: 'off',
+                    queue: queued.map(s => s.uuid), queue_index: queued.length - 1,
+                    shuffle_order: queued.map((_, i) => i), shuffle_seed: 7, shuffle_position: queued.length - 1,
+                },
+            })
+
+            await page.goto(routes.library)
+            await lib.waitForSongs()
+            await player.waitForBar(10000)
+
+            async function playNextExtra() {
+                const card = page.locator(`[data-song-id="${extra.uuid}"]`).first()
+                await card.hover()
+                await lib.kebab(card).click()
+                await lib.kebabMenu().getByRole('button', { name: 'Play next' }).click()
+                await expect(lib.kebabMenu()).not.toBeVisible({ timeout: 3000 })
+            }
+
+            await playNextExtra()
+            await player.openQueue()
+            await expect.poll(() => player.queueRows().count(), { timeout: 5000 }).toBe(queued.length + 1)
+            const row = page.locator(`[data-qi="${queued.length}"]`)
+            await row.hover()
+            await player.queueRemoveBtn(row).click()
+            await expect.poll(() => player.queueRows().count(), { timeout: 5000 }).toBe(queued.length)
+            await player.closeQueue()
+
+            await playNextExtra()
+            await player.openQueue()
+            await expect.poll(() => player.queueRows().count(), { timeout: 5000 }).toBe(queued.length + 1)
+
+            // What the next device would load: a permutation of the queue.
+            await expect.poll(async () => {
+                const state = await (await api.get(`${API_V1}/player/state`)).json()
+                const order: number[] = state?.shuffle_order ?? []
+                return order.length === queued.length + 1
+                    && [...order].sort((a, b) => a - b).every((v, i) => v === i)
+            }, { timeout: 10000, message: 'saved shuffle order should be a permutation of the queue' }).toBe(true)
+            expect(errors, `Page errors: ${errors.join('\n')}`).toHaveLength(0)
+        } finally {
+            await api.dispose()
+        }
+    })
 })

@@ -114,6 +114,8 @@ jobs:
           E2E_SEARCH_PASSWORD: e2e-SearchPass-1
           E2E_ERROR_USERNAME: e2e-error
           E2E_ERROR_PASSWORD: e2e-ErrorPass-1
+          E2E_OFFLINE_USERNAME: e2e-offline
+          E2E_OFFLINE_PASSWORD: e2e-OfflinePass-1
         run: make ${{ matrix.make_target }}
 
       - name: Upload Playwright report

@@ -1,7 +1,8 @@
 'use client'
 import { useEffect, useRef, useState } from "react";
-import { changePassword, fetchLibrarySongs } from "../../lib/data";
-import { clearOfflineCache, getCachedSongIds, getStorageEstimate, formatBytes, getSongFile, uncacheSong, cacheSong } from "../../lib/offline";
+import { AuthExpiredError, RefreshUnavailableError, changePassword, fetchLibrarySongs } from "../../lib/data";
+import { clearOfflineCache, getCachedSongIds, getStorageEstimate, formatBytes, getSongFile, uncacheSong, cacheSong, reportSaveResult, SaveOutcome } from "../../lib/offline";
+import { useToast } from "../../components/toast";
 import { clearServerOfflineSongs } from "../../lib/data";
 import { EVENTS } from "../../lib/events";
 import { useOfflineSave } from "../../lib/offline-save-context";
@@ -105,6 +106,7 @@ function CacheAudit() {
     const [running, setRunning] = useState(false)
     const [result, setResult] = useState<AuditResult | null>(null)
     const [fixing, setFixing] = useState(false)
+    const { showToast } = useToast()
 
     async function runAudit() {
         setRunning(true)
@@ -140,6 +142,7 @@ function CacheAudit() {
     async function fixIssues() {
         if (!result) return
         setFixing(true)
+        let stopped: SaveOutcome | null = null
         for (const id of result.orphaned) {
             setFixProgress(`removing orphan…`)
             await uncacheSong(id)
@@ -150,8 +153,16 @@ function CacheAudit() {
             await uncacheSong(id)
             try {
                 await cacheSong(id)
-            } catch { /* will show as still corrupt on re-audit */ }
+            } catch (err) {
+                // Anything else leaves this one song missing, which the re-audit
+                // below reports. A session or connection failure would do the same
+                // to every remaining song, so stop and say why.
+                if (err instanceof AuthExpiredError) stopped = 'auth-expired'
+                else if (err instanceof RefreshUnavailableError) stopped = 'unavailable'
+                if (stopped) break
+            }
         }
+        if (stopped) reportSaveResult({ failed: new Set(), outcome: stopped }, showToast)
         setFixProgress('')
         setFixing(false)
         await refreshCachedIds()

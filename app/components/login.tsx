@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import Input from "./input";
 import { login } from "../lib/data";
 import { routes } from "../lib/routes";
+import { safeNext } from "../lib/safe-next";
 
 export default function Login() {
     const router = useRouter()
@@ -16,10 +17,13 @@ export default function Login() {
         sending: "signing in…",
         unauthorized: "invalid credentials",
         error: "server unavailable",
+        expired: "session expired — sign in again",
     }
     const [username, setUsername] = useState('')
     const [password, setPassword] = useState('')
-    const [status, setStatus] = useState(statuses.idle)
+    // Said in the status slot beside the bird, like every other message here, so
+    // a session that ran out reads as information and not as an error.
+    const [status, setStatus] = useState(searchParams.get('expired') === '1' ? statuses.expired : statuses.idle)
 
     const isSending = status === statuses.sending
 
@@ -29,7 +33,7 @@ export default function Login() {
         const result = await login(username, password)
         if (result === 401) { setStatus(statuses.unauthorized); return }
         if (result === 'error') { setStatus(statuses.error); return }
-        window.location.href = next ?? routes.download
+        window.location.href = safeNext(next, window.location.origin) ?? routes.download
     }
 
     return (
@@ -60,7 +64,14 @@ export default function Login() {
                             >
                                 <FaDove size="20" className="hover:text-sky-600" />
                             </button>
-                            {status && <p className={status === statuses.sending ? 'text-gray-400' : 'text-red-500'}>{status}</p>}
+                            {status && (
+                                <p
+                                    data-testid={status === statuses.expired ? 'login-expired' : undefined}
+                                    className={status === statuses.sending || status === statuses.expired ? 'text-gray-400' : 'text-red-500'}
+                                >
+                                    {status}
+                                </p>
+                            )}
                         </div>
                     </div>
                 </form>

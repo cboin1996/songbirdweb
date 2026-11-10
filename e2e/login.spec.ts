@@ -1,6 +1,6 @@
 import { routes } from './routes'
 import { test, expect } from '@playwright/test'
-import { login } from './helpers'
+import { login, USERNAME, PASSWORD } from './helpers'
 
 test.beforeEach(async ({ page }) => {
   await page.context().clearCookies()
@@ -35,6 +35,34 @@ test('authenticated user visiting / is redirected to /download', async ({ page }
 test('unauthenticated user visiting /download is redirected to /', async ({ page }) => {
   await page.goto(routes.download)
   await expect(page).toHaveURL('/')
+})
+
+test('login follows a same-origin next path', async ({ page }) => {
+  await page.goto('/?next=' + encodeURIComponent(routes.library))
+  await page.getByPlaceholder('username').fill(USERNAME)
+  await page.getByPlaceholder('password').fill(PASSWORD)
+  await expect(page.getByTestId('login-submit')).toBeEnabled({ timeout: 5000 })
+  await page.getByTestId('login-submit').click()
+  await expect(page).toHaveURL(new RegExp(routes.library))
+})
+
+test('login says why when the session expired, and only then', async ({ page }) => {
+  await page.goto('/?next=' + encodeURIComponent(routes.library) + '&expired=1')
+  await expect(page.getByTestId('login-expired')).toBeVisible()
+  await page.goto('/?next=' + encodeURIComponent(routes.library))
+  await expect(page.getByTestId('login-submit')).toBeVisible()
+  await expect(page.getByTestId('login-expired')).toHaveCount(0)
+})
+
+test('login ignores a next that points off-site', async ({ page }) => {
+  // Stub the foreign host so a regression lands on a known page instead of the network.
+  await page.route('https://evil.example/**', route => route.fulfill({ status: 200, body: 'off-site' }))
+  await page.goto('/?next=' + encodeURIComponent('https://evil.example/phish'))
+  await page.getByPlaceholder('username').fill(USERNAME)
+  await page.getByPlaceholder('password').fill(PASSWORD)
+  await expect(page.getByTestId('login-submit')).toBeEnabled({ timeout: 5000 })
+  await page.getByTestId('login-submit').click()
+  await expect(page).toHaveURL(/\/download/)
 })
 
 test('logout clears session and redirects to /', async ({ page }) => {

@@ -51,7 +51,10 @@ and starts a prod server automatically; just run `npx playwright test --project=
 | `navigation.spec.ts`   | Every authed page loads without console errors                   |
 | `library.spec.ts`      | View tabs, search, letter rail, scrub bar                        |
 | `bulk-select.spec.ts`  | Select mode, bulk action bar, bulk add to playlist               |
-| `player.spec.ts`       | Play/pause, skip, shuffle, repeat, queue drag, source links      |
+| `player.spec.ts`       | Play/pause, skip, shuffle, repeat (a repeat-all lap plays every song once), queue drag, source links |
+| `player-sync.spec.ts`  | Server-state restore, cross-device resync on tab return (what it adopts, what it must not clobber), token refresh on return |
+| `error-states.spec.ts` | API failures per page, and playback failure: one silent retry, bounded error cascade, stop on the last song, expired session sends the user to sign in |
+| `search.spec.ts`       | Library search and queue-panel search                            |
 | `queue.spec.ts`        | Queue panel, skip-next, manual-next                              |
 | `playlist.spec.ts`     | Create / add / rename / delete                                    |
 | `editor.spec.ts`       | Modal open, properties, cuts/fades, draft save                    |
@@ -70,7 +73,8 @@ and starts a prod server automatically; just run `npx playwright test --project=
 | File              | Coverage                                                              |
 |-------------------|-----------------------------------------------------------------------|
 | `sw.spec.ts`      | SW registers, becomes controller, version bumps purge old caches      |
-| `offline.spec.ts` | `/library` from cache when offline, `/offline` fallback, manifest, full auth→play flow no errors |
+| `offline.spec.ts` | `/library` from cache when offline, `/offline` fallback, manifest, cache audit — read-only, main test user |
+| `offline-songs.spec.ts` | Saving songs and playing them offline: saved song plays, offline advance steps over unsaved songs (shuffle, repeat-all laps, end of queue), first play in airplane mode, the 401-on-download retry, save-all's refresh (before each song, dead refresh, refused downloads). Serial, own `E2E_OFFLINE` user — these write the user's server-side offline list and player state |
 
 ### `e2e-mobile/` (mobile project)
 
@@ -84,7 +88,7 @@ Tests read from `.env.local` at repo root:
 
 | Var                       | Purpose                                                        |
 |---------------------------|----------------------------------------------------------------|
-| `TEST_USERNAME` / `TEST_PASSWORD` | Shared read-only test user (admin, info, nav, login, offline, share, smoke, playlist) |
+| `TEST_USERNAME` / `TEST_PASSWORD` | Shared read-only test user (admin, info, nav, login, `e2e-prod/offline`, share, smoke, playlist) |
 | `E2E_ADMIN_USERNAME` / `_PASSWORD` | Admin for global-setup user provisioning             |
 | `E2E_EDITOR_USERNAME` / `_PASSWORD` | editor.spec.ts                                     |
 | `E2E_BULK_USERNAME` / `_PASSWORD`   | bulk-select.spec.ts                                |
@@ -97,6 +101,7 @@ Tests read from `.env.local` at repo root:
 | `E2E_LIBRARY_USERNAME` / `_PASSWORD` | library.spec.ts                                   |
 | `E2E_SEARCH_USERNAME` / `_PASSWORD`  | search.spec.ts (library search block)             |
 | `E2E_ERROR_USERNAME` / `_PASSWORD`   | error-states.spec.ts                              |
+| `E2E_OFFLINE_USERNAME` / `_PASSWORD` | e2e-prod/offline-songs.spec.ts                    |
 | `NEXT_PUBLIC_API_BASE_URL`        | Empty in dev (browser uses relative URLs through Next proxy) |
 | `E2E_API_BASE_URL`                | Override when API is on a different host                |
 
@@ -127,6 +132,16 @@ UI for setup.
 | `purgePlaylistsByPrefix(api, prefix)` | Delete any playlist whose name starts with `prefix`       |
 | `pickFirstLibrarySong(api)`           | Grab any library song UUID + track for tests that just need *a* song |
 | `ignoreError(msg)`                    | Console-error allow-list (AbortError, favicon 404, fetch-during-nav, etc.) |
+| `clearLocalAudio(page)`               | Empty the OPFS audio folder and the saved-songs index      |
+| `libraryIds(page)`                    | Song ids in library order (each song renders two cards, so deduped) |
+| `saveSongOffline(page, uuid)`         | Save one song offline through its menu and wait until held |
+| `playLibraryPaused(page, opts)`       | Start Play All, set shuffle/repeat, and leave it paused    |
+| `setVisibility(page, state)`          | Drive a tab hide/show the way the player observes it       |
+| `songTrackName(page, uuid)`           | The displayed track name of a library song                 |
+| `recordDownloadRequests(page)`        | Ids of every song-audio request the page makes, in order   |
+| `recordDownloads(page, respond?)`     | Intercept song downloads, recording ids; `respond` decides the answer |
+| `restoredSongId(page)`                | The song the player restored on load, read off the stream URL |
+| `expectStable(read, ms?)`             | Assert a value does not change for `ms` — for "nothing happens" checks without a sleep |
 
 ## State isolation
 
@@ -134,12 +149,15 @@ UI for setup.
 a seeded library of 9 fixture songs and its own storageState file. This prevents
 cross-spec interference when tests run in parallel across 4 workers.
 
-**Read-only specs** (admin, info, navigation, login, offline, share, smoke, playlist)
+**Read-only specs** (admin, info, navigation, login, `e2e-prod/offline`, share, smoke, playlist)
 share the main test user since they don't mutate server state that other specs depend on.
+A spec that saves songs offline or presses Play All is not read-only: it writes the
+user's server-side offline list and player state, so it gets its own user
+(`e2e-prod/offline-songs.spec.ts`).
 
 **Write specs** that mutate player state, settings, or library contents get dedicated
 users: player, sync, download, settings, library, search, error-states, editor,
-bulk-select, import, queue.
+bulk-select, import, queue, offline.
 
 To add a new isolated user:
 1. Add env vars to `.env.local`, `.github/workflows/test.yml`
