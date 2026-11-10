@@ -12,6 +12,7 @@ export default function Login() {
     const router = useRouter()
     const searchParams = useSearchParams()
     const next = searchParams.get('next')
+    const expired = searchParams.get('expired') === '1'
     const statuses = {
         idle: "",
         sending: "signing in…",
@@ -37,6 +38,7 @@ export default function Login() {
         <div className="grid min-h-screen grid-rows-[20px_1fr_20px] items-center justify-items-center gap-16 p-8 pb-20 sm:p-20">
             <main className="row-start-2 flex flex-col items-center gap-[32px]">
                 <p className="font-medium">songbird.</p>
+                {expired && <p data-testid="login-expired" className="text-amber-500">session expired — sign in again</p>}
                 <form onSubmit={handleSubmit}>
                     <div className="flex flex-col items-center gap-3">
                         <Input

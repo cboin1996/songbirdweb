@@ -824,8 +824,12 @@ test.describe('error states — player', () => {
         // navigating away. The session cookie is really still valid, so the
         // middleware bounces it straight back; the request is what shows intent.
         let songsAtRedirect: number | null = null
+        let redirectUrl = ''
         page.context().on('request', req => {
-            if (armed && songsAtRedirect === null && /\/\?next=/.test(req.url())) songsAtRedirect = songsAsked.size
+            if (armed && songsAtRedirect === null && /\/\?next=/.test(req.url())) {
+                songsAtRedirect = songsAsked.size
+                redirectUrl = req.url()
+            }
         })
 
         // The click starts a chain that ends in a navigation, and the page it lands
@@ -840,6 +844,8 @@ test.describe('error states — player', () => {
         // limit would have asked for five songs before saying anything, and then
         // blamed the connection.
         expect(songsAtRedirect).toBe(1)
+        // The page is gone before a toast could be read, so the login page is told why.
+        expect(redirectUrl).toContain('expired=1')
     })
 
     test('a failure on the last song of a queue that does not repeat stops instead of going quiet', async ({ page }) => {

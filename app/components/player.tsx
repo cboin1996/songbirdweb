@@ -14,6 +14,7 @@ import { getSongFile, cacheArtworkUrls } from "../lib/offline"
 import { useOfflineSave } from "../lib/offline-save-context"
 import { createBlobSlot } from "../lib/blob-slot"
 import { readTestOverride } from "../lib/test-overrides"
+import { isValidShuffleOrder } from "../lib/shuffle-order"
 import Slider from "./slider"
 import { routes } from "../lib/routes"
 
@@ -671,7 +672,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
         const seed = state.shuffle_seed
         const savedPos = state.shuffle_position ?? 0
-        if (state.shuffle_order && state.shuffle_order.length === restoredQueue.length) {
+        if (isValidShuffleOrder(state.shuffle_order, restoredQueue.length)) {
             shuffleOrderRef.current = state.shuffle_order
             if (seed != null) shuffleSeedRef.current = seed
             shufflePosRef.current = Math.max(0, Math.min(savedPos, state.shuffle_order.length - 1))
@@ -851,7 +852,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     function insertNext(song: PlayableSong, silent = false) {
 
         const q = [...queueRef.current]
-        const insertAt = queueIndexRef.current + 1 + manualNextRef.current.length
+        // Clamped because splice clamps: an index past the end would put the song
+        // last in the queue but leave the shuffle order naming a slot that is not there.
+        const insertAt = Math.min(queueIndexRef.current + 1 + manualNextRef.current.length, q.length)
         q.splice(insertAt, 0, song)
         queueRef.current = q
         manualNextRef.current.push(song)
@@ -897,6 +900,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         queueRef.current = q
         if (index <= currentIdx) queueIndexRef.current = Math.max(-1, currentIdx - 1)
         setQueue([...q])
+        // A manually queued song that leaves the queue leaves the manual list too:
+        // the count sets where the next "play next" lands, so a stale entry puts
+        // it a slot too far.
+        if (songId && manualNextRef.current.some(s => s.uuid === songId)) {
+            manualNextRef.current = manualNextRef.current.filter(s => s.uuid !== songId)
+            setManualNextIds(new Set(manualNextRef.current.map(s => s.uuid)))
+        }
         if (shuffleRef.current && shuffleOrderRef.current.length > 0) {
             const removedShufflePos = shuffleOrderRef.current.indexOf(index)
             const order = shuffleOrderRef.current
@@ -1571,7 +1581,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     }, [volume])
 
     const queueDisplayItemsAll = useMemo(
-        () => shuffle && shuffleOrder.length === queue.length
+        () => shuffle && isValidShuffleOrder(shuffleOrder, queue.length)
             ? shuffleOrder.map(qi => ({ song: queue[qi], qi }))
             : queue.map((song, qi) => ({ song, qi })),
         [shuffle, shuffleOrder, queue]

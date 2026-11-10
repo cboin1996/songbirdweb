@@ -46,6 +46,14 @@ test('login follows a same-origin next path', async ({ page }) => {
   await expect(page).toHaveURL(new RegExp(routes.library))
 })
 
+test('login says why when the session expired, and only then', async ({ page }) => {
+  await page.goto('/?next=' + encodeURIComponent(routes.library) + '&expired=1')
+  await expect(page.getByTestId('login-expired')).toBeVisible()
+  await page.goto('/?next=' + encodeURIComponent(routes.library))
+  await expect(page.getByTestId('login-submit')).toBeVisible()
+  await expect(page.getByTestId('login-expired')).toHaveCount(0)
+})
+
 test('login ignores a next that points off-site', async ({ page }) => {
   // Stub the foreign host so a regression lands on a known page instead of the network.
   await page.route('https://evil.example/**', route => route.fulfill({ status: 200, body: 'off-site' }))

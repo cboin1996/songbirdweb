@@ -40,3 +40,19 @@ describe('redirectToLogin after logout', () => {
         await pending
     })
 })
+
+// Where a dead session sends the user. The page navigates away the moment this
+// is set, so a toast raised just before it never gets seen; the login page has to
+// say why, and it can only do that from the URL.
+describe('loginRedirectUrl', () => {
+    it('keeps the page being left and says the session expired', async () => {
+        const data = await load()
+        expect(data.loginRedirectUrl('/library', '?sort=name'))
+            .toBe('/?next=%2Flibrary%3Fsort%3Dname&expired=1')
+    })
+
+    it('works for a page with no query', async () => {
+        const data = await load()
+        expect(data.loginRedirectUrl('/download', '')).toBe('/?next=%2Fdownload&expired=1')
+    })
+})

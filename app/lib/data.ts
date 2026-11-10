@@ -85,8 +85,14 @@ export function redirectToLogin(): boolean {
   if (signingOut) return false
   if (window.location.pathname === '/') return false
   if (!navigator.onLine) return false
-  window.location.href = '/?next=' + encodeURIComponent(window.location.pathname + window.location.search)
+  window.location.href = loginRedirectUrl(window.location.pathname, window.location.search)
   return true
+}
+
+// The page navigates away the moment this is set, so a toast raised just before
+// it is gone before it can be read. The login page reads `expired` and says why.
+export function loginRedirectUrl(pathname: string, search: string): string {
+  return '/?next=' + encodeURIComponent(pathname + search) + '&expired=1'
 }
 
 // AbortSignal.timeout is missing from older browsers and throws synchronously
