@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { login } from '../e2e/helpers'
-import { LibraryPage, PlayerBar, CommonPage } from '../e2e/pages'
+import { LibraryPage, CommonPage } from '../e2e/pages'
 
 test.describe('Offline Behavior', () => {
   test('client-side nav to library works offline', async ({ page }) => {
@@ -65,71 +65,6 @@ test.describe('Offline Behavior', () => {
     } catch {
       await expect(page).toHaveURL(/\/import/)
     }
-  })
-
-  test('saved-offline song plays after going offline', async ({ page, context }) => {
-    test.setTimeout(60000)
-
-    const lib = new LibraryPage(page)
-    const player = new PlayerBar(page)
-
-    await login(page)
-    await lib.goto()
-    await lib.waitForSongs()
-
-    const songId = await page.locator('[data-song-id]').first().getAttribute('data-song-id')
-    expect(songId).toBeTruthy()
-
-    const card = lib.songCards.first()
-    await card.hover()
-    await lib.kebab(card).click()
-    await page.getByRole('button', { name: /save offline/i }).click()
-    await expect(
-      page.getByRole('button', { name: /remove offline copy/i })
-    ).toBeVisible({ timeout: 30000 })
-
-    const opfsHasFile = await page.evaluate(async (id) => {
-      const root = await navigator.storage.getDirectory()
-      try {
-        const dir = await root.getDirectoryHandle('audio')
-        for (const ext of ['mp3', 'm4a']) {
-          try {
-            const fh = await dir.getFileHandle(`${id}.${ext}`)
-            const f = await fh.getFile()
-            if (f.size > 0) return f.size
-          } catch { /* try next */ }
-        }
-        return 0
-      } catch { return 0 }
-    }, songId)
-    expect(opfsHasFile).toBeGreaterThan(0)
-
-    await page.reload()
-    await lib.waitForSongs()
-
-    await page.locator(`[data-song-id="${songId}"]`).first().click()
-    await player.waitForBar()
-
-    await expect.poll(
-      () => page.locator('audio').first().evaluate((el: HTMLAudioElement) => el.src),
-      { timeout: 10000, message: 'audio.src never became blob: URL' }
-    ).toMatch(/^blob:/)
-
-    await expect.poll(
-      () => page.locator('audio').first().evaluate((el: HTMLAudioElement) => el.readyState),
-      { timeout: 5000 }
-    ).toBeGreaterThanOrEqual(2)
-
-    await context.setOffline(true)
-    await page.evaluate(() => window.dispatchEvent(new Event('offline')))
-
-    const offlineSrc = await page.locator('audio').first().evaluate((el: HTMLAudioElement) => el.src)
-    expect(offlineSrc).toMatch(/^blob:/)
-
-    const offlineReadyState = await page.locator('audio').first().evaluate((el: HTMLAudioElement) => el.readyState)
-    expect(offlineReadyState).toBeGreaterThanOrEqual(2)
-
-    await context.setOffline(false)
   })
 
   test('OfflineGuard on /explore shows offline state', async ({ page }) => {

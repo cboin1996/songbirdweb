@@ -3,10 +3,10 @@ import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore } from
 import Image from "next/image"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { LibrarySong, Playlist, EligibleSong, artworkUrl, songArtworkUrl, fetchLibrarySongs, fetchPlaylists, fetchPlaylistSongs, fetchEligibleSongs, fetchDrafts, publishSongs, removeFromLibrary, downloadSongToFile, addSongToPlaylist, bulkRemoveFromLibrary, bulkAddSongsToPlaylist, syncOfflineSongs, addServerOfflineSong, removeServerOfflineSong, clearServerOfflineSongs } from "../../lib/data"
+import { LibrarySong, Playlist, EligibleSong, artworkUrl, songArtworkUrl, fetchLibrarySongs, fetchPlaylists, fetchPlaylistSongs, fetchEligibleSongs, fetchDrafts, publishSongs, removeFromLibrary, downloadSongToFile, addSongToPlaylist, bulkRemoveFromLibrary, bulkAddSongsToPlaylist, syncOfflineSongs, removeServerOfflineSong, clearServerOfflineSongs } from "../../lib/data"
 import { queryKeys } from "../../lib/query-keys"
 import SongPickerModal, { PickerSong } from "../../components/song-picker-modal"
-import { cacheSong, uncacheSong, cacheArtworkUrls } from "../../lib/offline"
+import { saveSongsOffline, reportSaveResult, uncacheSong, cacheArtworkUrls } from "../../lib/offline"
 import { useOfflineSave } from "../../lib/offline-save-context"
 import { useOnline } from "../../lib/use-online"
 import Song from "../../components/song"
@@ -280,10 +280,7 @@ export default function LibraryList() {
     async function saveAllOffline() {
         const freshCached = await refreshCachedIds()
         const uncached = displaySongs.filter(s => s.properties && !freshCached.has(s.uuid))
-        if (uncached.length) {
-            const failed = await cacheSongsById(uncached)
-            if (failed.size > 0) showToast(`${failed.size} song${failed.size > 1 ? 's' : ''} failed to save offline`, true)
-        }
+        if (uncached.length) await cacheSongsById(uncached)
         await queryClient.invalidateQueries({ queryKey: queryKeys.playlists })
         const fresh = queryClient.getQueryData<Playlist[]>(queryKeys.playlists) ?? []
         await Promise.allSettled(fresh.map(p => fetchPlaylistSongs(p.id)))
@@ -291,8 +288,7 @@ export default function LibraryList() {
 
     async function retryFailed() {
         const toRetry = songs.filter(s => failedIds.has(s.uuid))
-        const failed = await cacheSongsById(toRetry)
-        if (failed.size > 0) showToast(`${failed.size} song${failed.size > 1 ? 's' : ''} failed to save offline`, true)
+        await cacheSongsById(toRetry)
     }
 
     async function downloadSyncSongs() {
@@ -779,28 +775,14 @@ export default function LibraryList() {
 
     async function bulkSaveOffline() {
         setBulkLoading(true)
-        const failed = new Set<string>()
-        for (const id of selectedIds) {
-            if (!cachedIds.has(id)) {
-                try {
-                    await cacheSong(id)
-                    try {
-                        await addServerOfflineSong(id)
-                    } catch {
-                        await uncacheSong(id).catch(() => {})
-                        failed.add(id)
-                        continue
-                    }
-                    setCachedIds(prev => new Set([...prev, id]))
-                } catch { failed.add(id) }
-            }
-        }
-        if (failed.size > 0) {
-            setSelectedIds(failed)
-            showToast(`${failed.size} song${failed.size > 1 ? 's' : ''} failed to save offline`, true)
-        } else {
-            exitSelectMode()
-        }
+        const result = await saveSongsOffline([...selectedIds].filter(id => !cachedIds.has(id)), {
+            onSaved: id => setCachedIds(prev => new Set([...prev, id])),
+        })
+        reportSaveResult(result, showToast)
+        // The selection becomes what is still unsaved, which includes songs the
+        // batch never reached, so one press of the button retries exactly those.
+        if (result.failed.size > 0) setSelectedIds(result.failed)
+        else exitSelectMode()
         setBulkLoading(false)
     }
 

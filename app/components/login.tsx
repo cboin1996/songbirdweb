@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import Input from "./input";
 import { login } from "../lib/data";
 import { routes } from "../lib/routes";
+import { safeNext } from "../lib/safe-next";
 
 export default function Login() {
     const router = useRouter()
@@ -29,7 +30,7 @@ export default function Login() {
         const result = await login(username, password)
         if (result === 401) { setStatus(statuses.unauthorized); return }
         if (result === 'error') { setStatus(statuses.error); return }
-        window.location.href = next ?? routes.download
+        window.location.href = safeNext(next, window.location.origin) ?? routes.download
     }
 
     return (

@@ -9,8 +9,11 @@ import { FaPause, FaPlay, FaStepBackward, FaStepForward, FaRandom, FaRedo, FaLis
 import { filterSongs } from "../lib/use-filtered-songs"
 import SearchInput from "./search-input"
 import Spinner from "./spinner"
-import { DOWNLOAD_URL, LibrarySong, PlayableSong, PlayerState, artworkUrl, songArtworkUrl, fetchLibrarySongs, fetchPlayerState, fetchSongById, recordPlay, savePlayerState, updatePosition, queueInsert, queueRemove, queueReorder as apiQueueReorder } from "../lib/data"
+import { DOWNLOAD_URL, LibrarySong, RefreshResult, PlayableSong, PlayerState, artworkUrl, songArtworkUrl, ensureFreshToken, isSigningOut, redirectToLogin, tryRefresh, fetchLibrarySongs, fetchPlayerState, fetchSongById, recordPlay, savePlayerState, updatePosition, queueInsert, queueRemove, queueReorder as apiQueueReorder } from "../lib/data"
 import { getSongFile, cacheArtworkUrls } from "../lib/offline"
+import { useOfflineSave } from "../lib/offline-save-context"
+import { createBlobSlot } from "../lib/blob-slot"
+import { readTestOverride } from "../lib/test-overrides"
 import Slider from "./slider"
 import { routes } from "../lib/routes"
 
@@ -98,6 +101,26 @@ export function usePlayer() {
 }
 
 const QUEUE_ROW_H = 52
+
+// A dead zone must cost one song, not the queue: after this many consecutive
+// failed loads the player lands back where it started and stops.
+const MAX_CONSECUTIVE_FAILURES = 5
+// Real progress past the position a load started at. Not "playback began": on
+// weak cellular a song buffers, starts, stalls and fails, which would zero the
+// failure budget on every hop and recreate the runaway.
+const PROGRESS_RESET_SEC = 10
+
+// Everything an error cascade moves while it walks the queue. Restoring the
+// index alone is not enough — the walk also moves the shuffle position, shifts
+// entries off the manual-next list, and rebuilds the whole shuffle order if it
+// crosses a lap boundary.
+type AdvanceSnapshot = {
+    queueIndex: number
+    shufflePos: number
+    shuffleOrder: number[]
+    shuffleSeed: number | null
+    manualNext: PlayableSong[]
+}
 
 function fmt(s: number) {
     if (!isFinite(s) || s < 0) return '0:00'
@@ -384,7 +407,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const loadGenRef = useRef(0)
     const hasUserPlayedRef = useRef(false)
     const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-    const blobUrlRef = useRef<string | null>(null)
+    const blobSlotRef = useRef(createBlobSlot())
+    // The song whose source was last assigned to the element, which can differ
+    // from `current` while a load is in flight.
+    const srcUuidRef = useRef<string | null>(null)
     const autoplayActivatedRef = useRef(false)
     // refs mirror state so stable callbacks always see latest values
     const queueRef = useRef<PlayableSong[]>([])
@@ -407,8 +433,44 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const libMapRef = useRef<Map<string, LibrarySong>>(new Map())
     const shuffleSeedRef = useRef<number | null>(null)
     const playContextRef = useRef<PlayContext | null>(null)
+    // Failure containment. The counter is consecutive failed loads; the snapshot
+    // is where the cascade started; stopped is an explicit terminal state that
+    // nothing but the user leaves.
+    const failureCountRef = useRef(0)
+    const failureSnapshotRef = useRef<AdvanceSnapshot | null>(null)
+    const stoppedRef = useRef(false)
+    // The load generation that has already used its one silent retry, and the
+    // generation that assigned the source currently on the element.
+    const retriedGenRef = useRef(-1)
+    const srcGenRef = useRef(0)
+    // The load whose synchronous stream-URL guess has not yet been confirmed or
+    // replaced by the resolved source. Errors from the guess are held until then.
+    const pendingSwapGenRef = useRef(-1)
+    const loadStartPositionRef = useRef(0)
+    const lastPositionRef = useRef(0)
+    const lastRefreshOutcomeRef = useRef<'none' | RefreshResult>('none')
 
     const { showToast } = useToast()
+    // Which songs have a local copy. Read through refs, never through the context
+    // value directly: the advance path is a stable callback with no dependencies
+    // and is also captured once into the media-session and keyboard handlers, so
+    // a direct read would pin the provider's initial empty set for the whole
+    // session and report "no offline copies left" with a full offline library.
+    const { cachedIds, cachedIdsStatus } = useOfflineSave()
+    const cachedIdsRef = useRef(cachedIds)
+    const cachedIdsStatusRef = useRef(cachedIdsStatus)
+    useEffect(() => { cachedIdsRef.current = cachedIds }, [cachedIds])
+    useEffect(() => { cachedIdsStatusRef.current = cachedIdsStatus }, [cachedIdsStatus])
+
+    // The local copies to filter the advance against, or null for no pre-filter.
+    // Online, no provider (the public share page mounts the player without one),
+    // and a scan that has not finished all keep today's behaviour; only a
+    // finished scan justifies concluding there is nothing left to play.
+    function offlineOnlyIds(): Set<string> | null {
+        if (typeof navigator === 'undefined' || navigator.onLine) return null
+        if (cachedIdsStatusRef.current !== 'scanned') return null
+        return cachedIdsRef.current
+    }
 
     function generateShuffleOrder(currentIdx = queueIndexRef.current, existingSeed?: number) {
         const seed = existingSeed ?? (Math.random() * 0xFFFFFFFF | 0)
@@ -422,27 +484,107 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setShuffleOrder([...order])
     }
 
-    async function resolveAudioSrc(songUuid: string): Promise<string> {
-        if (blobUrlRef.current) {
-            URL.revokeObjectURL(blobUrlRef.current)
-            blobUrlRef.current = null
-        }
+    // `gen` is the load generation that asked for this source. A superseded
+    // caller gets null. Omitting `gen` opts out of the check.
+    //
+    // A blob made here belongs to nobody until `applyAudioSrc` assigns it: this
+    // function must not revoke the current one, because the element may still be
+    // playing it, and a load that overlaps this one may be about to assign what it
+    // made. Every caller assigns the result without an await in between, so a
+    // blob made here is never left unassigned.
+    async function resolveAudioSrc(songUuid: string, gen?: number): Promise<string | null> {
+        const superseded = () => gen !== undefined && gen !== loadGenRef.current
+        if (superseded()) return null
+        let cached: File | null = null
         try {
-            const cached = await getSongFile(songUuid)
-            if (cached) {
-                blobUrlRef.current = URL.createObjectURL(cached)
-                return blobUrlRef.current
-            }
+            cached = await getSongFile(songUuid)
         } catch {}
+        if (superseded()) return null
+        if (cached) return URL.createObjectURL(cached)
         return `${DOWNLOAD_URL}/${songUuid}`
     }
 
-    function applyAudioSrc(audio: HTMLAudioElement, src: string) {
+    // "Already loaded" means this exact song's source is on the element and has
+    // not failed. `currentRef` is set by an effect after render, so mid-load it can
+    // already name the new song while the element still holds the old one's
+    // source; the uuid recorded at assignment is what the element actually has.
+    // A source that errored is not loaded: keeping it would leave the player
+    // showing a song it cannot play through every later sync.
+    function sourceAlreadyLoaded(uuid: string): boolean {
+        const audio = audioRef.current
+        return srcUuidRef.current === uuid && !!audio?.src && !audio.error
+    }
+
+    function applyAudioSrc(audio: HTMLAudioElement, src: string, uuid: string) {
         audio.src = src
+        blobSlotRef.current.adopt(src)
+        srcUuidRef.current = uuid
+        srcGenRef.current = loadGenRef.current
         setAudioSrc(src)
     }
 
+    // Called on real playback progress and on anything the user started.
+    function clearFailureState() {
+        failureCountRef.current = 0
+        failureSnapshotRef.current = null
+        stoppedRef.current = false
+        lastRefreshOutcomeRef.current = 'none'
+    }
+
+    function snapshotAdvanceState(): AdvanceSnapshot {
+        return {
+            queueIndex: queueIndexRef.current,
+            shufflePos: shufflePosRef.current,
+            shuffleOrder: [...shuffleOrderRef.current],
+            shuffleSeed: shuffleSeedRef.current,
+            manualNext: [...manualNextRef.current],
+        }
+    }
+
+    // Restores where the cascade started **without touching the audio source**.
+    // Restoring by loading the song would assign a source, fail again in the
+    // dead zone, and re-enter the error handler with a freshly zeroed counter —
+    // the same endless walk, one toast per lap.
+    function restoreAdvanceState(snap: AdvanceSnapshot) {
+        queueIndexRef.current = snap.queueIndex
+        shufflePosRef.current = snap.shufflePos
+        shuffleOrderRef.current = snap.shuffleOrder
+        setShuffleOrder([...snap.shuffleOrder])
+        shuffleSeedRef.current = snap.shuffleSeed
+        manualNextRef.current = snap.manualNext
+        setManualNextIds(new Set(snap.manualNext.map(s => s.uuid)))
+        const song = queueRef.current[snap.queueIndex]
+        if (song) setCurrent(song)
+    }
+
+    // The terminal state: nothing but the user leaves it, and it says so once.
+    // Shared by the repeated-failure stop and the "nothing saved offline left"
+    // stop, which differ only in their message.
+    function enterStoppedState(message: string) {
+        stoppedRef.current = true
+        failureCountRef.current = 0
+        failureSnapshotRef.current = null
+        setIsPlaying(false)
+        setIsBuffering(false)
+        shouldPlayRef.current = false
+        // The element may still be mid-song: the user pressed next, and the walk
+        // found nothing to move to. Saying "stopped" over audible playback would
+        // be worse than the silence.
+        audioRef.current?.pause()
+        showToast(message, true)
+        // The cascade or the walk may have moved the queue before the state was
+        // put back; the server should hold where the user is now, not where the
+        // last debounced save happened to catch it.
+        scheduleSave()
+    }
+
     async function applyPlayerState(state: PlayerState) {
+        // Everything down to the barrier resolves and decides; nothing writes.
+        // A reconcile overtaken by the user tapping a song must leave nothing
+        // half-applied behind it, so the generation is re-checked after each
+        // await and all writes happen together at the end.
+        const gen = loadGenRef.current
+        const superseded = () => gen !== loadGenRef.current
         const libMap = libMapRef.current
         let sourceMap: Record<string, PlayContext> = state.queue_sources ?? {}
         if (Object.keys(sourceMap).length === 0) {
@@ -468,31 +610,32 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             return results
         }
 
-        setShuffle(state.shuffle)
-        shuffleRef.current = state.shuffle
-        setRepeat(state.repeat)
-        repeatRef.current = state.repeat
-        if (state.play_context) setPlayContext(contextFromId(state.play_context))
-
+        const audio = audioRef.current
         const restoredQueue = await resolveUuids(state.queue ?? [])
+        if (superseded()) return
 
         if (restoredQueue.length === 0) {
             const entries = [...libMap.values()]
             const last = entries
                 .filter(s => s.last_played_at && s.properties)
                 .sort((a, b) => new Date(b.last_played_at!).getTime() - new Date(a.last_played_at!).getTime())[0]
-            if (last?.properties) {
-                const song: PlayableSong = { uuid: last.uuid, properties: last.properties!, last_position: last.last_position, last_played_at: last.last_played_at, artwork_cached: last.artwork_cached, source: fallbackCtx }
-                setCurrent(song)
+            if (!last?.properties) return
+            const song: PlayableSong = { uuid: last.uuid, properties: last.properties!, last_position: last.last_position, last_played_at: last.last_played_at, artwork_cached: last.artwork_cached, source: fallbackCtx }
+            const keepSource = sourceAlreadyLoaded(song.uuid)
+            let src: string | null = null
+            if (!keepSource && audio) {
+                src = await resolveAudioSrc(song.uuid, gen)
+                if (src === null) return
+            }
+            setCurrent(song)
+            queueRef.current = [song]
+            queueIndexRef.current = 0
+            setQueue([song])
+            if (!keepSource) {
                 setCurrentTime(last.last_position ?? 0)
-                queueRef.current = [song]
-                queueIndexRef.current = 0
-                setQueue([song])
-                const audio = audioRef.current
-                if (audio) {
+                if (audio && src !== null) {
                     pendingPosition.current = last.last_position ?? 0
-                    const src = await resolveAudioSrc(last.uuid)
-                    applyAudioSrc(audio, src)
+                    applyAudioSrc(audio, src, song.uuid)
                 }
             }
             return
@@ -500,6 +643,28 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
         const safeIndex = Math.max(0, Math.min(state.queue_index, restoredQueue.length - 1))
         const song = restoredQueue[safeIndex]
+
+        const savedManualNext = state.manual_next ?? []
+        const resolvedManualNext = savedManualNext.length > 0 ? await resolveUuids(savedManualNext) : []
+        if (superseded()) return
+
+        // Source-preserving: the same song already on the element keeps its
+        // source and its position. Re-assigning the source would re-download it
+        // and seek back to whatever the server last recorded.
+        const keepSource = sourceAlreadyLoaded(song.uuid)
+        let src: string | null = null
+        if (!keepSource && audio) {
+            src = await resolveAudioSrc(song.uuid, gen)
+            if (src === null) return
+        }
+
+        // ---- barrier: everything below writes, and nothing below awaits ----
+        setShuffle(state.shuffle)
+        shuffleRef.current = state.shuffle
+        setRepeat(state.repeat)
+        repeatRef.current = state.repeat
+        if (state.play_context) setPlayContext(contextFromId(state.play_context))
+
         queueRef.current = restoredQueue
         queueIndexRef.current = safeIndex
         setQueue(restoredQueue)
@@ -522,22 +687,16 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             generateShuffleOrder(safeIndex)
         }
 
-        const savedManualNext = state.manual_next ?? []
-        if (savedManualNext.length > 0) {
-            manualNextRef.current = await resolveUuids(savedManualNext)
-            setManualNextIds(new Set(savedManualNext))
-        } else {
-            manualNextRef.current = []
-            setManualNextIds(new Set())
-        }
+        manualNextRef.current = resolvedManualNext
+        setManualNextIds(new Set(savedManualNext))
 
         setCurrent(song)
-        setCurrentTime(song.last_position ?? 0)
-        const audio = audioRef.current
-        if (audio) {
-            pendingPosition.current = song.last_position ?? 0
-            const src = await resolveAudioSrc(song.uuid)
-            applyAudioSrc(audio, src)
+        if (!keepSource) {
+            setCurrentTime(song.last_position ?? 0)
+            if (audio && src !== null) {
+                pendingPosition.current = song.last_position ?? 0
+                applyAudioSrc(audio, src, song.uuid)
+            }
         }
 
         // Persist baseline so future reconcile can compare timestamps
@@ -552,18 +711,43 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     async function reconcilePlayerState(serverState: PlayerState) {
         if (hasUserPlayedRef.current) return
         if (audioRef.current && !audioRef.current.paused) return
+        // A change is waiting for its debounced save, so this player is ahead of the
+        // server by definition. Comparing against what the server has not heard yet
+        // would read the user's own skip or toggle as another device's edit.
+        if (saveTimerRef.current) return
+
         let localState: (PlayerState & { saved_at?: string }) | undefined
         try {
             const raw = localStorage.getItem('playerState')
             if (raw) localState = JSON.parse(raw)
         } catch {}
-        if (!localState) {
+
+        // Compare against the player's own live refs once it holds a song:
+        // inside the save debounce the mirror in local storage lags, and a
+        // lagging mirror produces a false match that drops a real change. At a
+        // cold mount nothing is loaded yet, so the mirror is all there is.
+        const loaded = currentRef.current != null
+        const baseSong = loaded ? currentRef.current!.uuid : localState?.current_song_uuid
+        const baseQueue = loaded ? queueRef.current.map(s => s.uuid) : (localState?.queue ?? [])
+        const sameSong = baseSong != null && serverState.current_song_uuid === baseSong
+        const sameQueue = JSON.stringify(serverState.queue ?? []) === JSON.stringify(baseQueue)
+        if (sameSong && sameQueue) {
+            // Nothing differs: returning here saves a download. This is an
+            // optimisation, not the safety mechanism — applying is safe too,
+            // because applying the same song no longer touches the source.
+            if (loaded
+                && serverState.shuffle === shuffleRef.current
+                && serverState.repeat === repeatRef.current
+                && JSON.stringify(serverState.manual_next ?? [])
+                    === JSON.stringify(manualNextRef.current.map(s => s.uuid))) return
+            // Same song, but shuffle, repeat or manual-next moved on another
+            // device. Apply it: it costs nothing now, and dropping it is the
+            // bug this replaces.
             await applyPlayerState(serverState)
             return
         }
-        const queuesMatch = serverState.current_song_uuid === localState.current_song_uuid
-            && JSON.stringify(serverState.queue) === JSON.stringify(localState.queue)
-        if (queuesMatch) {
+
+        if (!localState) {
             await applyPlayerState(serverState)
             return
         }
@@ -582,11 +766,17 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         updatePosition(song.uuid, time).catch(() => {})
     }, [])
 
-    async function loadSong(song: PlayableSong, fromStart = false) {
+    // `startAt` overrides the stored last-played position. The error retry needs
+    // it: `last_position` comes from an app-start library snapshot, so reloading
+    // on it would throw away however far the song had actually got.
+    async function loadSong(song: PlayableSong, startAt?: number) {
         const audio = audioRef.current
         if (!audio) return
         const gen = ++loadGenRef.current
-        pendingPosition.current = fromStart ? 0 : (song.last_position ?? 0)
+        const startPosition = startAt ?? song.last_position ?? 0
+        pendingPosition.current = startPosition
+        loadStartPositionRef.current = startPosition
+        lastPositionRef.current = startPosition
 
         setCurrentTime(0)
         setDuration(0)
@@ -594,29 +784,49 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setIsPlaying(true)
 
         if (autoplayActivatedRef.current) {
-            const src = await resolveAudioSrc(song.uuid)
+            // Not a gesture path — this already awaits src resolution, so a stale
+            // token can be refreshed before the stream request carries it.
+            await ensureFreshToken()
             if (gen !== loadGenRef.current) return
+            const src = await resolveAudioSrc(song.uuid, gen)
+            if (src === null) return
             shouldPlayRef.current = true
-            applyAudioSrc(audio, src)
+            applyAudioSrc(audio, src, song.uuid)
             audio.play().catch(() => {})
         } else {
             // First play — must set src + play() synchronously within user-gesture window.
+            // Fire the refresh unawaited: any await here and iOS rejects play()
+            // silently while the UI has already flipped to "playing".
+            void ensureFreshToken()
             const streamSrc = `${DOWNLOAD_URL}/${song.uuid}`
             shouldPlayRef.current = true
-            applyAudioSrc(audio, streamSrc)
+            // The stream URL is a guess made to fit inside the gesture window. In
+            // airplane mode it always fails, and on a song that is saved offline
+            // that failure means nothing — so hold its error until the swap below
+            // has had its say, or a saved song never starts in airplane mode.
+            pendingSwapGenRef.current = gen
+            applyAudioSrc(audio, streamSrc, song.uuid)
             audio.play().catch(() => {})
             // Swap to offline blob if available after gesture window
-            const src = await resolveAudioSrc(song.uuid)
-            if (gen !== loadGenRef.current) return
+            const src = await resolveAudioSrc(song.uuid, gen)
+            // Superseded: the mark belongs to the newer load now, so leave it.
+            if (src === null) return
+            pendingSwapGenRef.current = -1
             if (src !== streamSrc) {
                 shouldPlayRef.current = true
-                applyAudioSrc(audio, src)
+                applyAudioSrc(audio, src, song.uuid)
+            } else if (audio.error) {
+                // There was no local copy and the stream really did fail. The held
+                // error has to surface or the UI sits there claiming to play, so
+                // load the same source again and let it error with nothing held.
+                audio.load()
             }
         }
     }
 
     function play(song: PlayableSong, newQueue?: PlayableSong[], context?: PlayContext) {
         hasUserPlayedRef.current = true
+        clearFailureState()
         const baseQueue = newQueue ?? [song]
         const q = context !== undefined
             ? baseQueue.map(s => ({ ...s, source: s.source ?? context }))
@@ -630,7 +840,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setQueue(q)
         if (shuffleRef.current) generateShuffleOrder(idx)
         syncMediaSession(playingSong)
-        loadSong(playingSong, true)
+        loadSong(playingSong, 0)
         if (context !== undefined) {
             setPlayContext(context)
             playContextRef.current = context
@@ -842,6 +1052,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         const audio = audioRef.current
         const song = currentRef.current
         if (!audio || !song) return
+        // Pressing play is how the user leaves the stopped state: the budget is
+        // theirs to spend again, and the errored element reloads below.
+        clearFailureState()
+        // Gesture path (button and media-session 'play'): fire unawaited. resume()
+        // sets no src, so the rest of the song arrives as range requests carrying
+        // whatever cookie is current by then.
+        void ensureFreshToken()
         if (audio.error) {
             loadSong(song)
             return
@@ -859,45 +1076,130 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setCurrentTime(t)
     }
 
-    const skipNext = useCallback(() => {
+    // One step of the advance order. Mutates the shuffle position, the manual-next
+    // list and the shuffle order exactly as a normal advance would, and returns
+    // the index it lands on — or null at the end of a queue that does not repeat.
+    // It does **not** move the queue index or load anything, so the offline walk
+    // can take several steps before committing to one.
+    // `consumedManual` is the manual-next entry this step used up, so a walk that
+    // steps over it for want of a local copy can put it back.
+    function stepAdvance(): { idx: number; consumedManual: PlayableSong | null } | null {
         const q = queueRef.current
         const idx = queueIndexRef.current
-        if (q.length === 0) return
-        let nextIdx: number
         if (shuffleRef.current) {
             if (manualNextRef.current.length > 0) {
-                manualNextRef.current.shift()
+                const consumedManual = manualNextRef.current.shift() ?? null
                 setManualNextIds(new Set(manualNextRef.current.map(s => s.uuid)))
-                nextIdx = idx + 1
-                if (nextIdx >= q.length) return
+                const nextIdx = idx + 1
+                if (nextIdx >= q.length) return null
                 // advance shuffle position to wherever this manually-queued song lands
                 const pos = shuffleOrderRef.current.indexOf(nextIdx)
                 if (pos >= 0) shufflePosRef.current = pos
-            } else {
-                const nextPos = shufflePosRef.current + 1
-                if (nextPos >= shuffleOrderRef.current.length) {
-                    if (repeatRef.current === 'all') { generateShuffleOrder(idx); nextIdx = shuffleOrderRef.current[shufflePosRef.current] ?? idx }
-                    else return
-                } else {
-                    shufflePosRef.current = nextPos
-                    nextIdx = shuffleOrderRef.current[nextPos]
-                }
+                return { idx: nextIdx, consumedManual }
             }
-        } else {
-            nextIdx = idx + 1
-            if (nextIdx >= q.length) {
-                if (repeatRef.current === 'all') nextIdx = 0
-                else return
+            const nextPos = shufflePosRef.current + 1
+            if (nextPos >= shuffleOrderRef.current.length) {
+                if (repeatRef.current !== 'all') return null
+                // A new lap. Pinning the song that just ended would replay
+                // it back to back, so pick a different one and pin the fresh
+                // order to that. Pick-then-pin rather than re-roll-until-
+                // different: the reload path rebuilds a missing order as
+                // "pinned song, then a seeded shuffle of the rest", so only
+                // an order built that way survives a reload.
+                const others = q.map((_, i) => i).filter(i => i !== idx)
+                const startIdx = others.length > 0
+                    ? others[Math.floor(Math.random() * others.length)]
+                    : idx
+                generateShuffleOrder(startIdx)
+                return { idx: startIdx, consumedManual: null }
             }
+            shufflePosRef.current = nextPos
+            return { idx: shuffleOrderRef.current[nextPos], consumedManual: null }
         }
-        queueIndexRef.current = nextIdx
-        loadSong(q[nextIdx], true)
-        scheduleSave()
+        const nextIdx = idx + 1
+        if (nextIdx >= q.length) {
+            if (repeatRef.current !== 'all') return null
+            return { idx: 0, consumedManual: null }
+        }
+        return { idx: nextIdx, consumedManual: null }
+    }
+
+    // Moves to the next track without touching the failure budget, and says
+    // whether it loaded one. The automatic advances — end of track, and the error
+    // cascade — go through this: a song ending is not the user saying "try
+    // again". False means the queue has nowhere left to go: either it simply
+    // ended (nothing happens, as online) or the walk below stopped the player and
+    // told the user why.
+    const advanceTrack = useCallback((): boolean => {
+        const q = queueRef.current
+        if (q.length === 0) return false
+        const localOnly = offlineOnlyIds()
+
+        if (!localOnly) {
+            const step = stepAdvance()
+            if (!step) return false
+            queueIndexRef.current = step.idx
+            loadSong(q[step.idx], 0)
+            scheduleSave()
+            return true
+        }
+
+        // Offline with nothing in the queue saved: there is nowhere to walk to.
+        if (!q.some(s => localOnly.has(s.uuid))) {
+            enterStoppedState('no offline copies left')
+            return false
+        }
+
+        // Offline: walk the same order the normal advance would, stepping over
+        // songs with no local copy instead of letting each one fail. A saved song
+        // is known to be in the queue, so the walk only has to be long enough to
+        // reach it: the rest of the lap it is in, then one whole new lap (a repeat-
+        // all wrap reshuffles, and the song it lands on is chosen at random), plus
+        // up to a lap of slack for each manually queued song, whose jump can move
+        // the position anywhere. Shorter than that, the walk gave up with a saved
+        // song still ahead.
+        const before = snapshotAdvanceState()
+        const steppedOverManual: PlayableSong[] = []
+        let steppedOver = 0
+        const bound = (manualNextRef.current.length + 2) * q.length
+        for (let steps = 0; steps < bound; steps++) {
+            const step = stepAdvance()
+            if (!step) break
+            queueIndexRef.current = step.idx
+            if (localOnly.has(q[step.idx].uuid)) {
+                // Manually queued songs stepped over for want of a local copy keep
+                // their queued status, so they are still there when the connection
+                // comes back.
+                if (steppedOverManual.length > 0) {
+                    manualNextRef.current = [...steppedOverManual, ...manualNextRef.current]
+                    setManualNextIds(new Set(manualNextRef.current.map(s => s.uuid)))
+                }
+                loadSong(q[step.idx], 0)
+                scheduleSave()
+                return true
+            }
+            steppedOver++
+            if (step.consumedManual) steppedOverManual.push(step.consumedManual)
+        }
+        // No saved song ahead. Restore where the walk started so the queue is
+        // where the user left it. If the queue just ended there is nothing to
+        // report, as online; if unsaved songs stood between here and the end, say
+        // so, because the silence would otherwise look like a crash.
+        restoreAdvanceState(before)
+        if (steppedOver > 0) enterStoppedState('the rest of the queue is not saved offline')
+        return false
     }, [])
+
+    // What the user presses: a fresh start, so the failure budget resets.
+    const skipNext = useCallback(() => {
+        clearFailureState()
+        advanceTrack()
+    }, [advanceTrack])
 
     const skipPrev = useCallback(() => {
         const audio = audioRef.current
         if (!audio) return
+        clearFailureState()
         if (audio.currentTime > 3) {
             audio.currentTime = 0
             setCurrentTime(0)
@@ -910,11 +1212,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             shufflePosRef.current = prevPos
             const prevIdx = shuffleOrderRef.current[prevPos]
             queueIndexRef.current = prevIdx
-            loadSong(queueRef.current[prevIdx], true)
+            loadSong(queueRef.current[prevIdx], 0)
         } else {
             if (idx <= 0) return
             queueIndexRef.current = idx - 1
-            loadSong(queueRef.current[idx - 1], true)
+            loadSong(queueRef.current[idx - 1], 0)
         }
         scheduleSave()
     }, [])
@@ -922,6 +1224,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     function scheduleSave() {
         if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
         saveTimerRef.current = setTimeout(() => {
+            saveTimerRef.current = null
             const ctx = playContextRef.current
             const sources: Record<string, PlayContext> = {}
             for (const s of queueRef.current) if (s.source) sources[s.uuid] = s.source
@@ -975,6 +1278,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     function playAt(index: number) {
         const q = queueRef.current
         if (index < 0 || index >= q.length) return
+        clearFailureState()
         queueIndexRef.current = index
         if (shuffleRef.current) {
             const pos = shuffleOrderRef.current.indexOf(index)
@@ -1022,7 +1326,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         function onPlaying() { setIsBuffering(false) }
         function onTimeUpdate() {
             setCurrentTime(audio!.currentTime)
+            lastPositionRef.current = audio!.currentTime
             if (audio!.buffered.length > 0) setBuffered(audio!.buffered.end(audio!.buffered.length - 1))
+            // Enough real progress past where this load started means the song is
+            // genuinely playing, so the failure budget resets.
+            if ((failureCountRef.current > 0 || stoppedRef.current)
+                && audio!.currentTime - loadStartPositionRef.current >= readTestOverride('__playerProgressResetSec', PROGRESS_RESET_SEC)) {
+                clearFailureState()
+            }
             updatePositionState()
         }
         function onDurationChange() { setDuration(audio!.duration); updatePositionState() }
@@ -1071,10 +1382,15 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             }
             const wasHiddenMs = hiddenAt !== null ? Date.now() - hiddenAt : 0
             hiddenAt = null
-            const threshold = (window as unknown as { __playerStaleThresholdMs?: number }).__playerStaleThresholdMs ?? 0
-            if (wasHiddenMs < threshold) return
             if (!navigator.onLine) return
-            const serverState = await fetchPlayerState().catch(() => undefined)
+            // Keep the 15-minute token valid before the user can press play. This,
+            // not the check at src assignment, is what covers the long pause: a
+            // resume sets no src and fetches the rest of the song as range requests.
+            // Not awaited: it can take its eight-second timeout, and the state fetch
+            // below joins the same refresh if it meets a 401.
+            void ensureFreshToken()
+            if (wasHiddenMs < readTestOverride('__playerStaleThresholdMs', 0)) return
+            const serverState = await fetchPlayerState({ current: true }).catch(() => undefined)
             if (!serverState) return
             await reconcilePlayerState(serverState)
         }
@@ -1096,18 +1412,92 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 audio!.play().catch(() => {})
                 setIsPlaying(true)
             } else {
-                skipNext()
+                advanceTrack()
             }
         }
         function onError() {
-            const name = current?.properties?.trackName ?? 'song'
+            // Order matters: stopped, then superseded load, then the held first-play
+            // guess, and only then the one-retry and cascade logic. Checking the
+            // retry before the first three counts an outgoing load's error against
+            // the new song and walks the queue forever.
+            if (stoppedRef.current) return
+            // Logout clears the cookies before the page navigates away, so the
+            // stream can fail on that; the page is leaving, there is nothing to do.
+            if (isSigningOut()) return
+            // A newer load has started but not yet assigned its source, so this
+            // error belongs to the outgoing one.
+            if (srcGenRef.current !== loadGenRef.current) return
+            // The first play of a session guesses the stream URL synchronously to
+            // stay inside the gesture window; offline, that guess fails before the
+            // local copy resolves. loadSong resurfaces the error if the swap finds
+            // nothing to replace it with.
+            if (pendingSwapGenRef.current === loadGenRef.current) return
+            const song = current
+            if (!song) return
+            const name = song.properties?.trackName ?? 'song'
             const code = audio?.error?.code
             const reason = code === 2 ? 'network error'
                 : code === 3 ? 'file corrupt or unsupported'
                 : code === 4 ? 'source not found'
                 : 'playback failed'
-            if (current) showToast(`skipped "${name}" — ${reason}`, true)
-            skipNext()
+            const gen = loadGenRef.current
+
+            if (retriedGenRef.current !== gen) {
+                // One silent retry per load, gated on a per-load flag rather than
+                // token staleness: in a dead zone the refresh fails too, nothing
+                // records the attempt, so a staleness gate would take this branch
+                // on every error and never increment the counter.
+                retriedGenRef.current = gen
+                const failedAt = lastPositionRef.current
+                void (async () => {
+                    const refreshed = await tryRefresh()
+                    lastRefreshOutcomeRef.current = refreshed
+                    // The user may have chosen something else while the refresh was
+                    // in flight; reloading the old song over it would be worse than
+                    // the error.
+                    if (gen !== loadGenRef.current) return
+                    if (refreshed === 'rejected') {
+                        // The refresh token is gone, so every song in the queue
+                        // would fail the same way. Walking to the failure limit
+                        // would end in "check your connection", which is not what
+                        // is wrong. Say so and send the user to sign in.
+                        enterStoppedState('session expired — sign in again')
+                        redirectToLogin()
+                        return
+                    }
+                    loadSong(song, failedAt)
+                    // A failed refresh still consumes the retry, so a dead zone
+                    // still reaches the stop: the reload's own generation inherits
+                    // the mark. loadSong bumps the generation synchronously, so
+                    // this is the generation it just created.
+                    retriedGenRef.current = loadGenRef.current
+                })()
+                return
+            }
+
+            if (failureCountRef.current === 0) failureSnapshotRef.current = snapshotAdvanceState()
+            failureCountRef.current += 1
+            const limit = Math.min(Math.max(queueRef.current.length, 1), MAX_CONSECUTIVE_FAILURES)
+            if (failureCountRef.current < limit) {
+                showToast(`skipped "${name}" — ${reason}`, true)
+                // Nowhere to skip to is the same dead end as the limit: the tail of
+                // a queue that does not repeat would otherwise go silent with no
+                // stop and no way back to where the cascade began. A walk that
+                // stopped the player itself has already said so.
+                if (advanceTrack() || stoppedRef.current) return
+            }
+
+            const snap = failureSnapshotRef.current
+            if (snap) restoreAdvanceState(snap)
+            enterStoppedState('playback stopped — check your connection, then press play')
+            // A 401 and a dead zone are indistinguishable after the fact: the media
+            // error exposes only a numeric code.
+            console.warn('[player] playback stopped after repeated failures', {
+                mediaErrorCode: code ?? null,
+                refresh: lastRefreshOutcomeRef.current,
+                failures: limit,
+                song: song.uuid,
+            })
         }
         audio.addEventListener('ended', onEnded)
         audio.addEventListener('error', onError)
@@ -1115,7 +1505,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             audio.removeEventListener('ended', onEnded)
             audio.removeEventListener('error', onError)
         }
-    }, [current, savePosition, skipNext])
+    }, [current, savePosition, advanceTrack])
 
     useEffect(() => {
         if (!isPlaying || !current) return
@@ -1511,7 +1901,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                     <button data-testid="player-prev" onClick={skipPrev} disabled={!hasQueue} className={`shrink-0 disabled:opacity-30 ${idleClass}`}>
                                         <FaStepBackward size={13} />
                                     </button>
-                                    <button data-testid="player-play-pause" onClick={isPlaying ? pause : resume} className={`shrink-0 ${idleClass}`}>
+                                    <button data-testid="player-play-pause" title={isPlaying ? 'pause' : 'play'} onClick={isPlaying ? pause : resume} className={`shrink-0 ${idleClass}`}>
                                         {isBuffering && isPlaying ? <Spinner /> : isPlaying ? <FaPause size={18} /> : <FaPlay size={18} />}
                                     </button>
                                     <button data-testid="player-next" onClick={skipNext} disabled={!hasQueue} className={`shrink-0 disabled:opacity-30 ${idleClass}`}>

@@ -46,18 +46,29 @@ interface PlayerContextValue {
 | `manualNextRef` | Songs that were inserted via `insertNext` — they play before the natural queue order resumes. Persisted server-side so reload preserves them. |
 | `shuffleOrderRef`, `shuffleSeedRef`, `shufflePosRef` | Pre-computed shuffle order (Mulberry32-seeded) so the queue panel can show upcoming songs deterministically. The seed is persisted; reload reproduces the same order. Toggling shuffle off+on preserves seed; drag in shuffled mode reorders shuffleOrder without reseeding. |
 | `loadGenRef` | Generation counter; every `loadSong` call bumps it. Late awaits check `gen !== loadGenRef.current` and bail to avoid a stale OPFS swap clobbering a newer song. |
-| `blobUrlRef` | The current OPFS blob URL (revoked on next load to avoid leaks). |
+| `blobSlotRef` | Owns the OPFS blob URL on the element (`app/lib/blob-slot.ts`). A URL is revoked when the element lets go of it — when a newer source is applied — never when a competing load merely creates its own, so a superseded load cannot revoke the URL the element is playing. |
+| `srcUuidRef` | The song whose source was last assigned to the element. Can differ from `current` while a load is in flight; the "is this song already loaded" check reads it, plus `audio.error`, so a failed source reloads instead of being skipped. |
 | `pendingPosition` | Resume position to seek to once `loadedmetadata` fires. |
 | `shouldPlayRef` | Set to true between `audio.load()` and the metadata event so we know to call `play()` then. |
-| `autoplayActivatedRef` | First play must call `audio.play()` synchronously inside the user-gesture window. After that, awaits before touching the audio element are safe. |
-| `saveTimerRef` | Throttles server-state saves (queue mutations + position checkpoints). |
+| `autoplayActivatedRef` | First play must call `audio.play()` synchronously inside the user-gesture window. After that, awaits before touching the audio element are safe. It is also the switch for the token refresh: the first play fires `ensureFreshToken()` without awaiting it (an await would cost the gesture), every later load awaits it before assigning the source. |
+| `hasUserPlayedRef` | Set by `play()` and `playNow()` (not by the play/pause button). Once set, the restore from localStorage and the visibility resync stand down for the rest of the session, so they cannot override what the user chose. Nothing clears it. |
+| `saveTimerRef` | The pending debounced server-state save (2 s). Nulled when it fires, so non-null means "a local change is not on the server yet": `reconcilePlayerState` does nothing while it is set, so a resync cannot overwrite a newer local edit with older server state. |
 | `sessionKeepAliveRef` | True while the audio element is looping `silence.mp3` to keep the iOS audio session warm during a logical pause. Listeners early-return when set so silent-loop events don't clobber UI state. |
 | `savedSrcBeforeSilenceRef` | The real song's `audio.src` captured at pause time, so resume can restore it. |
 | `pinnedPosRef`, `pinnedDurRef` | Real position + duration captured at pause; re-asserted to `mediaSession.setPositionState` on every silent-loop tick so iOS lock-screen shows the static paused position instead of the silent file's `audio.currentTime`. |
+| `failureCountRef` | Consecutive failed loads. Reaches `MAX_CONSECUTIVE_FAILURES` (5) and the cascade stops. Cleared by `clearFailureState()` — a user action, or `PROGRESS_RESET_SEC` (10 s) of real playback past where the load started. |
+| `failureSnapshotRef` | Queue index, shuffle position/order/seed and manual-next list from where the cascade started, restored when it stops so the player lands back on the song it started from, not wherever the walk ended. |
+| `stoppedRef` | The terminal state (`enterStoppedState`): paused, toasted, saved. Only the user leaves it. The error handler returns immediately while it is set. |
+| `srcGenRef` | The load generation that assigned the source on the element. An error whose `srcGenRef` differs from `loadGenRef` belongs to an outgoing load and is ignored. |
+| `retriedGenRef` | The load generation that has already used its one silent retry. A load error calls `tryRefresh()` once, then reloads from where it failed; a second error on the same generation falls through to the cascade. A `rejected` refresh stops the player and sends the user to sign in. |
+| `pendingSwapGenRef` | The load whose synchronous stream-URL guess (first play) has not yet been confirmed or replaced by the resolved source. Errors from the guess are held; offline it fails before the local copy resolves, and `loadSong` resurfaces it only if the swap finds nothing to replace it with. |
+| `loadStartPositionRef`, `lastPositionRef` | Where the current load began, and the last position seen. A retry resumes from `lastPositionRef`; real progress is measured against `loadStartPositionRef`. |
+| `lastRefreshOutcomeRef` | The result (`ok` / `rejected` / `unavailable`) of the refresh the last retry made. Written to the console when a cascade stops, because a 401 and a dead zone are otherwise indistinguishable after the fact. |
+| `cachedIdsRef`, `cachedIdsStatusRef` | Mirrors of `cachedIds` / `cachedIdsStatus` from `useOfflineSave()`. The advance path is a stable callback captured once into the media-session and keyboard handlers, so it must read these through refs; a direct read would pin the initial empty set for the session. |
 
 ### Persistence schedule
 
-- **Queue + shuffle + repeat + queue_sources:** `scheduleSave()` debounces a `PUT /v1/player/state` after every queue mutation. On page load, `GET /v1/player/state` restores the entire state from the server (queue sources are now server-of-truth, not localStorage).
+- **Queue + shuffle + repeat + queue_sources:** `scheduleSave()` debounces a `PUT /v1/player/state` (2 s) after every queue mutation, and after a stop, so a reload opens on the song the stop restored rather than the one the cascade died on. On page load, `GET /v1/player/state` restores the entire state from the server (queue sources are now server-of-truth, not localStorage).
 - **Position (`last_position` on `user_songs`):** `PATCH /v1/library/{id}/position` every 10 s while playing and on pause.
 - **Play event:** `POST /v1/songs/{id}/play` after 30 s of continuous play.
 
@@ -78,6 +89,23 @@ Because the silent file's `audio.currentTime`/`audio.duration` are ~0/1s, iOS wo
 - The position state is **re-asserted on every silent-loop `timeupdate`** because iOS otherwise polls `audio.currentTime` for the playhead and the lock-screen position drifts back to 0:00.
 
 After ~20s in the background iOS sometimes suspends the page, killing the silent loop. A `visibilitychange` listener detects this on re-foreground (silent-loop active + `audio.paused === true`) and resets the UI to "ready to play" — restores the real `audio.src`, drops the keep-alive flag, clears `isBuffering`/`isPlaying` — so the user sees a tappable play button instead of a stuck spinner. The same handler re-binds `previoustrack`/`nexttrack` because iOS forgets them across suspension and falls back to ±10s seek markers.
+
+### Coming back to the tab
+
+The same `visibilitychange` handler, on return with a connection, does two more things:
+
+1. Calls `ensureFreshToken()` without awaiting it. This is what keeps the 15-minute token valid across a long pause: a resume sets no `src` and fetches the rest of the song as range requests, so the check at source assignment never runs. The attempt is gated (10 min since the last refresh, 30 s cooldown after a failure), so a tab that is toggled repeatedly costs nothing.
+2. Fetches the server's player state with `{ current: true }` (`fetchData` refuses a service-worker cached fallback, marked `X-SW-Stale`, so a stale answer is never mistaken for the server's) and calls `reconcilePlayerState`. That declines when the user has played in this session (`hasUserPlayedRef`), when audio is playing, or when a save is pending (`saveTimerRef`). Otherwise it compares the server against the player's live refs: identical, nothing happens; same song and queue but different shuffle, repeat or manual-next, those are applied; different, the newer of the local mirror and the server wins (a newer local state raises the sync prompt, an older one is replaced by the server's with a "synced from another device" toast).
+
+Known limit: tapping a song sets `hasUserPlayedRef` for the rest of the session, which ends this resync. Recorded in `known-issues.md`.
+
+### Offline advance
+
+Offline, `advanceTrack()` filters against `cachedIdsRef` instead of attempting each song and failing: `offlineOnlyIds()` returns the local set only when offline and the launch scan has finished (`cachedIdsStatus === 'scanned'`), else `null` and the old behaviour. The walk steps over unsaved songs (shuffle, manual-next and lap boundaries all use `stepAdvance()`), is bounded, restores the snapshot if it ends without a song, and says "the rest of the queue is not saved offline" only if it stepped over something; a queue that simply ends offline ends quietly, as it does online.
+
+## Token refresh — `app/lib/data.ts`
+
+`tryRefresh()` is the reactive path (something just got a 401; single-flight; 8 s timeout). `ensureFreshToken()` is the proactive path (stale-gated, with a cooldown after failure). Both return `'ok' | 'rejected' | 'unavailable'`: `rejected` is a 401/403 from the refresh endpoint (the session is over: sign in again), `unavailable` is anything else (a dead connection: do not sign anyone out). `logout()` marks the page as signing out, after which `redirectToLogin()` declines and the player's error handler stands down: logout clears the cookies before it navigates, and a stream that fails on that must not race it to the login page. Test timing knobs live in `app/lib/test-overrides.ts`.
 
 ## `UserProvider` — `app/lib/user-context.tsx`
 
@@ -100,8 +128,8 @@ Big component because library is the central UX. State lives entirely in this cl
 |---|---|---|
 | `songs` | `LibrarySong[]` | initial hydration, `EVENTS.songRemoved`, post-publish refetch, post-bulk-remove |
 | `scrollPos` | `number` | sessionStorage-backed scroll position; restored on navigation back, cleared on reload |
-| `cachedIds` | `Set<string>` | OPFS scan on mount, after each per-song download, on `EVENTS.offlineCleared`, after `Save all offline` |
-| `offlineReady` | `boolean` | true after first successful OPFS scan |
+| `cachedIds` | `Set<string>` | read from `useOfflineSave()`, which owns it: scanned once at app launch (so it is right on a page that never opened the library), updated after each per-song download, on `EVENTS.offlineCleared`, after `Save all offline` |
+| `offlineReady` | `boolean` | true after first successful OPFS scan on this page |
 | `savingAll` / `saveAllProgress` | flags + counter | during the bulk "save all offline" flow |
 | `failedIds` | `Set<string>` | songs that failed to download to OPFS (shown with retry pill) |
 | `syncPromptIds` | `string[]` | server-side offline list ⊃ local OPFS list — UI prompts to download these |

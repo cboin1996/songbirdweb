@@ -1,5 +1,6 @@
 import { cacheLibraryData, getCachedData } from './offline-db'
 import { EVENTS } from './events'
+import { readTestOverride } from './test-overrides'
 
 const isServer = typeof window === 'undefined'
 export const BASE_URL = isServer
@@ -32,21 +33,108 @@ const SKIP_REFRESH_URLS = new Set([
   `${API_V1}/auth/me`,
 ])
 
-let refreshPromise: Promise<boolean> | null = null
+// What a refresh attempt means for the caller. `rejected`: the API answered 401 or
+// 403, and it answers 401 for every dead-session case (missing, expired or
+// revoked refresh token, disabled user), so the session is over. `unavailable`:
+// no answer, a 5xx or a timeout, so nothing is known about the session and
+// giving up on it would be wrong.
+export type RefreshResult = 'ok' | 'rejected' | 'unavailable'
 
-function redirectToLogin() {
-  if (window.location.pathname === '/') return
-  if (!navigator.onLine) return
-  window.location.href = '/?next=' + encodeURIComponent(window.location.pathname + window.location.search)
+let refreshPromise: Promise<RefreshResult> | null = null
+
+// The API's access token lives 15 minutes. Treat it as stale well inside that
+// so a proactive refresh has room to complete before anything 401s.
+const REFRESH_STALE_MS = 10 * 60 * 1000
+// Single-flight means one hung refresh blocks every caller that joins the
+// promise, so it must not outlive a few seconds.
+const REFRESH_TIMEOUT_MS = 8000
+// After a failed refresh the proactive path waits this long before asking
+// again, so a dead zone costs one stalled attempt rather than one per song.
+const REFRESH_COOLDOWN_MS = 30 * 1000
+
+// Zero means "never refreshed on this page". A page can load with a token
+// that has a minute left (the middleware passes any unexpired token through),
+// or from the service worker's cache with one that is already dead, so a page
+// load says nothing about the token's age: the first caller refreshes.
+let lastRefreshAt = 0
+let lastFailure: { at: number; result: 'rejected' | 'unavailable' } | null = null
+
+function markTokenFresh() {
+  lastRefreshAt = Date.now()
 }
 
-async function tryRefresh(): Promise<boolean> {
+function isTokenStale(): boolean {
+  return Date.now() - lastRefreshAt >= readTestOverride('__tokenRefreshStaleMs', REFRESH_STALE_MS)
+}
+
+// Set when the user logs out. The cookies go before the page navigates away, so
+// a stream that was in flight can get its 401 in between, and the sign-in
+// redirect that 401 triggers would land on the login page with a ?next= of the
+// page being left. Logout is already heading to the login page; stay out of it.
+let signingOut = false
+
+export function isSigningOut(): boolean {
+  return signingOut
+}
+
+// Where the user lands to sign in again. Returns whether it navigated: it does
+// not when offline (the login page could not load) or when already on it, and
+// a caller that stopped work on the strength of the redirect has to say so
+// itself in that case.
+export function redirectToLogin(): boolean {
+  if (signingOut) return false
+  if (window.location.pathname === '/') return false
+  if (!navigator.onLine) return false
+  window.location.href = '/?next=' + encodeURIComponent(window.location.pathname + window.location.search)
+  return true
+}
+
+// AbortSignal.timeout is missing from older browsers and throws synchronously
+// there, which would reject the refresh instead of failing it.
+function timeoutSignal(ms: number): { signal: AbortSignal; clear: () => void } {
+  if (typeof AbortSignal.timeout === 'function') return { signal: AbortSignal.timeout(ms), clear: () => {} }
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), ms)
+  return { signal: controller.signal, clear: () => clearTimeout(timer) }
+}
+
+async function requestRefresh(): Promise<RefreshResult> {
+  const { signal, clear } = timeoutSignal(REFRESH_TIMEOUT_MS)
+  let result: RefreshResult
+  try {
+    const r = await fetch(`${API_V1}/auth/refresh`, { method: 'POST', credentials: 'include', signal })
+    result = r.ok ? 'ok' : (r.status === 401 || r.status === 403) ? 'rejected' : 'unavailable'
+  } catch {
+    result = 'unavailable'
+  } finally {
+    clear()
+  }
+  if (result === 'ok') {
+    markTokenFresh()
+    lastFailure = null
+  } else {
+    lastFailure = { at: Date.now(), result }
+  }
+  return result
+}
+
+// The reactive path: something just got a 401, so the attempt is always made.
+export async function tryRefresh(): Promise<RefreshResult> {
   if (refreshPromise) return refreshPromise
-  refreshPromise = fetch(`${API_V1}/auth/refresh`, { method: 'POST', credentials: 'include' })
-    .then(r => r.ok)
-    .catch(() => false)
-    .finally(() => { refreshPromise = null })
+  refreshPromise = requestRefresh().finally(() => { refreshPromise = null })
   return refreshPromise
+}
+
+// The proactive path: refresh only when the token is stale, and not again right
+// after a failure. Anything but `ok` means a refresh was attempted (now or just
+// before) and did not work, so callers can tell "still good" from "tried and
+// could not".
+export async function ensureFreshToken(): Promise<RefreshResult> {
+  if (!isTokenStale()) return 'ok'
+  if (!refreshPromise && lastFailure && Date.now() - lastFailure.at < REFRESH_COOLDOWN_MS) {
+    return lastFailure.result
+  }
+  return tryRefresh()
 }
 
 export class FetchError extends Error {
@@ -55,6 +143,25 @@ export class FetchError extends Error {
     super(message)
     this.name = 'FetchError'
     this.status = status
+  }
+}
+
+// The refresh token is gone, or the access token was refused even after a
+// refresh. Distinct from any other failure, which condemns only its own request:
+// this one means no later request in a batch can succeed either.
+export class AuthExpiredError extends Error {
+  constructor() {
+    super('session expired')
+    this.name = 'AuthExpiredError'
+  }
+}
+
+// A refresh was needed and could not be attempted or answered. Unlike
+// AuthExpiredError the session may be fine; the connection is not.
+export class RefreshUnavailableError extends Error {
+  constructor() {
+    super('refresh unavailable')
+    this.name = 'RefreshUnavailableError'
   }
 }
 
@@ -82,6 +189,10 @@ async function fetchData<T>(args: {
   rawBody?: BodyInit;
   responseType?: ResponseTypes;
   silentStatuses?: number[];
+  // The service worker answers a failed GET with its cached copy, marked stale.
+  // A caller that would act on the content as current, rather than show it
+  // because nothing better exists, asks for no answer instead.
+  rejectSwStale?: boolean;
 }): Promise<T | undefined> {
   const responseType = args.responseType ?? ResponseTypes.json;
   let options: RequestInit;
@@ -104,11 +215,12 @@ async function fetchData<T>(args: {
     throw new FetchError(`server unavailable: ${args.method} ${args.url}`, 0);
   }
   if (response.ok && typeof window !== 'undefined' && !response.headers.get('X-SW-Stale')) window.dispatchEvent(new CustomEvent(EVENTS.serverReachable))
+  if (response.ok && args.rejectSwStale && response.headers.get('X-SW-Stale')) return undefined
   if (!response.ok) {
     const silent = args.silentStatuses ?? []
     if (response.status === 401 && typeof window !== 'undefined' && !SKIP_REFRESH_URLS.has(args.url)) {
       const refreshed = await tryRefresh()
-      if (refreshed) {
+      if (refreshed === 'ok') {
         let retryOptions: RequestInit;
         if (args.rawBody) {
           retryOptions = { method: args.method, body: args.rawBody };
@@ -130,6 +242,12 @@ async function fetchData<T>(args: {
           return undefined;
         }
         throw new FetchError(`${retryResponse.status} ${args.method} ${args.url}`, retryResponse.status)
+      }
+      if (refreshed === 'unavailable') {
+        // The session may be fine; only the refresh could not be answered, so
+        // this is a connection failure like any other, not a reason to sign out.
+        window.dispatchEvent(new CustomEvent(EVENTS.serverUnreachable))
+        throw new FetchError(`server unavailable: ${args.method} ${args.url}`, 0)
       }
       redirectToLogin()
       return undefined;
@@ -168,6 +286,7 @@ export async function login(username: string, password: string): Promise<Current
     });
     if (response.status === 401) return 401;
     if (!response.ok) return 'error';
+    markTokenFresh();
     return await response.json();
   } catch {
     return 'error';
@@ -175,6 +294,7 @@ export async function login(username: string, password: string): Promise<Current
 }
 
 export async function logout(): Promise<void> {
+  signingOut = true
   try {
     await fetch(`${API_V1}/auth/logout`, {
       method: 'POST',
@@ -659,8 +779,11 @@ export interface PlayerState {
   updated_at?: string | null
 }
 
-export async function fetchPlayerState(): Promise<PlayerState | undefined> {
-  return fetchData<PlayerState>({ url: `${API_V1}/player/state`, method: 'GET' })
+// `current` is for a caller that means to apply the state to a live player: it
+// gets nothing rather than the service worker's cached copy, which is older than
+// anything the user has done since the connection dropped.
+export async function fetchPlayerState(opts: { current?: boolean } = {}): Promise<PlayerState | undefined> {
+  return fetchData<PlayerState>({ url: `${API_V1}/player/state`, method: 'GET', rejectSwStale: opts.current })
 }
 
 export async function savePlayerState(state: PlayerState): Promise<void> {

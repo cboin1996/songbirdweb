@@ -556,4 +556,100 @@ test.describe('player bar', () => {
         await player.openQueue()
         await expect(player.queueRows().locator('span', { hasText: 'Queued' }).first()).toBeVisible({ timeout: 3000 })
     })
+
+    // A shuffled lap has to cover the whole playlist. Asserting only that the
+    // track after the wrap differs from the one before would also pass for a
+    // "start the new lap at slot one" fix, which silently drops a song every
+    // lap — so assert the second lap is the full set.
+    test('shuffle + repeat all: every song plays once per lap', async ({ page }) => {
+        const player = new PlayerBar(page)
+        const api = await apiLoginAs(PLAYER_USERNAME, PLAYER_PASSWORD)
+        try {
+            const libRes = await api.get(`${API_V1}/songs/library`)
+            const songs = (await libRes.json()) as { uuid: string; properties?: { trackName?: string } }[]
+            test.skip(songs.length < 3, 'need at least 3 library songs')
+            const three = songs.slice(0, 3)
+            const names = three.map(s => s.properties?.trackName ?? '')
+            test.skip(new Set(names).size < 3 || names.some(n => !n), 'need 3 distinctly named songs')
+
+            await api.put(`${API_V1}/player/state`, {
+                data: {
+                    shuffle: true, repeat: 'all',
+                    queue: three.map(s => s.uuid), queue_index: 0,
+                    manual_next: [], current_song_uuid: three[0].uuid,
+                    shuffle_order: [0, 1, 2], shuffle_seed: 12345, shuffle_position: 0,
+                },
+            })
+
+            await page.goto(routes.library)
+            await player.waitForBar(10000)
+            await player.waitForTrackName(10000)
+
+            // Two laps. Advancing is driven by the control, so no audio has to play.
+            const played: string[] = [await player.getTrackName()]
+            for (let i = 0; i < 5; i++) {
+                await player.next.click()
+                // The names are distinct, so the track having changed is the advance
+                // having finished.
+                await expect(player.trackName).not.toHaveText(played[played.length - 1])
+                played.push(await player.getTrackName())
+            }
+
+            const secondLap = played.slice(3)
+            expect(secondLap[0], 'the new lap must not open with the song that just ended')
+                .not.toBe(played[2])
+            expect(secondLap, 'the second lap must play all three songs, each once')
+                .toEqual(expect.arrayContaining(names))
+            expect(new Set(secondLap).size).toBe(3)
+        } finally {
+            await api.dispose()
+        }
+    })
+
+    // The "pick another song" rule has nowhere to go in a one-song queue, so
+    // that song must still repeat.
+    test('shuffle + repeat all: a one-song queue replays that song', async ({ page }) => {
+        const player = new PlayerBar(page)
+        const api = await apiLoginAs(PLAYER_USERNAME, PLAYER_PASSWORD)
+        try {
+            const libRes = await api.get(`${API_V1}/songs/library`)
+            const songs = (await libRes.json()) as { uuid: string }[]
+            test.skip(songs.length < 1, 'need at least 1 library song')
+
+            await api.put(`${API_V1}/player/state`, {
+                data: {
+                    shuffle: true, repeat: 'all',
+                    queue: [songs[0].uuid], queue_index: 0,
+                    manual_next: [], current_song_uuid: songs[0].uuid,
+                    shuffle_order: [0], shuffle_seed: 4242, shuffle_position: 0,
+                },
+            })
+
+            await page.goto(routes.library)
+            await player.waitForBar(10000)
+            await player.waitForTrackName(10000)
+            const name = await player.getTrackName()
+
+            await page.waitForFunction(() => {
+                const a = document.querySelector('audio')
+                return !!a && isFinite(a.duration) && a.duration > 4
+            }, null, { timeout: 15000 })
+            // The next button is disabled for a one-song queue, so the only way
+            // in is the one the player actually takes: the track ending.
+            await page.evaluate(() => {
+                const a = document.querySelector('audio')!
+                a.currentTime = 4
+                a.dispatchEvent(new Event('ended'))
+            })
+
+            // Replayed from the top, same song.
+            await expect.poll(
+                () => page.evaluate(() => document.querySelector('audio')!.currentTime),
+                { timeout: 5000 },
+            ).toBeLessThan(2)
+            expect(await player.getTrackName()).toBe(name)
+        } finally {
+            await api.dispose()
+        }
+    })
 })

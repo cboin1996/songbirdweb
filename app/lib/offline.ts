@@ -1,4 +1,7 @@
-import { DOWNLOAD_URL } from './data'
+import {
+    DOWNLOAD_URL, AuthExpiredError, RefreshUnavailableError,
+    addServerOfflineSong, ensureFreshToken, redirectToLogin, tryRefresh,
+} from './data'
 
 const AUDIO_DIR = 'audio'
 const ARTWORK_CACHE_NAME = 'songbird-artwork-v1'
@@ -112,7 +115,11 @@ export async function getSongFile(songId: string): Promise<File | null> {
     return new File([blob], `${songId}`, { type: blob.type || 'audio/mpeg' })
 }
 
-export async function getCachedSongIds(): Promise<Set<string>> {
+// `verify` opens every OPFS entry to check it is non-empty. The launch-time scan
+// passes false: on a phone with a large offline library that is one file open per
+// song, competing with the initial player-state fetch. The non-empty check still
+// happens on the playback path, in getSongFile, where it belongs.
+export async function getCachedSongIds(verify = true): Promise<Set<string>> {
     const ids = new Set<string>()
 
     if (await opfsAvailable()) {
@@ -120,6 +127,10 @@ export async function getCachedSongIds(): Promise<Set<string>> {
             const dir = await getAudioDir()
             for await (const [name, handle] of (dir as FileSystemDirectoryHandle & { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()) {
                 if (typeof name === 'string' && (name.endsWith('.mp3') || name.endsWith('.m4a'))) {
+                    if (!verify) {
+                        ids.add(name.replace(/\.(mp3|m4a)$/, ''))
+                        continue
+                    }
                     try {
                         const file = await (handle as FileSystemFileHandle).getFile()
                         if (file.size > 0) ids.add(name.replace(/\.(mp3|m4a)$/, ''))
@@ -137,11 +148,33 @@ export async function getCachedSongIds(): Promise<Set<string>> {
     return ids
 }
 
+// The download is the one request that never went through fetchData, so it was
+// also the one request that never refreshed an expired access token. A save that
+// runs longer than the token's fifteen minutes used to fail from that point on.
+// The retry lives here rather than in the bulk loops so the row menu, the
+// select-mode save and the settings page get it too, and because a download is a
+// plain GET: asking again costs only the bytes already thrown away.
+//
+// A 401 that survives a successful refresh is as terminal as a refused refresh:
+// every later song would be refused the same way, so it ends the batch instead of
+// costing one failed request and one refresh per song.
+async function fetchDownload(songId: string): Promise<Response> {
+    const url = `${DOWNLOAD_URL}/${songId}`
+    const res = await fetch(url, { credentials: 'include' })
+    if (res.status !== 401) return res
+    const refreshed = await tryRefresh()
+    if (refreshed === 'rejected') throw new AuthExpiredError()
+    if (refreshed === 'unavailable') throw new RefreshUnavailableError()
+    const retry = await fetch(url, { credentials: 'include' })
+    if (retry.status === 401) throw new AuthExpiredError()
+    return retry
+}
+
 export async function cacheSong(
     songId: string,
     onProgress?: (pct: number) => void,
 ): Promise<void> {
-    const res = await fetch(`${DOWNLOAD_URL}/${songId}`, { credentials: 'include' })
+    const res = await fetchDownload(songId)
     if (!res.ok) throw new Error(`fetch failed: ${res.status}`)
 
     const contentLength = parseInt(res.headers.get('content-length') ?? '0', 10)
@@ -157,6 +190,13 @@ export async function cacheSong(
         if (contentLength > 0 && onProgress) onProgress(received / contentLength)
     }
 
+    // A body that ends early is not a song, and the scan would count it as one.
+    // Skipped when the body was encoded in transit: the declared length is then
+    // the encoded size, which the decoded stream never matches.
+    if (contentLength > 0 && received !== contentLength && !res.headers.get('content-encoding')) {
+        throw new Error(`incomplete download: ${received} of ${contentLength} bytes`)
+    }
+
     const contentType = res.headers.get('content-type') || 'audio/mpeg'
     const ext = contentType.includes('mp4') || contentType.includes('m4a') ? 'm4a' : 'mp3'
     const blob = new Blob(chunks, { type: contentType })
@@ -167,15 +207,26 @@ export async function cacheSong(
             if (ext !== 'mp3') {
                 try { await dir.removeEntry(`${songId}.mp3`) } catch { /* no old file */ }
             }
-            const fileHandle = await dir.getFileHandle(`${songId}.${ext}`, { create: true })
-            const writable = await fileHandle.createWritable()
+            const name = `${songId}.${ext}`
+            // Creating the handle creates the entry, before a byte is written. If
+            // the write then fails, the empty file stays, and the scan reads any
+            // entry as a saved song. Remove what this call made; an earlier good
+            // copy is left alone, because a writable only replaces it on close().
+            const existed = await dir.getFileHandle(name).then(() => true, () => false)
+            const fileHandle = await dir.getFileHandle(name, { create: true })
             try {
-                await writable.write(blob)
-                await writable.close()
-                if (onProgress) onProgress(1)
-                return
-            } catch (err) {
-                await writable.abort()
+                const writable = await fileHandle.createWritable()
+                try {
+                    await writable.write(blob)
+                    await writable.close()
+                    if (onProgress) onProgress(1)
+                    return
+                } catch (err) {
+                    await writable.abort().catch(() => {})
+                    throw err
+                }
+            } catch {
+                if (!existed) await dir.removeEntry(name).catch(() => {})
                 // fall through to IDB
             }
         } catch { /* fall through to IDB */ }
@@ -183,6 +234,74 @@ export async function cacheSong(
 
     await idbPut(songId, blob)
     if (onProgress) onProgress(1)
+}
+
+// How a batch save ended. `done`: every song was tried. `auth-expired`: the
+// session is over, so no later song could succeed. `unavailable`: a refresh was
+// needed and the server could not be reached, so the session may be fine but the
+// rest cannot be fetched now.
+export type SaveOutcome = 'done' | 'auth-expired' | 'unavailable'
+
+export interface SaveResult {
+    // Songs that did not end up saved, including the ones never tried because
+    // the batch stopped. A retry of this set is a retry of exactly what is missing.
+    failed: Set<string>
+    outcome: SaveOutcome
+}
+
+// The one policy for saving a list of songs, shared by save-all, retry, the
+// select-mode save and sync download: refresh the token as we go (a whole-library
+// save outlives its fifteen minutes), and stop at the first sign that no later
+// song can succeed instead of failing the rest one by one.
+export async function saveSongsOffline(
+    ids: string[],
+    hooks: { onSaved?: (id: string) => void; onSettled?: (id: string) => void } = {},
+): Promise<SaveResult> {
+    const failed = new Set<string>()
+    const stop = (from: number, outcome: SaveOutcome): SaveResult => {
+        for (const id of ids.slice(from)) failed.add(id)
+        return { failed, outcome }
+    }
+    for (let i = 0; i < ids.length; i++) {
+        const id = ids[i]
+        const fresh = await ensureFreshToken()
+        if (fresh !== 'ok') return stop(i, fresh === 'rejected' ? 'auth-expired' : 'unavailable')
+        try {
+            await cacheSong(id)
+            try {
+                await addServerOfflineSong(id)
+            } catch {
+                await uncacheSong(id).catch(() => {})
+                failed.add(id)
+                hooks.onSettled?.(id)
+                continue
+            }
+            hooks.onSaved?.(id)
+        } catch (err) {
+            if (err instanceof AuthExpiredError) return stop(i, 'auth-expired')
+            if (err instanceof RefreshUnavailableError) return stop(i, 'unavailable')
+            failed.add(id)
+        }
+        hooks.onSettled?.(id)
+    }
+    return { failed, outcome: 'done' }
+}
+
+// What to tell the user when a save ends, so every caller says the same thing.
+// An expired session sends them to sign in; when that redirect cannot happen
+// (offline, or already on the login page) the batch would otherwise end in
+// silence, so it says so.
+export function reportSaveResult(
+    { failed, outcome }: SaveResult,
+    showToast: (message: string, error?: boolean) => void,
+): void {
+    if (outcome === 'auth-expired') {
+        if (!redirectToLogin()) showToast('session expired — sign in to finish saving', true)
+    } else if (outcome === 'unavailable') {
+        showToast('saving paused — connection problem, retry the failed songs', true)
+    } else if (failed.size > 0) {
+        showToast(`${failed.size} song${failed.size > 1 ? 's' : ''} failed to save offline`, true)
+    }
 }
 
 export async function uncacheSong(songId: string): Promise<void> {
