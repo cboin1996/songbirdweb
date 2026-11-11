@@ -5,6 +5,8 @@ export type TestOverride =
   | '__tokenRefreshStaleMs'     // how old the token must be before a proactive refresh
   | '__playerStaleThresholdMs'  // how long the tab must be hidden before a resync
   | '__playerProgressResetSec'  // seconds of real playback that clear the failure budget
+  | '__playerWriteLimitMs'      // how long a player write may wait for the server before it is given up
+  | '__probeIntervalMs'         // how often an unreachable server is asked whether it is back
 
 export function readTestOverride(name: TestOverride, fallback: number): number {
   if (typeof window === 'undefined') return fallback

@@ -1,6 +1,7 @@
 import { routes } from './routes'
 import { test, expect, Page } from '@playwright/test'
-import { login, apiLoginAs, setVisibility, expectStable, API_V1, SYNC_USERNAME, SYNC_PASSWORD } from './helpers'
+import { login, apiLoginAs, setVisibility, expectStable, libraryIds, restoredSongId, routeStalePlayerState, API_V1, SYNC_USERNAME, SYNC_PASSWORD } from './helpers'
+import { LibraryPage, PlayerBar } from './pages'
 
 async function apiReturnsUpdatedAt(): Promise<boolean> {
     const api = await apiLoginAs(SYNC_USERNAME, SYNC_PASSWORD)
@@ -511,6 +512,53 @@ test.describe('player state sync', () => {
         }
     })
 
+    // Tapping a song is not a reason to stop listening to the other devices: the
+    // guard that protects a launch from a late answer must not outlive the launch.
+    test('visibility resync: a song tapped earlier in the session does not stop later syncs', async ({ page }) => {
+        test.skip(!await apiReturnsUpdatedAt(), 'API does not return updated_at')
+        const api = await apiLoginAs(SYNC_USERNAME, SYNC_PASSWORD)
+        try {
+            const libRes = await api.get(`${API_V1}/songs/library`)
+            const songs = (await libRes.json()) as { uuid: string; properties?: { trackName?: string } }[]
+            test.skip(songs.length < 2, 'need at least 2 library songs')
+
+            const lib = new LibraryPage(page)
+            const player = new PlayerBar(page)
+            await page.goto(routes.library)
+            await lib.waitForSongs()
+
+            const saved = page.waitForResponse(r =>
+                r.url().includes('/v1/player/state') && r.request().method() === 'PUT')
+            await lib.playAllBtn.click()
+            await player.waitForBar()
+            await player.waitForTrackName()
+            const started = await player.getTrackName()
+            await saved
+            await player.playPause.click()
+            await expect(player.playPause).toHaveAttribute('title', 'play')
+
+            const other = songs.find(s => s.properties?.trackName && !started.includes(s.properties.trackName))
+            test.skip(!other, 'need a library song with a track name different from the one playing')
+            await api.put(`${API_V1}/player/state`, {
+                data: {
+                    shuffle: false, repeat: 'off',
+                    queue: [other!.uuid], queue_index: 0,
+                    manual_next: [], current_song_uuid: other!.uuid,
+                },
+            })
+
+            // Each return to the tab asks again, so a return that lands inside a
+            // pending save is simply tried once more.
+            await expect.poll(async () => {
+                await setVisibility(page, 'hidden')
+                await setVisibility(page, 'visible')
+                return (await player.getTrackName()).includes(other!.properties!.trackName!)
+            }, { timeout: 15000, intervals: [500] }).toBe(true)
+        } finally {
+            await api.dispose()
+        }
+    })
+
     // The service worker answers a failed player-state request with its last
     // cached copy, marked stale. In a dead zone that copy predates whatever the
     // user changed since, so applying it silently reverts their change.
@@ -585,6 +633,113 @@ test.describe('player state sync', () => {
         }
     })
 
+    // Offline, the service worker answers the launch's player-state request from
+    // its cache. That copy is older than anything this device did since, so it is
+    // no reason to ask the user which one to keep.
+    test('launch: a player state served stale from the cache neither prompts nor replaces this device\'s copy', async ({ page }) => {
+        const api = await apiLoginAs(SYNC_USERNAME, SYNC_PASSWORD)
+        try {
+            const libRes = await api.get(`${API_V1}/songs/library`)
+            const songs = (await libRes.json()) as { uuid: string }[]
+            test.skip(songs.length < 2, 'need at least 2 library songs')
+
+            await page.goto(routes.library)
+            await page.evaluate((uuid) => {
+                localStorage.setItem('playerState', JSON.stringify({
+                    shuffle: false, repeat: 'off',
+                    queue: [uuid], queue_index: 0,
+                    manual_next: [], current_song_uuid: uuid,
+                    saved_at: new Date().toISOString(),
+                }))
+            }, songs[1].uuid)
+
+            await routeStalePlayerState(page, {
+                shuffle: false, repeat: 'off',
+                queue: [songs[0].uuid], queue_index: 0,
+                manual_next: [], current_song_uuid: songs[0].uuid,
+                updated_at: '2020-01-01T00:00:00.000Z',
+            })
+            await page.reload()
+
+            await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 10000 })
+            // The restore is the last thing launch does, so by now it has decided
+            // whether to ask.
+            expect(await restoredSongId(page)).toBe(songs[1].uuid)
+            await expect(page.getByTestId('sync-prompt')).toHaveCount(0)
+            await expect(page.getByText(/synced from another device/i)).toHaveCount(0)
+            await expectStable(() => page.getByTestId('sync-prompt').count())
+        } finally {
+            await api.dispose()
+        }
+    })
+
+    test('launch: a player state served stale from the cache is used when this device has none of its own', async ({ page }) => {
+        const api = await apiLoginAs(SYNC_USERNAME, SYNC_PASSWORD)
+        try {
+            const libRes = await api.get(`${API_V1}/songs/library`)
+            const songs = (await libRes.json()) as { uuid: string }[]
+            test.skip(songs.length < 1, 'need at least 1 library song')
+
+            await page.goto(routes.library)
+            await page.evaluate(() => localStorage.removeItem('playerState'))
+            await routeStalePlayerState(page, {
+                shuffle: false, repeat: 'off',
+                queue: [songs[0].uuid], queue_index: 0,
+                manual_next: [], current_song_uuid: songs[0].uuid,
+                updated_at: '2020-01-01T00:00:00.000Z',
+            })
+            await page.reload()
+
+            await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 10000 })
+            expect(await restoredSongId(page)).toBe(songs[0].uuid)
+            await expect(page.getByTestId('sync-prompt')).toHaveCount(0)
+        } finally {
+            await api.dispose()
+        }
+    })
+
+    // The state request is slow; the user does not wait for it.
+    test('launch: a song picked before the state arrives is not replaced by it', async ({ page }) => {
+        const lib = new LibraryPage(page)
+        const player = new PlayerBar(page)
+        await page.goto(routes.library)
+        await lib.waitForSongs()
+        const ids = await libraryIds(page)
+        test.skip(ids.length < 2, 'need at least 2 library songs')
+
+        let release!: () => void
+        const gate = new Promise<void>(resolve => { release = resolve })
+        let asked = false
+        await page.route('**/v1/player/state', async route => {
+            if (route.request().method() !== 'GET') return route.continue()
+            asked = true
+            await gate
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                headers: { 'X-SW-Stale': '1', 'Access-Control-Expose-Headers': 'X-SW-Stale' },
+                body: JSON.stringify({
+                    shuffle: false, repeat: 'off',
+                    queue: [ids[1]], queue_index: 0,
+                    manual_next: [], current_song_uuid: ids[1],
+                    updated_at: '2020-01-01T00:00:00.000Z',
+                }),
+            })
+        })
+        await page.reload()
+        await lib.waitForSongs()
+        await expect.poll(() => asked, { timeout: 10000 }).toBe(true)
+
+        await lib.playAllBtn.click()
+        await player.waitForBar()
+        const picked = await restoredSongId(page)
+        expect(picked).not.toBeNull()
+
+        release()
+        await expectStable(() => restoredSongId(page), 2000)
+        expect(await restoredSongId(page)).toBe(picked)
+    })
+
     // The player saves two seconds after a change. Coming back to the tab inside
     // that window compares the screen against a server that has not heard yet.
     test('visibility resync: a change made inside the save window is not overwritten', async ({ page }) => {
@@ -645,6 +800,117 @@ test.describe('player state sync', () => {
             await api.dispose()
         }
     })
+
+    // The save goes out two seconds after a change; on a bad connection it is
+    // still on its way when the user comes back to the tab. The server then
+    // holds the state from before the change, and comparing against it reads
+    // the user's own change as another device's.
+    test('visibility resync: a save still on its way is not overwritten by the older state on the server', async ({ page }) => {
+        const api = await apiLoginAs(SYNC_USERNAME, SYNC_PASSWORD)
+        try {
+            const libRes = await api.get(`${API_V1}/songs/library`)
+            const songs = (await libRes.json()) as { uuid: string }[]
+            test.skip(songs.length < 1, 'need at least 1 library song')
+
+            await api.put(`${API_V1}/player/state`, {
+                data: {
+                    shuffle: false, repeat: 'off',
+                    queue: [songs[0].uuid], queue_index: 0,
+                    manual_next: [], current_song_uuid: songs[0].uuid,
+                },
+            })
+            await page.goto(routes.library)
+            await page.evaluate(() => localStorage.removeItem('playerState'))
+            await page.reload()
+            await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 10000 })
+
+            let saveHeld = false
+            await page.route('**/v1/player/state', async route => {
+                if (route.request().method() !== 'PUT') return route.continue()
+                saveHeld = true
+                await new Promise(resolve => setTimeout(resolve, 4000))
+                await route.continue()
+            })
+
+            const shuffle = page.getByTestId('player-shuffle').filter({ visible: true }).first()
+            await expect(shuffle).toHaveAttribute('aria-pressed', 'false')
+            await page.evaluate(() => {
+                const w = window as unknown as { __shuffleSeen: string[] }
+                w.__shuffleSeen = []
+                new MutationObserver(records => {
+                    for (const r of records) {
+                        const el = r.target as HTMLElement
+                        if (el.dataset.testid === 'player-shuffle') w.__shuffleSeen.push(el.getAttribute('aria-pressed') ?? '')
+                    }
+                }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['aria-pressed'] })
+            })
+            await shuffle.click()
+            await expect(shuffle).toHaveAttribute('aria-pressed', 'true')
+
+            // The debounce has fired and the request is held: the save is on its way.
+            await expect.poll(() => saveHeld, { timeout: 10000 }).toBe(true)
+            await setVisibility(page, 'hidden')
+            await setVisibility(page, 'visible')
+
+            await expectStable(() => shuffle.getAttribute('aria-pressed'), 2000)
+            await expect(page.getByTestId('sync-prompt')).toHaveCount(0)
+            const seen = await page.evaluate(() => (window as unknown as { __shuffleSeen: string[] }).__shuffleSeen)
+            expect(seen).toContain('true')
+            expect(seen).not.toContain('false')
+        } finally {
+            await api.dispose()
+        }
+    })
+
+    // A toggle made while the server was out of reach never got there. Coming back to
+    // the tab must not read the server's older copy as another device's edit.
+    for (const probe of [false, true]) {
+        test(probe
+            ? 'a toggle that never reached the server is sent when the server is back, with nothing else done'
+            : 'visibility resync: a toggle that never reached the server is kept, and sent', async ({ page }) => {
+            if (probe) await page.addInitScript(() => { (window as unknown as Record<string, number>).__probeIntervalMs = 500 })
+            const api = await apiLoginAs(SYNC_USERNAME, SYNC_PASSWORD)
+            try {
+                const libRes = await api.get(`${API_V1}/songs/library`)
+                const songs = (await libRes.json()) as { uuid: string }[]
+                test.skip(songs.length < 1, 'need at least 1 library song')
+
+                await api.put(`${API_V1}/player/state`, {
+                    data: {
+                        shuffle: false, repeat: 'off',
+                        queue: [songs[0].uuid], queue_index: 0,
+                        manual_next: [], current_song_uuid: songs[0].uuid,
+                    },
+                })
+                await page.goto(routes.library)
+                await page.evaluate(() => localStorage.removeItem('playerState'))
+                await page.reload()
+                await expect(page.getByTestId('player-bar')).toBeVisible({ timeout: 10000 })
+
+                let refused = 0
+                await page.route('**/v1/player/state', async route => {
+                    if (route.request().method() !== 'PUT') return route.continue()
+                    refused++
+                    await route.abort()
+                })
+                const shuffle = page.getByTestId('player-shuffle').filter({ visible: true }).first()
+                await shuffle.click()
+                await expect(shuffle).toHaveAttribute('aria-pressed', 'true')
+                await expect.poll(() => refused, { timeout: 10000 }).toBeGreaterThan(0)
+                await page.unroute('**/v1/player/state')
+
+                if (!probe) {
+                    await setVisibility(page, 'hidden')
+                    await setVisibility(page, 'visible')
+                    await expectStable(() => shuffle.getAttribute('aria-pressed'), 2000)
+                    await expect(shuffle).toHaveAttribute('aria-pressed', 'true')
+                }
+                await expect.poll(async () => (await (await api.get(`${API_V1}/player/state`)).json()).shuffle, { timeout: 20000 }).toBe(true)
+            } finally {
+                await api.dispose()
+            }
+        })
+    }
 
     // A refresh can take up to its eight-second timeout. The state fetch carries
     // its own refresh-and-retry on a 401, so it need not queue behind one.

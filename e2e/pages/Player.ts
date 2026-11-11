@@ -8,6 +8,7 @@ export class PlayerBar {
     readonly shuffle: Locator
     readonly repeat: Locator
     readonly next: Locator
+    readonly prev: Locator
     readonly progress: Locator
     readonly queueToggle: Locator
     readonly queuePanel: Locator
@@ -23,6 +24,7 @@ export class PlayerBar {
         this.shuffle = page.getByTestId('player-shuffle').filter({ visible: true }).first()
         this.repeat = page.getByTestId('player-repeat').filter({ visible: true }).first()
         this.next = page.getByTestId('player-next').first()
+        this.prev = page.getByTestId('player-prev').first()
         this.progress = page.getByTestId('player-progress')
         this.queueToggle = page.getByTestId('player-queue-toggle')
         this.queuePanel = page.getByTestId('player-queue-panel')

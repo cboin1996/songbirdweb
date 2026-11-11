@@ -92,25 +92,28 @@ See `docs/STATE.md` (PlayerProvider section) for the implementation details.
 
 ## Service worker — `public/sw.js`
 
+Generated: `npm run build` runs `prebuild`, which copies `public/sw.template.js` to `public/sw.js` with the app's `package.json` version in the shell cache name. Edit the template, never `sw.js`.
+
 Registered by `app/components/sw-register.tsx` only in `process.env.NODE_ENV === 'production'`. In dev, the registrar **unregisters** any prior SW so stale chunks don't break HMR.
 
 Caches:
 
-- `songbird-shell-v7` — `/offline`, `/`, `/library` precached on install. Fetch handler:
+- `songbird-shell-v<version>` — `/offline`, `/`, `/library` precached on install, each on its own: a page the server answers with a redirect (signed out, `/library` goes to sign-in) or an error is skipped, so the sign-in page is never stored as `/library`. Only `/offline` is required: if it cannot be stored the install fails and the previous version stays, because activating would delete its copy and leave nothing to show. Fetch handler:
   - Static `_next/static/*` → cache-first (chunks are content-addressed, safe to cache forever).
-  - RSC payloads (`?_rsc=`) → network-first, cache by pathname for offline RSC fetches.
-  - Page navigations → network-first; cache 200s; on network failure fall back to cached page or `/offline`.
+  - Page navigations → network-first; a success that did not come by redirect is stored (copied before the page starts reading the answer); on network failure fall back to the stored page or `/offline`.
+  - In-app page data (`?_rsc=`) is not handled: it goes to the network, and a page that cannot load it falls back to a full page load, which the navigation rule above answers.
 - `songbird-artwork-v1` — separate cache for two patterns:
   - `/_next/image*` requests (Next image optimizer): cache-first; falls back to checking the raw `?url=` parameter if the optimized URL isn't cached. This makes the same artwork accessible whether the request hits `Image` or a raw `<img>`.
   - `/v1/songs/{id}/artwork/*` (raw API artwork URL): cache-first.
+- `songbird-api-v2` — the last good answer of `GET /v1/player/state`, `/v1/songs/library` and `/v1/library`, when the API is on the page's own origin (behind the proxy in production; in the e2e harness the API is another origin and this cache is not exercised). Network-first: a success is stored; when the request fails or the proxy answers 502, the stored copy is served with an `X-SW-Stale: 1` header. Callers that need the server's own word (the launch and the return to the tab) read that header and treat the copy as no answer. Writes are never handled. `logout()` deletes every `songbird-api-*` cache.
 
-Cache versioning: bumping the suffix (`-v6` → `-v7`) triggers the activate handler to delete stale caches. Always do this when SW logic changes shape.
+Cache versioning: the shell cache name follows the app version, so a release changes it and the activate handler deletes every cache that is not in its keep list (shell, artwork, API). The API cache name is **not** versioned with the app: rename it by hand (`songbird-api-v2` → `-v3`) when copies already stored under the old name must go, and add the new name to the keep list.
 
 ## Offline strategy
 
 Three layers cooperate:
 
-1. **Service worker** — caches the app shell, JS chunks, RSC payloads, and artwork. Lets offline navigations to `/library` and `/settings` actually load HTML + JS.
+1. **Service worker** — caches the app shell, JS chunks, visited pages, artwork and the last good answers of three API reads. Lets an offline launch open `/library` and `/settings` and restore the player from the stored state.
 2. **OPFS audio** — `app/lib/offline.ts` streams audio bytes from `/v1/download/{id}` and writes to `audio/<id>.<ext>` in the Origin Private File System. On playback, `loadSong` in `player.tsx` checks OPFS first via `getSongFile()` and creates a blob URL when present, skipping the network entirely. Falls back to IndexedDB (`songbird-audio` db, `files` store) when OPFS is unavailable (older browsers).
 3. **Library snapshot** — `app/lib/offline-db.ts` (`songbird-offline` IndexedDB, `library-cache` store). The library page caches its `LibrarySong[]` so the offline UX still has data to render.
 4. **Artwork warm** — `cacheArtworkUrls()` in `offline.ts` pre-fetches the artwork URLs for every cached song so the SW's `songbird-artwork-v1` cache is populated before the user goes offline.
@@ -119,7 +122,7 @@ The client tells the server which songs the user wants offline via `/v1/library/
 
 ## `OfflineGuard`
 
-For routes that aren't useful offline (`/admin`, `/explore`, `/import`, `/download`, `/info`), the page-level `layout.tsx` wraps `{children}` in `<OfflineGuard feature="...">`. The guard reads `navigator.onLine` (via `use-online.ts`) and renders a friendly fallback with a "go to library" link instead of children. Library + settings are not wrapped because they work offline.
+For routes that aren't useful offline (`/admin`, `/explore`, `/import`, `/download`, `/info`), the page-level `layout.tsx` wraps `{children}` in `<OfflineGuard feature="...">`. The guard reads the shared offline signal (via `use-online.ts`: the browser's report, or the API found unreachable — see `docs/STATE.md`) and renders a friendly fallback with a "go to library" link instead of children. Library + settings are not wrapped because they work offline.
 
 ## Image optimization
 

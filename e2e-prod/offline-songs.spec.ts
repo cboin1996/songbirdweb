@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import {
-  login, clearLocalAudio, libraryIds, saveSongOffline, playLibraryPaused,
+  login, clearLocalAudio, libraryIds, saveSongOffline, emptySavedFile, playLibraryPaused, enterDeadZone, failAnApiRequest,
   songTrackName, recordDownloadRequests, recordDownloads, restoredSongId, expectStable,
   OFFLINE_USERNAME, OFFLINE_PASSWORD,
 } from '../e2e/helpers'
@@ -145,6 +145,470 @@ test.describe('Offline saving and playback', () => {
     // to report; the saved song is playing, not stopped.
     expect(requested.slice(mark)).not.toContain(skippedId)
     await expect(player.playPause).toHaveAttribute('title', 'pause')
+    // A walk that finds a saved song to land on has nothing to apologise for.
+    await expect(page.getByTestId('toast').filter({ hasText: /not saved offline/i })).toHaveCount(0)
+
+    await context.setOffline(false)
+  })
+
+  test('in a dead zone the offline advance steps over uncached songs to the next saved one', async ({ page, context }) => {
+    test.setTimeout(90000)
+
+    const lib = new LibraryPage(page)
+    const player = new PlayerBar(page)
+    const requested = recordDownloadRequests(page)
+
+    await lib.goto()
+    await lib.waitForSongs()
+    const ids = await libraryIds(page)
+    expect(ids.length).toBeGreaterThanOrEqual(3)
+    const savedId = ids[2]
+    const skippedId = ids[1]
+    const savedName = await songTrackName(page, savedId)
+    expect(savedName).toBeTruthy()
+
+    await saveSongOffline(page, savedId)
+    await playLibraryPaused(page)
+
+    await enterDeadZone(page, context)
+    await failAnApiRequest(page, player)
+
+    // The browser still says it is online; the queue goes by what the app has found out.
+    await player.openQueue()
+    await expect(page.getByTestId('queue-offline-summary')).toHaveText(`Offline — 1 of ${ids.length} available`)
+    await expect(player.queuePanel.locator('[data-unsaved="true"]').first()).toBeVisible()
+    await player.closeQueue()
+    const mark = requested.length
+
+    await player.next.click()
+
+    await expect(player.trackName).toHaveText(savedName!, { timeout: 15000 })
+    expect(requested.slice(mark)).not.toContain(skippedId)
+    await expect(player.playPause).toHaveAttribute('title', 'pause')
+
+    await context.setOffline(false)
+  })
+
+  test('when the server answers again the unsaved songs stream again', async ({ page, context }) => {
+    test.setTimeout(90000)
+
+    const lib = new LibraryPage(page)
+    const player = new PlayerBar(page)
+    const requested = recordDownloadRequests(page)
+
+    await lib.goto()
+    await lib.waitForSongs()
+    const ids = await libraryIds(page)
+    expect(ids.length).toBeGreaterThanOrEqual(2)
+    const nextName = await songTrackName(page, ids[1])
+    await playLibraryPaused(page)
+
+    await enterDeadZone(page, context)
+    await failAnApiRequest(page, player)
+
+    // The network is back; the browser never said it was gone. The next request
+    // the app makes is answered, and that is what ends the dead zone.
+    await context.setOffline(false)
+    const saved = page.waitForResponse(r => r.url().includes('/v1/player/state') && r.request().method() === 'PUT' && r.ok(), { timeout: 15000 })
+    await player.repeat.click()
+    await saved
+    const mark = requested.length
+
+    await player.next.click()
+
+    await expect(player.trackName).toHaveText(nextName!, { timeout: 15000 })
+    await expect.poll(() => requested.slice(mark), { timeout: 10000 }).toContain(ids[1])
+  })
+
+  // The launch scan lists names without opening the files, so a song whose file was
+  // lost or emptied is still listed as saved. Playback is where that comes out.
+  test('a saved song whose file is empty is stepped over offline without a word, and then shows as not saved', async ({ page, context }) => {
+    test.setTimeout(90000)
+
+    const lib = new LibraryPage(page)
+    const player = new PlayerBar(page)
+    const common = new CommonPage(page)
+
+    await lib.goto()
+    await lib.waitForSongs()
+    const ids = await libraryIds(page)
+    expect(ids.length).toBeGreaterThanOrEqual(3)
+    const emptiedId = ids[1]
+    const savedId = ids[2]
+    const savedName = await songTrackName(page, savedId)
+    expect(savedName).toBeTruthy()
+
+    await saveSongOffline(page, emptiedId)
+    await saveSongOffline(page, savedId)
+    await emptySavedFile(page, emptiedId)
+    await playLibraryPaused(page)
+
+    await common.goOffline()
+    await player.next.click()
+
+    await expect(player.trackName).toHaveText(savedName!, { timeout: 15000 })
+    await expect(player.playPause).toHaveAttribute('title', 'pause')
+    // Nothing was said about the song that was stepped over.
+    await expectStable(async () => (await page.getByTestId('toast').count()) + (await page.getByTestId('toast-error').count()), 2000)
+    expect(await page.getByTestId('toast').count() + await page.getByTestId('toast-error').count()).toBe(0)
+    // And it is no longer treated as saved: offline the library lists only saved songs.
+    await expect(lib.songById(emptiedId)).toHaveCount(0)
+    await expect(lib.songById(savedId).first()).toBeVisible()
+
+    await context.setOffline(false)
+  })
+
+  test('pressing play offline on a song that is not saved moves on to the next saved song', async ({ page, context }) => {
+    test.setTimeout(90000)
+
+    const lib = new LibraryPage(page)
+    const player = new PlayerBar(page)
+    const common = new CommonPage(page)
+
+    await lib.goto()
+    await lib.waitForSongs()
+    const ids = await libraryIds(page)
+    expect(ids.length).toBeGreaterThanOrEqual(3)
+    const savedName = await songTrackName(page, ids[2])
+    expect(savedName).toBeTruthy()
+
+    await saveSongOffline(page, ids[2])
+    await playLibraryPaused(page)
+
+    // Paused on the first song, which is not saved.
+    await common.goOffline()
+    await player.playPause.click()
+
+    await expect(player.trackName).toHaveText(savedName!, { timeout: 15000 })
+    await expect(player.playPause).toHaveAttribute('title', 'pause')
+
+    await context.setOffline(false)
+  })
+
+  test('tapping a queued song that is not saved says so offline and loads nothing', async ({ page, context }) => {
+    test.setTimeout(90000)
+
+    const lib = new LibraryPage(page)
+    const player = new PlayerBar(page)
+    const common = new CommonPage(page)
+
+    await lib.goto()
+    await lib.waitForSongs()
+    const ids = await libraryIds(page)
+    expect(ids.length).toBeGreaterThanOrEqual(3)
+    const startedName = await songTrackName(page, ids[0])
+    await saveSongOffline(page, ids[2])
+    await playLibraryPaused(page)
+    await common.goOffline()
+
+    await player.openQueue()
+    await player.queueRows().nth(1).getByRole('button').first().click()
+
+    await expect(page.getByTestId('toast')).toContainText(/not saved offline/i)
+    await expect(player.trackName).toHaveText(startedName!)
+    await expect(player.playPause).toHaveAttribute('title', 'play')
+
+    await context.setOffline(false)
+  })
+
+  // A name on the saved list can stand for an empty file. Tapping it must not leave the
+  // old song playing under the new one's title: the file is looked at before anything
+  // changes, and a refusal changes nothing.
+  test('tapping a queued song whose saved file is empty says so and leaves the current song playing', async ({ page, context }) => {
+    test.setTimeout(90000)
+
+    const lib = new LibraryPage(page)
+    const player = new PlayerBar(page)
+    const common = new CommonPage(page)
+
+    await lib.goto()
+    await lib.waitForSongs()
+    const ids = await libraryIds(page)
+    expect(ids.length).toBeGreaterThanOrEqual(3)
+    const playingName = await songTrackName(page, ids[2])
+    await saveSongOffline(page, ids[1])
+    await saveSongOffline(page, ids[2])
+    await emptySavedFile(page, ids[1])
+    await playLibraryPaused(page)
+    await common.goOffline()
+
+    await player.openQueue()
+    await player.queueRows().nth(2).getByRole('button').first().click()
+    await expect(player.trackName).toHaveText(playingName!, { timeout: 15000 })
+    await expect(player.playPause).toHaveAttribute('title', 'pause')
+
+    await player.queueRows().nth(1).getByRole('button').first().click()
+    await expect(page.getByTestId('toast')).toContainText(/not saved offline/i)
+    await expect(player.trackName).toHaveText(playingName!)
+    await expect(player.playPause).toHaveAttribute('title', 'pause')
+    const before = await page.locator('audio').first().evaluate((el: HTMLAudioElement) => el.currentTime)
+    await expect.poll(() => page.locator('audio').first().evaluate((el: HTMLAudioElement) => el.currentTime)).toBeGreaterThan(before)
+    // And it is no longer listed as saved.
+    await expect(player.queueRows().nth(1).locator('[data-unsaved="true"], [aria-label="not saved offline"]').first()).toBeVisible()
+
+    await context.setOffline(false)
+  })
+
+  test('skipping back onto a song that is not saved says so and leaves the current song playing', async ({ page, context }) => {
+    test.setTimeout(90000)
+
+    const lib = new LibraryPage(page)
+    const player = new PlayerBar(page)
+    const common = new CommonPage(page)
+
+    await lib.goto()
+    await lib.waitForSongs()
+    const ids = await libraryIds(page)
+    expect(ids.length).toBeGreaterThanOrEqual(3)
+    const savedName = await songTrackName(page, ids[1])
+    await saveSongOffline(page, ids[1])
+    await playLibraryPaused(page)
+    await common.goOffline()
+    await player.next.click()
+    await expect(player.trackName).toHaveText(savedName!, { timeout: 15000 })
+    await expect(player.playPause).toHaveAttribute('title', 'pause')
+
+    // The song before it is the first, which is not saved.
+    await player.prev.click()
+    await expect(page.getByTestId('toast')).toContainText(/not saved offline/i)
+    await expect(player.trackName).toHaveText(savedName!)
+    await expect(player.playPause).toHaveAttribute('title', 'pause')
+    await expectStable(() => player.getTrackName(), 1500)
+
+    await context.setOffline(false)
+  })
+
+  // The car: the app is opened with no signal, on the song it stopped at, whose saved
+  // file turns out to be empty. One press of play goes to the next saved song; it does
+  // not stop to explain.
+  test('launched offline on a song whose saved file is empty, one press of play moves to the next saved song', async ({ page, context }) => {
+    test.setTimeout(120000)
+
+    const lib = new LibraryPage(page)
+    const player = new PlayerBar(page)
+    const common = new CommonPage(page)
+
+    await lib.goto()
+    // The page is kept for offline by the service worker once it controls the tab,
+    // so load it once more under the worker before the network goes.
+    await page.evaluate(() => navigator.serviceWorker.ready)
+    await page.reload()
+    await lib.waitForSongs()
+    const ids = await libraryIds(page)
+    expect(ids.length).toBeGreaterThanOrEqual(3)
+    const nextSaved = await songTrackName(page, ids[2])
+    await saveSongOffline(page, ids[0])
+    await saveSongOffline(page, ids[2])
+    await emptySavedFile(page, ids[0])
+
+    const queueSaved = page.waitForResponse(
+      r => r.url().includes('/v1/player/state') && r.request().method() === 'PUT' && r.ok(),
+      { timeout: 20000 },
+    )
+    await lib.playAllBtn.click()
+    await player.waitForBar()
+    await player.waitForTrackName()
+    await player.playPause.click()
+    await expect(player.playPause).toHaveAttribute('title', 'play')
+    await queueSaved
+
+    await context.setOffline(true)
+    await page.reload()
+    await player.waitForBar()
+    await player.waitForTrackName(15000)
+    await expect(player.playPause).toHaveAttribute('title', 'play')
+
+    await player.playPause.click()
+
+    await expect(player.trackName).toHaveText(nextSaved!, { timeout: 20000 })
+    await expect(player.playPause).toHaveAttribute('title', 'pause')
+    await expectStable(async () => (await page.getByTestId('toast').count()) + (await page.getByTestId('toast-error').count()), 2000)
+    expect(await page.getByTestId('toast').count() + await page.getByTestId('toast-error').count()).toBe(0)
+
+    await context.setOffline(false)
+    void common
+  })
+
+  // Opening a saved file can fail for reasons that say nothing about the song (storage
+  // interrupted). Online that streams it. Offline there is nothing to stream, and the
+  // walk must not come back to the same song for ever on repeat-all.
+  test('offline with repeat all, saved songs that cannot be opened end the walk instead of looping', async ({ page, context }) => {
+    test.setTimeout(90000)
+    await page.addInitScript(() => {
+      const w = window as unknown as { __failLookups?: boolean; __lookups?: number }
+      const original = FileSystemDirectoryHandle.prototype.getFileHandle
+      FileSystemDirectoryHandle.prototype.getFileHandle = function (this: FileSystemDirectoryHandle, name: string, opts?: FileSystemGetFileOptions) {
+        if (w.__failLookups && !opts?.create) {
+          w.__lookups = (w.__lookups ?? 0) + 1
+          return Promise.reject(new DOMException('read failed', 'NotReadableError'))
+        }
+        return original.call(this, name, opts)
+      } as typeof original
+    })
+
+    const lib = new LibraryPage(page)
+    const player = new PlayerBar(page)
+    const common = new CommonPage(page)
+
+    await lib.goto()
+    await lib.waitForSongs()
+    const ids = await libraryIds(page)
+    expect(ids.length).toBeGreaterThanOrEqual(3)
+    await saveSongOffline(page, ids[1])
+    await saveSongOffline(page, ids[2])
+    await playLibraryPaused(page, { repeat: 'all' })
+    await common.goOffline()
+    await page.evaluate(() => { (window as unknown as { __failLookups: boolean }).__failLookups = true })
+
+    await player.next.click()
+
+    await expect(common.toast).toHaveText(/no offline copies left/i, { timeout: 15000 })
+    await expectStable(async () => page.evaluate(() => (window as unknown as { __lookups?: number }).__lookups ?? 0), 2000)
+    expect(await page.evaluate(() => (window as unknown as { __lookups?: number }).__lookups ?? 0)).toBeLessThan(20)
+
+    await context.setOffline(false)
+  })
+
+  // Opening a file to see whether it has anything in it is the expensive part of a scan,
+  // and the launch has already listed what is saved. Counted at the file-system API
+  // itself, so the test does not depend on how the app happens to name its scans.
+  test('opening the library after launch does not read the saved files again', async ({ page }) => {
+    test.setTimeout(90000)
+
+    const lib = new LibraryPage(page)
+    const common = new CommonPage(page)
+
+    await page.addInitScript(() => {
+      const w = window as unknown as { __fileReads: number }
+      w.__fileReads = 0
+      const original = FileSystemFileHandle.prototype.getFile
+      FileSystemFileHandle.prototype.getFile = function (...args) {
+        w.__fileReads++
+        return original.apply(this, args)
+      }
+    })
+
+    await lib.goto()
+    await lib.waitForSongs()
+    const ids = await libraryIds(page)
+    await saveSongOffline(page, ids[0])
+
+    // A fresh launch: its scan lists the saved song, and the player restores its state.
+    await page.reload()
+    await lib.waitForSongs()
+    await restoredSongId(page)
+    await expect(page.getByTestId('player-bar')).toBeVisible()
+
+    await page.evaluate(() => { (window as unknown as { __fileReads: number }).__fileReads = 0 })
+    await common.navLink('explore').click()
+    await expect(page).toHaveURL(/\/explore/)
+    await common.navLink('library').click()
+    await expect(page).toHaveURL(/\/library/)
+    await lib.waitForSongs()
+    // The library has finished mounting once its saved-offline marker is there.
+    await expect(lib.songById(ids[0]).first()).toBeVisible()
+
+    await expectStable(() => page.evaluate(() => (window as unknown as { __fileReads: number }).__fileReads), 2000)
+    expect(await page.evaluate(() => (window as unknown as { __fileReads: number }).__fileReads)).toBe(0)
+  })
+
+  // Offline, the queue says which songs will actually play, in the panel and in the
+  // expanded player alike. Online it looks as it always did.
+  test('offline, the queue marks the songs that are not saved and counts the ones that are', async ({ page, context }) => {
+    test.setTimeout(90000)
+
+    const lib = new LibraryPage(page)
+    const player = new PlayerBar(page)
+    const common = new CommonPage(page)
+
+    await lib.goto()
+    await lib.waitForSongs()
+    const ids = await libraryIds(page)
+    expect(ids.length).toBeGreaterThanOrEqual(3)
+    const startedName = await songTrackName(page, ids[0])
+    await saveSongOffline(page, ids[2])
+    await playLibraryPaused(page)
+
+    const panel = player.queuePanel
+    await player.openQueue()
+    await expect(panel.locator('[data-qi]').first()).toBeVisible()
+    await expect(panel.locator('[data-unsaved]')).toHaveCount(0)
+    await expect(page.getByTestId('queue-offline-summary')).toHaveCount(0)
+
+    await common.goOffline()
+
+    await expect(page.getByTestId('queue-offline-summary')).toHaveText(`Offline — 1 of ${ids.length} available`)
+    const rows = panel.locator('[data-qi]')
+    const rendered = await rows.count()
+    await expect(panel.locator('[data-unsaved]')).toHaveCount(rendered - 1)
+    await expect(panel.getByRole('img', { name: 'not saved offline' })).toHaveCount(rendered - 1)
+    await expect(rows.nth(2)).not.toHaveAttribute('data-unsaved', 'true')
+    // A song that will not play is dimmed, one that will is not.
+    await expect(rows.nth(1)).toHaveClass(/opacity-50/)
+    await expect(rows.nth(2)).not.toHaveClass(/opacity-50/)
+
+    // Searching the queue narrows the list, not the count.
+    if (ids.length > 5) {
+      await player.queueSearch.fill('zzzzzzzz')
+      await expect(page.getByTestId('queue-offline-summary')).toHaveText(`Offline — 1 of ${ids.length} available`)
+      await player.queueSearchClear.click()
+    }
+
+    // A tap on one that is not saved says so and changes nothing.
+    await rows.nth(1).locator('button').first().click()
+    await expect(page.getByTestId('toast')).toContainText(/not saved offline/i)
+    await expect(player.trackName).toHaveText(startedName!)
+
+    // The expanded player shows the same, and a tap there does not leave the queue.
+    await player.closeQueue()
+    await page.getByTestId('player-expand-art').click()
+    const overlay = page.getByTestId('player-expanded')
+    await expect(overlay).toBeVisible()
+    await overlay.getByRole('button', { name: /toggle queue/i }).click()
+    const overlayRows = overlay.locator('[data-qi]')
+    await expect(overlayRows.first()).toBeVisible()
+    await expect(overlay.getByTestId('queue-offline-summary')).toHaveText(`Offline — 1 of ${ids.length} available`)
+    const overlayRendered = await overlayRows.count()
+    await expect(overlay.locator('[data-unsaved]')).toHaveCount(overlayRendered - 1)
+    await overlayRows.nth(1).locator('button').first().click()
+    await expect(page.getByTestId('toast')).toContainText(/not saved offline/i)
+    await expect(overlayRows.first()).toBeVisible()
+
+    // Back online the marks go.
+    await context.setOffline(false)
+    await expect(overlay.locator('[data-unsaved]')).toHaveCount(0)
+    await expect(overlay.getByTestId('queue-offline-summary')).toHaveCount(0)
+  })
+
+  // The list of saved songs can be wrong about a song until it is opened. When that
+  // is found out, the queue stops promising it, without a reload.
+  test('offline, a saved song found to have no file gains its mark in the queue and leaves the count', async ({ page, context }) => {
+    test.setTimeout(90000)
+
+    const lib = new LibraryPage(page)
+    const player = new PlayerBar(page)
+    const common = new CommonPage(page)
+
+    await lib.goto()
+    await lib.waitForSongs()
+    const ids = await libraryIds(page)
+    expect(ids.length).toBeGreaterThanOrEqual(3)
+    await saveSongOffline(page, ids[1])
+    await saveSongOffline(page, ids[2])
+    await emptySavedFile(page, ids[1])
+    await playLibraryPaused(page)
+    await common.goOffline()
+
+    await player.openQueue()
+    await expect(page.getByTestId('queue-offline-summary')).toHaveText(`Offline — 2 of ${ids.length} available`)
+    await expect(player.queueRows().nth(1)).not.toHaveAttribute('data-unsaved', 'true')
+
+    await player.queueRows().nth(1).getByRole('button').first().click()
+    await expect(page.getByTestId('toast')).toContainText(/not saved offline/i)
+
+    await expect(page.getByTestId('queue-offline-summary')).toHaveText(`Offline — 1 of ${ids.length} available`)
+    await expect(player.queueRows().nth(1)).toHaveAttribute('data-unsaved', 'true')
+    await expect(player.queueRows().nth(2)).not.toHaveAttribute('data-unsaved', 'true')
 
     await context.setOffline(false)
   })
@@ -176,7 +640,7 @@ test.describe('Offline saving and playback', () => {
 
     await player.next.click()
 
-    await expect(common.toastError).toHaveText(/no offline copies left/i, { timeout: 15000 })
+    await expect(common.toast).toHaveText(/no offline copies left/i, { timeout: 15000 })
     // A known state, not a crash: the player stays put and stays stopped.
     await expect(player.playPause).toHaveAttribute('title', 'play')
     await expect(player.trackName).toHaveText(started)
@@ -274,7 +738,7 @@ test.describe('Offline saving and playback', () => {
 
     // Songs were stepped over and the queue ended with none saved: that is worth
     // saying, unlike an album simply finishing.
-    await expect(common.toastError).toHaveText(/not saved offline/i, { timeout: 15000 })
+    await expect(common.toast).toHaveText(/not saved offline/i, { timeout: 15000 })
     await expect(player.playPause).toHaveAttribute('title', 'play')
     await expect(player.trackName).toHaveText(started)
   })
@@ -318,7 +782,7 @@ test.describe('Offline saving and playback', () => {
     await common.goOffline()
     await player.next.click()
 
-    await expect(common.toastError).toHaveText(/no offline copies left/i, { timeout: 15000 })
+    await expect(common.toast).toHaveText(/no offline copies left/i, { timeout: 15000 })
     await expect(player.trackName).toHaveText(started)
 
     await context.setOffline(false)

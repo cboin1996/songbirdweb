@@ -83,19 +83,19 @@ npm run build
 npm run start
 ```
 
-…then open the app in an incognito window so a fresh SW installs. Bump cache versions in `public/sw.js` (`songbird-shell-v6` → `-v7`) when changing fetch handler shape so the activate handler purges old caches.
+…then open the app in an incognito window so a fresh SW installs. `public/sw.js` is generated from `public/sw.template.js` by `npm run build`; edit the template. The shell cache name follows the app version, so a version bump purges the old shell cache. Rename `songbird-api-v2` by hand only when stored API copies must go.
 
 DevTools tips:
 
 - Application → Service Workers → check "Update on reload" while iterating.
 - Application → Cache Storage → inspect the `songbird-shell-vX` and `songbird-artwork-v1` caches.
-- Network tab → "Offline" mode tests the OfflineGuard fallback.
+- Network tab → "Offline" mode tests the OfflineGuard fallback. It does not reproduce a dead zone (a connection that reports online and fails every request); the e2e helper `enterDeadZone` does.
 - Application → Storage → "Clear site data" wipes cookies, OPFS, IndexedDB — useful after `dev-wipe` on the API side.
 
 ## How to run tests
 
 ```bash
-npm test               # Jest + React Testing Library (unit)
+npm test               # Jest (unit); CI runs it as `make unit`
 npm run lint           # next lint (ESLint)
 
 # E2E — recommended (CI-parity Docker harness, isolated API + Postgres)
@@ -136,7 +136,7 @@ CI. `make test-e2e` is for fast iteration against your own dev API. See
 | `app/lib/` | Pure client helpers (data fetching, OPFS, hooks) |
 | `app/v1/[...path]/route.ts` | Dev-only API proxy |
 | `middleware.ts` | Auth + token refresh |
-| `public/sw.js` | Service worker (production) |
+| `public/sw.template.js` | Service worker source; `npm run build` generates `public/sw.js` from it |
 | `e2e/` | Playwright specs + helpers |
 | `__tests__/` | Jest unit tests |
 | `docs/` | This + ARCHITECTURE + STATE + ENV |

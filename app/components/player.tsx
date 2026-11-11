@@ -5,11 +5,14 @@ import { useVirtualList } from "../lib/use-virtual-list"
 import Image from "next/image"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
+import { MdCloudOff } from "react-icons/md"
 import { FaPause, FaPlay, FaStepBackward, FaStepForward, FaRandom, FaRedo, FaList, FaTimes, FaVolumeUp, FaVolumeMute, FaBars, FaMusic, FaChevronDown } from "react-icons/fa"
 import { filterSongs } from "../lib/use-filtered-songs"
 import SearchInput from "./search-input"
 import Spinner from "./spinner"
-import { DOWNLOAD_URL, LibrarySong, RefreshResult, PlayableSong, PlayerState, artworkUrl, songArtworkUrl, ensureFreshToken, isSigningOut, redirectToLogin, tryRefresh, fetchLibrarySongs, fetchPlayerState, fetchSongById, recordPlay, savePlayerState, updatePosition, queueInsert, queueRemove, queueReorder as apiQueueReorder } from "../lib/data"
+import { DOWNLOAD_URL, LibrarySong, RefreshResult, PlayableSong, PlayerState, artworkUrl, songArtworkUrl, ensureFreshToken, isSigningOut, redirectToLogin, tryRefresh, fetchLibrarySongs, fetchLibrarySongsAtLaunch, fetchPlayerState, fetchPlayerStateAtLaunch, fetchSongById, recordPlay, savePlayerState, playerWritesPending, readLocalPlayerState, updatePosition, queueInsert, queueRemove, queueReorder as apiQueueReorder } from "../lib/data"
+import { isOffline } from "../lib/offline-signal"
+import { useOnline } from "../lib/use-online"
 import { getSongFile, cacheArtworkUrls } from "../lib/offline"
 import { useOfflineSave } from "../lib/offline-save-context"
 import { createBlobSlot } from "../lib/blob-slot"
@@ -253,6 +256,10 @@ interface QueueRowListProps {
     queueDropTarget: number | null
     setQueueDropTarget: (n: number | null) => void
     manualNextIds: Set<string>
+    // What is saved, when the queue is to show which songs are not: offline, once the
+    // launch scan has finished. `available` and `total` count the whole queue, for the
+    // line at the top. Null leaves the queue as it is online.
+    offline: { savedIds: Set<string>; available: number; total: number } | null
     queueSearch: string
     setQueueSearch: (s: string) => void
     showSearch: boolean
@@ -270,7 +277,7 @@ interface QueueRowListProps {
 function QueueRowList({
     containerRef, items, start, end, totalHeight, offsetTop,
     currentUuid, isPlaying, dragFromRef, draggedQi, setDraggedQi,
-    queueDropTarget, setQueueDropTarget, manualNextIds,
+    queueDropTarget, setQueueDropTarget, manualNextIds, offline,
     queueSearch, setQueueSearch, showSearch, searchTestId, emptyTestId,
     reorderQueue, removeFromQueue, onPlayAt, onPause, onResume, onSourceNav,
     variant,
@@ -297,6 +304,11 @@ function QueueRowList({
 
     return (
         <>
+            {offline && (
+                <p data-testid="queue-offline-summary" className="shrink-0 pb-2 text-xs text-gray-400">
+                    Offline — {offline.available} of {offline.total} available
+                </p>
+            )}
             {showSearch && (
                 <div className="shrink-0 pb-2">
                     <SearchInput value={queueSearch} onChange={setQueueSearch} placeholder="search queue…" testId={searchTestId ?? 'queue-search'} />
@@ -321,14 +333,16 @@ function QueueRowList({
                             const isBeingDragged = draggedQi === dpos
                             const isDropTarget = queueDropTarget === dpos && !isBeingDragged
                             const isDropAfter = queueDropTarget === dpos + 1 && dpos === items.length - 1 && !isBeingDragged
+                            const unsaved = offline !== null && !offline.savedIds.has(song.uuid)
                             const art = songArtworkUrl(song.uuid, song.artwork_cached, sp?.artworkUrl100, 200)
                             return (
                                 <div
                                     key={`${song.uuid}-${qi}`}
                                     data-qi={qi}
                                     data-dpos={dpos}
+                                    data-unsaved={unsaved ? 'true' : undefined}
                                     style={{ height: QUEUE_ROW_H }}
-                                    className={`flex items-center gap-3 ${s.px} border-t-2 border-b-2 transition-colors select-none ${isDropTarget ? 'border-t-sky-500' : 'border-t-transparent'} ${isDropAfter ? 'border-b-sky-500' : 'border-b-transparent'} ${isBeingDragged ? 'opacity-40' : ''} ${isActive ? s.activeRow : s.hoverRow}`}
+                                    className={`flex items-center gap-3 ${s.px} border-t-2 border-b-2 transition-colors select-none ${isDropTarget ? 'border-t-sky-500' : 'border-t-transparent'} ${isDropAfter ? 'border-b-sky-500' : 'border-b-transparent'} ${isBeingDragged ? 'opacity-40' : unsaved ? 'opacity-50' : ''} ${isActive ? s.activeRow : s.hoverRow}`}
                                 >
                                     <span
                                         data-testid={variant === 'panel' ? 'queue-drag-handle' : undefined}
@@ -354,6 +368,7 @@ function QueueRowList({
                                             </div>
                                             <p className={s.artist}>{sp?.artistName ?? '—'}</p>
                                         </div>
+                                        {unsaved && <MdCloudOff role="img" aria-label="not saved offline" size={14} className="shrink-0 text-gray-400" />}
                                         {isActive && (isPlaying ? <FaPause size={9} className={`${s.activePing} shrink-0`} /> : <FaPlay size={9} className={`${s.activePing} shrink-0`} />)}
                                     </button>
                                     {song.source && (
@@ -457,20 +472,21 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     // and is also captured once into the media-session and keyboard handlers, so
     // a direct read would pin the provider's initial empty set for the whole
     // session and report "no offline copies left" with a full offline library.
-    const { cachedIds, cachedIdsStatus } = useOfflineSave()
-    const cachedIdsRef = useRef(cachedIds)
+    const { cachedIds, cachedIdsStatus, savedNow, dropSaved } = useOfflineSave()
+    const online = useOnline()
     const cachedIdsStatusRef = useRef(cachedIdsStatus)
-    useEffect(() => { cachedIdsRef.current = cachedIds }, [cachedIds])
     useEffect(() => { cachedIdsStatusRef.current = cachedIdsStatus }, [cachedIdsStatus])
 
     // The local copies to filter the advance against, or null for no pre-filter.
     // Online, no provider (the public share page mounts the player without one),
     // and a scan that has not finished all keep today's behaviour; only a
-    // finished scan justifies concluding there is nothing left to play.
+    // finished scan justifies concluding there is nothing left to play. "Offline"
+    // is the shared signal, which includes a server that cannot be reached while
+    // the browser still reports a connection.
     function offlineOnlyIds(): Set<string> | null {
-        if (typeof navigator === 'undefined' || navigator.onLine) return null
+        if (!isOffline()) return null
         if (cachedIdsStatusRef.current !== 'scanned') return null
-        return cachedIdsRef.current
+        return savedNow()
     }
 
     function generateShuffleOrder(currentIdx = queueIndexRef.current, existingSeed?: number) {
@@ -485,6 +501,21 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setShuffleOrder([...order])
     }
 
+    // A load found no local copy of the song and there is no network to stream it from.
+    // What was playing stops, so it does not carry on under the new song's title. A
+    // walk that was stepping to this song as one it believed saved goes on to the next;
+    // a tap is told why nothing plays.
+    function stopForMissingCopy(audio: HTMLAudioElement, walk: boolean) {
+        audio.pause()
+        shouldPlayRef.current = false
+        if (walk) {
+            advanceTrack()
+            return
+        }
+        setIsPlaying(false)
+        showToast('not saved offline')
+    }
+
     // `gen` is the load generation that asked for this source. A superseded
     // caller gets null. Omitting `gen` opts out of the check.
     //
@@ -497,11 +528,26 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         const superseded = () => gen !== undefined && gen !== loadGenRef.current
         if (superseded()) return null
         let cached: File | null = null
+        let lookupSucceeded = false
         try {
             cached = await getSongFile(songUuid)
-        } catch {}
+            lookupSucceeded = true
+        } catch (err) {
+            console.warn('could not look up the saved copy of a song', songUuid, err)
+        }
         if (superseded()) return null
         if (cached) return URL.createObjectURL(cached)
+        // The saved list names a song whose file is missing or empty: the launch scan
+        // lists names without opening the files. It stops being a saved song now, in
+        // every view. The file itself is left alone: an empty one costs nothing, the
+        // next save overwrites it, and deleting here could race a save that has made
+        // the file and not yet written it.
+        //
+        // A lookup that failed says nothing about the file, so online the song is
+        // streamed and stays listed. Offline there is no stream to fall back on, and
+        // leaving it listed would let the walk land on it again and again: for this
+        // session it is treated as missing, and the next launch scans it afresh.
+        if (lookupSucceeded || offlineOnlyIds()) dropSaved(songUuid)
         return `${DOWNLOAD_URL}/${songUuid}`
     }
 
@@ -560,8 +606,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     // The terminal state: nothing but the user leaves it, and it says so once.
     // Shared by the repeated-failure stop and the "nothing saved offline left"
-    // stop, which differ only in their message.
-    function enterStoppedState(message: string) {
+    // stop, which differ in their message and in whether it is an error: running
+    // out of saved songs offline is expected, so it gets the plain toast.
+    function enterStoppedState(message: string, isError = true) {
         stoppedRef.current = true
         failureCountRef.current = 0
         failureSnapshotRef.current = null
@@ -572,7 +619,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         // found nothing to move to. Saying "stopped" over audible playback would
         // be worse than the silence.
         audioRef.current?.pause()
-        showToast(message, true)
+        showToast(message, isError)
         // The cascade or the walk may have moved the queue before the state was
         // put back; the server should hold where the user is now, not where the
         // last debounced save happened to catch it.
@@ -709,19 +756,19 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         } catch {}
     }
 
+    // The launch checks hasUserPlayedRef itself: that guard protects the launch from a
+    // late answer, and has no business stopping a later return to the tab.
     async function reconcilePlayerState(serverState: PlayerState) {
-        if (hasUserPlayedRef.current) return
         if (audioRef.current && !audioRef.current.paused) return
         // A change is waiting for its debounced save, so this player is ahead of the
         // server by definition. Comparing against what the server has not heard yet
         // would read the user's own skip or toggle as another device's edit.
         if (saveTimerRef.current) return
+        // Or the save has gone out, or is waiting its turn behind a slow request: the
+        // server still has not heard, and what it holds is older than this screen.
+        if (playerWritesPending()) return
 
-        let localState: (PlayerState & { saved_at?: string }) | undefined
-        try {
-            const raw = localStorage.getItem('playerState')
-            if (raw) localState = JSON.parse(raw)
-        } catch {}
+        const localState = readLocalPlayerState()
 
         // Compare against the player's own live refs once it holds a song:
         // inside the save debounce the mirror in local storage lags, and a
@@ -741,6 +788,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 && serverState.repeat === repeatRef.current
                 && JSON.stringify(serverState.manual_next ?? [])
                     === JSON.stringify(manualNextRef.current.map(s => s.uuid))) return
+            // This device changed them after the server's copy was made, and the
+            // server never heard (the save failed, out of reach): they are the newer
+            // ones. Keep them, and send them again.
+            if (loaded && localState?.saved_at && serverState.updated_at
+                && new Date(localState.saved_at).getTime() > new Date(serverState.updated_at).getTime()) {
+                scheduleSave()
+                return
+            }
             // Same song, but shuffle, repeat or manual-next moved on another
             // device. Apply it: it costs nothing now, and dropping it is the
             // bug this replaces.
@@ -770,7 +825,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     // `startAt` overrides the stored last-played position. The error retry needs
     // it: `last_position` comes from an app-start library snapshot, so reloading
     // on it would throw away however far the song had actually got.
-    async function loadSong(song: PlayableSong, startAt?: number) {
+    // `walk` marks a load made by the offline advance stepping to a song it believed
+    // was saved, so that finding it is not, it can step on without a word.
+    async function loadSong(song: PlayableSong, startAt?: number, walk = false) {
         const audio = audioRef.current
         if (!audio) return
         const gen = ++loadGenRef.current
@@ -791,6 +848,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             if (gen !== loadGenRef.current) return
             const src = await resolveAudioSrc(song.uuid, gen)
             if (src === null) return
+            // Offline there is no stream to fall back on. A song the list called saved
+            // had no playable file; the lookup has dropped it, and the walk goes on to
+            // the next saved one. A tap on it is told why nothing plays.
+            if (src.startsWith(DOWNLOAD_URL) && offlineOnlyIds()) {
+                stopForMissingCopy(audio, walk)
+                return
+            }
             shouldPlayRef.current = true
             applyAudioSrc(audio, src, song.uuid)
             audio.play().catch(() => {})
@@ -816,6 +880,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             if (src !== streamSrc) {
                 shouldPlayRef.current = true
                 applyAudioSrc(audio, src, song.uuid)
+            } else if (offlineOnlyIds()) {
+                // No local copy and no network to stream from: the stream that was started
+                // to fit the gesture window cannot succeed. Say why, and stop.
+                stopForMissingCopy(audio, walk)
             } else if (audio.error) {
                 // There was no local copy and the stream really did fail. The held
                 // error has to surface or the UI sits there claiming to play, so
@@ -825,7 +893,37 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         }
     }
 
+    // Runs `start` when the song may be started, and says "not saved offline" when
+    // it may not, leaving the player exactly as it was. Online, and while the saved
+    // list is unknown, every song may start. Offline the list decides, and once
+    // playback has begun the file is opened as well: a name on the list can stand for
+    // an empty file, and finding out after the queue and the current song had moved
+    // would leave the old song playing under the new one's title.
+    //
+    // Before the first play there is no await to spare: iOS wants the source set
+    // inside the gesture, so `start` runs at once and loadSong finds out afterwards.
+    // `start` may return false to say it found the queue had moved on and did nothing.
+    // Resolves to whether the song was started.
+    function startIfPlayable(uuid: string, start: () => boolean | void): Promise<boolean> {
+        const localOnly = offlineOnlyIds()
+        if (localOnly && !localOnly.has(uuid)) {
+            showToast('not saved offline')
+            return Promise.resolve(false)
+        }
+        if (!localOnly || !autoplayActivatedRef.current) return Promise.resolve(start() !== false)
+        return getSongFile(uuid).catch(() => null).then(file => {
+            if (file) return start() !== false
+            dropSaved(uuid)
+            showToast('not saved offline')
+            return false
+        })
+    }
+
     function play(song: PlayableSong, newQueue?: PlayableSong[], context?: PlayContext) {
+        void startIfPlayable(song.uuid, () => startPlaying(song, newQueue, context))
+    }
+
+    function startPlaying(song: PlayableSong, newQueue?: PlayableSong[], context?: PlayContext) {
         hasUserPlayedRef.current = true
         clearFailureState()
         const baseQueue = newQueue ?? [song]
@@ -1069,8 +1167,19 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         // sets no src, so the rest of the song arrives as range requests carrying
         // whatever cookie is current by then.
         void ensureFreshToken()
+        // Offline, a song that is not saved cannot play, so pressing play moves to the
+        // next one that can, in queue order.
+        const localOnly = offlineOnlyIds()
+        if (localOnly && !localOnly.has(song.uuid)) {
+            // Nowhere to go, and nothing said: the queue just ended on a song that is
+            // not saved. (A walk that found the rest unsaved has already said so.)
+            if (!advanceTrack() && !stoppedRef.current) showToast('not saved offline')
+            return
+        }
         if (audio.error) {
-            loadSong(song)
+            // A saved song whose file turns out to be missing is stepped over, not
+            // reported: pressing play offline is asking for something to play.
+            loadSong(song, undefined, !!localOnly)
             return
         }
         audio.play().catch(() => {})
@@ -1156,7 +1265,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
         // Offline with nothing in the queue saved: there is nowhere to walk to.
         if (!q.some(s => localOnly.has(s.uuid))) {
-            enterStoppedState('no offline copies left')
+            enterStoppedState('no offline copies left', false)
             return false
         }
 
@@ -1184,7 +1293,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                     manualNextRef.current = [...steppedOverManual, ...manualNextRef.current]
                     setManualNextIds(new Set(manualNextRef.current.map(s => s.uuid)))
                 }
-                loadSong(q[step.idx], 0)
+                loadSong(q[step.idx], 0, true)
                 scheduleSave()
                 return true
             }
@@ -1196,7 +1305,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         // report, as online; if unsaved songs stood between here and the end, say
         // so, because the silence would otherwise look like a crash.
         restoreAdvanceState(before)
-        if (steppedOver > 0) enterStoppedState('the rest of the queue is not saved offline')
+        if (steppedOver > 0) enterStoppedState('the rest of the queue is not saved offline', false)
         return false
     }, [])
 
@@ -1215,45 +1324,59 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             setCurrentTime(0)
             return
         }
-        const idx = queueIndexRef.current
+        const q = queueRef.current
+        let prevIdx: number
+        let prevPos = -1
         if (shuffleRef.current) {
-            const prevPos = shufflePosRef.current - 1
+            prevPos = shufflePosRef.current - 1
             if (prevPos < 0) return
-            shufflePosRef.current = prevPos
-            const prevIdx = shuffleOrderRef.current[prevPos]
-            queueIndexRef.current = prevIdx
-            loadSong(queueRef.current[prevIdx], 0)
+            prevIdx = shuffleOrderRef.current[prevPos]
         } else {
-            if (idx <= 0) return
-            queueIndexRef.current = idx - 1
-            loadSong(queueRef.current[idx - 1], 0)
+            if (queueIndexRef.current <= 0) return
+            prevIdx = queueIndexRef.current - 1
         }
-        scheduleSave()
+        const prev = q[prevIdx]
+        if (!prev) return
+        void startIfPlayable(prev.uuid, () => {
+            // The queue may have moved while the file was being checked.
+            if (queueRef.current !== q) return false
+            if (prevPos >= 0) shufflePosRef.current = prevPos
+            queueIndexRef.current = prevIdx
+            loadSong(prev, 0)
+            scheduleSave()
+            return true
+        })
     }, [])
+
+    // What the player holds right now, in the shape the server stores. Read when
+    // the save goes out as well as when it is asked for: a save held behind a slow
+    // request must not send what the player held two seconds earlier.
+    function buildPlayerState(): PlayerState {
+        const ctx = playContextRef.current
+        const sources: Record<string, PlayContext> = {}
+        for (const s of queueRef.current) if (s.source) sources[s.uuid] = s.source
+        for (const s of manualNextRef.current) if (s.source) sources[s.uuid] = s.source
+        return {
+            shuffle: shuffleRef.current,
+            repeat: repeatRef.current,
+            queue: queueRef.current.map(s => s.uuid),
+            queue_index: queueIndexRef.current,
+            shuffle_order: shuffleOrderRef.current,
+            play_context: ctx?.id ?? null,
+            shuffle_seed: shuffleSeedRef.current,
+            shuffle_position: shufflePosRef.current,
+            manual_next: manualNextRef.current.map(s => s.uuid),
+            current_song_uuid: queueRef.current[queueIndexRef.current]?.uuid ?? null,
+            queue_sources: sources,
+        }
+    }
 
     function scheduleSave() {
         if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
         saveTimerRef.current = setTimeout(() => {
             saveTimerRef.current = null
-            const ctx = playContextRef.current
-            const sources: Record<string, PlayContext> = {}
-            for (const s of queueRef.current) if (s.source) sources[s.uuid] = s.source
-            for (const s of manualNextRef.current) if (s.source) sources[s.uuid] = s.source
-            const state = {
-                shuffle: shuffleRef.current,
-                repeat: repeatRef.current,
-                queue: queueRef.current.map(s => s.uuid),
-                queue_index: queueIndexRef.current,
-                shuffle_order: shuffleOrderRef.current,
-                play_context: ctx?.id ?? null,
-                shuffle_seed: shuffleSeedRef.current,
-                shuffle_position: shufflePosRef.current,
-                manual_next: manualNextRef.current.map(s => s.uuid),
-                current_song_uuid: queueRef.current[queueIndexRef.current]?.uuid ?? null,
-                queue_sources: sources,
-            }
-            try { localStorage.setItem('playerState', JSON.stringify({ ...state, saved_at: new Date().toISOString() })) } catch {}
-            savePlayerState(state).catch(() => {})
+            try { localStorage.setItem('playerState', JSON.stringify({ ...buildPlayerState(), saved_at: new Date().toISOString() })) } catch {}
+            savePlayerState(buildPlayerState).catch(() => {})
         }, 2000)
     }
 
@@ -1285,17 +1408,24 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         })
     }
 
-    function playAt(index: number) {
+    // Resolves to false when nothing was started, so a caller can leave things as
+    // they are.
+    function playAt(index: number): Promise<boolean> {
         const q = queueRef.current
-        if (index < 0 || index >= q.length) return
-        clearFailureState()
-        queueIndexRef.current = index
-        if (shuffleRef.current) {
-            const pos = shuffleOrderRef.current.indexOf(index)
-            if (pos >= 0) shufflePosRef.current = pos
-        }
-        loadSong(q[index])
-        scheduleSave()
+        if (index < 0 || index >= q.length) return Promise.resolve(false)
+        return startIfPlayable(q[index].uuid, () => {
+            // The queue may have moved while the file was being checked.
+            if (queueRef.current !== q) return false
+            clearFailureState()
+            queueIndexRef.current = index
+            if (shuffleRef.current) {
+                const pos = shuffleOrderRef.current.indexOf(index)
+                if (pos >= 0) shufflePosRef.current = pos
+            }
+            loadSong(q[index])
+            scheduleSave()
+            return true
+        })
     }
 
     function toggleRepeat() {
@@ -1392,6 +1522,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             }
             const wasHiddenMs = hiddenAt !== null ? Date.now() - hiddenAt : 0
             hiddenAt = null
+            // The browser's own word on the connection, on purpose, not the shared offline
+            // signal: when the app only believes the server is gone, this return to the
+            // tab is the request that finds out it is back.
             if (!navigator.onLine) return
             // Keep the 15-minute token valid before the user can press play. This,
             // not the check at src assignment, is what covers the long pause: a
@@ -1559,19 +1692,24 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     }, [pause, resume, skipPrev, skipNext])
 
     useEffect(() => {
-        Promise.all([fetchPlayerState(), fetchLibrarySongs()]).then(async ([serverState, libSongs]) => {
+        // A failed request is no answer, like a 401: this device's own copy still restores.
+        Promise.all([fetchPlayerStateAtLaunch().catch(() => undefined), fetchLibrarySongsAtLaunch()]).then(async ([answer, libSongs]) => {
             const libMap = new Map((libSongs ?? []).map(s => [s.uuid, s]))
             libMapRef.current = libMap
-            if (serverState) {
-                await reconcilePlayerState(serverState)
-            } else {
-                let localState: PlayerState | undefined
-                try {
-                    const raw = localStorage.getItem('playerState')
-                    if (raw) localState = JSON.parse(raw)
-                } catch {}
-                if (localState && !hasUserPlayedRef.current) await applyPlayerState(localState)
+            // Whatever the user picked while the request was out stands; no answer, fresh or
+            // not, replaces it.
+            if (hasUserPlayedRef.current) return
+            if (answer && !answer.stale) {
+                await reconcilePlayerState(answer.state)
+                return
             }
+            // No answer, or one the service worker served from its cache: that copy is
+            // older than anything this device did since the connection dropped, so it
+            // is no news to offer the user. This device's own copy wins, and the cached
+            // one stands in only when there is nothing local.
+            const localState = readLocalPlayerState()
+            const restore = localState ?? answer?.state
+            if (restore) await applyPlayerState(restore)
         }).catch(() => {})
     }, [])
 
@@ -1586,6 +1724,18 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             : queue.map((song, qi) => ({ song, qi })),
         [shuffle, shuffleOrder, queue]
     )
+    // Offline, and only once the launch scan has finished (before that an empty list
+    // means nothing has been looked at, not that nothing is saved), the queue marks
+    // the songs that will not play. Counted over the whole queue, whatever the search
+    // has narrowed the list to.
+    const queueSavedIds = !online && cachedIdsStatus === 'scanned' ? cachedIds : null
+    const queueOffline = useMemo(
+        () => queueSavedIds
+            ? { savedIds: queueSavedIds, available: queue.filter(s => queueSavedIds.has(s.uuid)).length, total: queue.length }
+            : null,
+        [queueSavedIds, queue]
+    )
+
     const queueDisplayItems = useMemo(() => {
         if (!queueSearch.trim()) return queueDisplayItemsAll
         const matched = filterSongs(queueDisplayItemsAll.map(i => i.song), queueSearch)
@@ -1715,11 +1865,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                     draggedQi={draggedQi} setDraggedQi={setDraggedQi}
                                     queueDropTarget={queueDropTarget} setQueueDropTarget={setQueueDropTarget}
                                     manualNextIds={manualNextIds}
+                                    offline={queueOffline}
                                     queueSearch={queueSearch} setQueueSearch={setQueueSearch}
                                     showSearch={queue.length > 5}
                                     reorderQueue={reorderQueue}
                                     removeFromQueue={removeFromQueue}
-                                    onPlayAt={qi => { playAt(qi); setExpandedTab('nowplaying') }}
+                                    onPlayAt={qi => { void playAt(qi).then(started => { if (started) setExpandedTab('nowplaying') }) }}
                                     onPause={pause}
                                     onResume={resume}
                                     onSourceNav={() => setShowExpanded(false)}
@@ -1855,6 +2006,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                     draggedQi={draggedQi} setDraggedQi={setDraggedQi}
                                     queueDropTarget={queueDropTarget} setQueueDropTarget={setQueueDropTarget}
                                     manualNextIds={manualNextIds}
+                                    offline={queueOffline}
                                     queueSearch={queueSearch} setQueueSearch={setQueueSearch}
                                     showSearch={queue.length > 5}
                                     searchTestId="queue-search"

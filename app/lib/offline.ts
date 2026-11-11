@@ -74,16 +74,30 @@ async function idbDelete(songId: string): Promise<void> {
     db.close()
 }
 
-async function idbGetAllKeys(): Promise<string[]> {
+// With `verify`, a key whose blob is empty is left out, as an empty OPFS file is.
+async function idbGetAllKeys(verify = false): Promise<string[]> {
     const db = await openAudioDb()
-    const keys = await new Promise<IDBValidKey[]>((resolve, reject) => {
+    const { keys, blobs } = await new Promise<{ keys: IDBValidKey[]; blobs: (Blob | undefined)[] }>((resolve, reject) => {
         const tx = db.transaction(IDB_STORE, 'readonly')
-        const req = tx.objectStore(IDB_STORE).getAllKeys()
-        req.onsuccess = () => resolve(req.result)
-        req.onerror = () => reject(req.error)
+        const store = tx.objectStore(IDB_STORE)
+        const keysReq = store.getAllKeys()
+        const blobsReq = verify ? store.getAll() : null
+        const out = { keys: [] as IDBValidKey[], blobs: [] as (Blob | undefined)[] }
+        keysReq.onsuccess = () => {
+            out.keys = keysReq.result
+            if (!blobsReq) resolve(out)
+        }
+        if (blobsReq) {
+            blobsReq.onsuccess = () => {
+                out.blobs = blobsReq.result as (Blob | undefined)[]
+                resolve(out)
+            }
+            blobsReq.onerror = () => reject(blobsReq.error)
+        }
+        keysReq.onerror = () => reject(keysReq.error)
     })
     db.close()
-    return keys as string[]
+    return (keys as string[]).filter((_, i) => !verify || (blobs[i]?.size ?? 0) > 0)
 }
 
 async function idbClearAll(): Promise<void> {
@@ -99,6 +113,15 @@ async function idbClearAll(): Promise<void> {
 
 // --- Public API ---
 
+// A file that is not there, or not a file, is the answer "no copy in this format".
+// Any other error (a read that failed, storage that was interrupted) says nothing
+// about whether the copy exists, so it is the caller's to see: treating it as
+// "missing" would drop a saved song that is still on the device.
+function isAbsent(err: unknown): boolean {
+    const name = (err as { name?: string } | null)?.name
+    return name === 'NotFoundError' || name === 'TypeMismatchError'
+}
+
 export async function getSongFile(songId: string): Promise<File | null> {
     if (await opfsAvailable()) {
         const dir = await getAudioDir()
@@ -107,7 +130,9 @@ export async function getSongFile(songId: string): Promise<File | null> {
                 const handle = await dir.getFileHandle(`${songId}.${ext}`, { create: false })
                 const file = await handle.getFile()
                 if (file.size > 0) return file
-            } catch { /* try next */ }
+            } catch (err) {
+                if (!isAbsent(err)) throw err
+            }
         }
     }
     const blob = await idbGet(songId)
@@ -119,31 +144,32 @@ export async function getSongFile(songId: string): Promise<File | null> {
 // passes false: on a phone with a large offline library that is one file open per
 // song, competing with the initial player-state fetch. The non-empty check still
 // happens on the playback path, in getSongFile, where it belongs.
+//
+// A list that could not be read to the end is not a smaller list: it throws, so a
+// caller never takes part of the saved songs for all of them. Only a browser with no
+// OPFS or no IndexedDB at all is skipped, because there is nothing there to miss.
 export async function getCachedSongIds(verify = true): Promise<Set<string>> {
     const ids = new Set<string>()
 
     if (await opfsAvailable()) {
-        try {
-            const dir = await getAudioDir()
-            for await (const [name, handle] of (dir as FileSystemDirectoryHandle & { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()) {
-                if (typeof name === 'string' && (name.endsWith('.mp3') || name.endsWith('.m4a'))) {
-                    if (!verify) {
-                        ids.add(name.replace(/\.(mp3|m4a)$/, ''))
-                        continue
-                    }
-                    try {
-                        const file = await (handle as FileSystemFileHandle).getFile()
-                        if (file.size > 0) ids.add(name.replace(/\.(mp3|m4a)$/, ''))
-                    } catch { /* skip */ }
+        const dir = await getAudioDir()
+        for await (const [name, handle] of (dir as FileSystemDirectoryHandle & { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()) {
+            if (typeof name === 'string' && (name.endsWith('.mp3') || name.endsWith('.m4a'))) {
+                if (!verify) {
+                    ids.add(name.replace(/\.(mp3|m4a)$/, ''))
+                    continue
                 }
+                try {
+                    const file = await (handle as FileSystemFileHandle).getFile()
+                    if (file.size > 0) ids.add(name.replace(/\.(mp3|m4a)$/, ''))
+                } catch { /* an entry that cannot be opened is not a song to list */ }
             }
-        } catch { /* OPFS unavailable */ }
+        }
     }
 
-    try {
-        const keys = await idbGetAllKeys()
-        for (const k of keys) ids.add(k)
-    } catch { /* IDB unavailable */ }
+    if (typeof indexedDB !== 'undefined') {
+        for (const k of await idbGetAllKeys(verify)) ids.add(k)
+    }
 
     return ids
 }
@@ -201,12 +227,13 @@ export async function cacheSong(
     const ext = contentType.includes('mp4') || contentType.includes('m4a') ? 'm4a' : 'mp3'
     const blob = new Blob(chunks, { type: contentType })
 
+    // One copy per song. The old copies are removed only after the new one is
+    // written: a save that fails leaves the song playing from what it had.
+    const otherExt = ext === 'mp3' ? 'm4a' : 'mp3'
+
     if (await opfsAvailable()) {
         try {
             const dir = await getAudioDir()
-            if (ext !== 'mp3') {
-                try { await dir.removeEntry(`${songId}.mp3`) } catch { /* no old file */ }
-            }
             const name = `${songId}.${ext}`
             // Creating the handle creates the entry, before a byte is written. If
             // the write then fails, the empty file stays, and the scan reads any
@@ -219,6 +246,11 @@ export async function cacheSong(
                 try {
                     await writable.write(blob)
                     await writable.close()
+                    // The file is in place; the copies it replaces would only
+                    // shadow it or take up room. The format getSongFile tries
+                    // first is the m4a, so a leftover one would win over this mp3.
+                    try { await dir.removeEntry(`${songId}.${otherExt}`) } catch { /* no old file */ }
+                    try { await idbDelete(songId) } catch { /* no fallback copy */ }
                     if (onProgress) onProgress(1)
                     return
                 } catch (err) {
@@ -233,6 +265,17 @@ export async function cacheSong(
     }
 
     await idbPut(songId, blob)
+    // IndexedDB is read after OPFS, so a file left in either format would keep
+    // playing instead of this copy. This point is reached when the OPFS write
+    // failed, and an earlier copy in the same format is still there.
+    if (await opfsAvailable()) {
+        try {
+            const dir = await getAudioDir()
+            for (const old of [otherExt, ext]) {
+                try { await dir.removeEntry(`${songId}.${old}`) } catch { /* no old file */ }
+            }
+        } catch { /* no OPFS directory */ }
+    }
     if (onProgress) onProgress(1)
 }
 

@@ -1,6 +1,6 @@
 import { routes, downloadSongQuery } from './routes'
 import { test, expect } from '@playwright/test'
-import { login, ignoreError, apiLoginAs, API_V1, QUEUE_USERNAME, QUEUE_PASSWORD } from './helpers'
+import { login, ignoreError, apiLoginAs, libraryIds, playLibraryPaused, expectStable, API_V1, QUEUE_USERNAME, QUEUE_PASSWORD } from './helpers'
 import { LibraryPage, PlayerBar } from './pages'
 
 test.describe('player queue', () => {
@@ -378,5 +378,174 @@ test.describe('player queue', () => {
         } finally {
             await api.dispose()
         }
+    })
+
+    // The server hears queue changes as separate requests. A slow one must not be
+    // overtaken by the ones the user made after it.
+    test('"Play now" on a song already queued leaves the server queue as the screen has it when the remove is slow', async ({ page }) => {
+        const lib = new LibraryPage(page)
+        const api = await apiLoginAs(QUEUE_USERNAME, QUEUE_PASSWORD)
+        try {
+            await lib.goto()
+            await lib.waitForSongs()
+            const ids = await libraryIds(page)
+            test.skip(ids.length < 3, 'need at least 3 library songs')
+            await playLibraryPaused(page)
+
+            // Slower than the two-second save, so a remove that is let overtake
+            // lands after everything the user did next.
+            await page.route('**/v1/player/queue/*', async route => {
+                if (route.request().method() !== 'DELETE') return route.continue()
+                await new Promise(resolve => setTimeout(resolve, 3000))
+                await route.continue()
+            })
+            const removed = page.waitForResponse(r =>
+                /\/v1\/player\/queue\/[^/]+$/.test(r.url()) && r.request().method() === 'DELETE', { timeout: 15000 })
+            await lib.songById(ids[2]).first().click()
+            await removed
+
+            const read = async () => {
+                const server = (await (await api.get(`${API_V1}/player/state`)).json()).queue as string[]
+                const screen = await page.evaluate(() => (JSON.parse(localStorage.getItem('playerState') ?? '{}').queue ?? []) as string[])
+                return { server, screen }
+            }
+            await expect.poll(async () => {
+                const { server, screen } = await read()
+                return screen.length === ids.length && JSON.stringify(server) === JSON.stringify(screen)
+            }, { timeout: 15000, intervals: [500] }).toBe(true)
+            await expectStable(async () => JSON.stringify((await read()).server), 2000)
+        } finally {
+            await api.dispose()
+        }
+    })
+
+    test('a reorder is not sent until the insert before it has been answered', async ({ page }) => {
+        const lib = new LibraryPage(page)
+        const player = new PlayerBar(page)
+        const api = await apiLoginAs(QUEUE_USERNAME, QUEUE_PASSWORD)
+        try {
+            await lib.goto()
+            await lib.waitForSongs()
+            const ids = await libraryIds(page)
+            test.skip(ids.length < 3, 'need at least 3 library songs')
+            await playLibraryPaused(page)
+
+            // Take one song out of the queue, so that picking it again is an insert.
+            await player.openQueue()
+            await player.queueRemoveBtn(player.queueRows().nth(2)).click()
+            await expect.poll(() => player.queueRows().count()).toBe(ids.length - 1)
+            await player.closeQueue()
+
+            // The remove goes to the server as soon as it is made; the song it left out is
+            // the one picked again below, which is then an insert.
+            const missingFromServer = async () => {
+                const queue = (await (await api.get(`${API_V1}/player/state`)).json()).queue as string[]
+                return ids.find(id => !queue.includes(id))
+            }
+            await expect.poll(missingFromServer, { timeout: 10000 }).toBeDefined()
+            const target = (await missingFromServer())!
+
+            const events: string[] = []
+            page.on('request', r => {
+                if (r.method() === 'PUT' && r.url().endsWith('/v1/player/queue/reorder')) events.push('reorder:request')
+            })
+            page.on('response', r => {
+                if (r.request().method() === 'POST' && r.url().endsWith('/v1/player/queue')) events.push('insert:response')
+            })
+            await page.route('**/v1/player/queue', async route => {
+                if (route.request().method() !== 'POST') return route.continue()
+                events.push('insert:request')
+                await new Promise(resolve => setTimeout(resolve, 1500))
+                await route.continue()
+            })
+
+            await lib.songById(target).first().click()
+            await expect.poll(() => events.includes('insert:request'), { timeout: 10000 }).toBe(true)
+            await player.openQueue()
+            const rows = player.queueRows()
+            await player.queueDragHandle(rows.nth(1)).dragTo(rows.nth(0))
+
+            await expect.poll(() => events.includes('reorder:request') && events.includes('insert:response'), { timeout: 15000 }).toBe(true)
+            expect(events.indexOf('insert:response')).toBeLessThan(events.indexOf('reorder:request'))
+
+            // And what the server ends up holding is what the screen shows: a reorder
+            // that had run first would have moved the wrong song.
+            const read = async () => {
+                const server = (await (await api.get(`${API_V1}/player/state`)).json()).queue as string[]
+                const screen = await page.evaluate(() => (JSON.parse(localStorage.getItem('playerState') ?? '{}').queue ?? []) as string[])
+                return { server, screen }
+            }
+            await expect.poll(async () => {
+                const { server, screen } = await read()
+                return screen.length === ids.length && server.includes(target) && JSON.stringify(server) === JSON.stringify(screen)
+            }, { timeout: 15000, intervals: [500] }).toBe(true)
+            await expectStable(async () => JSON.stringify((await read()).server), 2000)
+        } finally {
+            await api.dispose()
+        }
+    })
+
+    // A remove that never answers is given up on after a time limit (shortened here
+    // from fifteen seconds). Whatever the server missed in the meantime is put right
+    // by a save of the whole state, sent after it, which is the last thing the server
+    // hears. A server that is only slow is still there: the app does not go offline.
+    test('after a remove that times out, the last write is a save of the current state', async ({ page }) => {
+        test.setTimeout(60000)
+        const limitMs = 3000
+        await page.addInitScript(ms => { (window as unknown as Record<string, number>).__playerWriteLimitMs = ms }, limitMs)
+        const lib = new LibraryPage(page)
+        const player = new PlayerBar(page)
+        await lib.goto()
+        await lib.waitForSongs()
+        const ids = await libraryIds(page)
+        test.skip(ids.length < 3, 'need at least 3 library songs')
+        await playLibraryPaused(page)
+
+        const writes: { at: number; kind: string; queue?: string[] }[] = []
+        page.on('request', r => {
+            const url = r.url()
+            if (!url.includes('/v1/player/') || r.method() === 'GET') return
+            const kind = r.method() === 'DELETE' ? 'remove' : r.method() === 'PUT' && url.endsWith('/v1/player/state') ? 'state' : 'other'
+            writes.push({ at: Date.now(), kind, queue: kind === 'state' ? (r.postDataJSON()?.queue as string[]) : undefined })
+        })
+        await page.route('**/v1/player/queue/*', async route => {
+            if (route.request().method() !== 'DELETE') return route.continue()
+            await new Promise(resolve => setTimeout(resolve, limitMs + 5000))
+            await route.abort().catch(() => {})
+        })
+
+        await player.openQueue()
+        await player.queueRemoveBtn(player.queueRows().nth(2)).click()
+        await expect.poll(() => player.queueRows().count()).toBe(ids.length - 1)
+
+        await expect.poll(() => writes.filter(w => w.kind === 'state').length, { timeout: 40000 }).toBeGreaterThan(0)
+        const remove = writes.find(w => w.kind === 'remove')!
+        const last = writes[writes.length - 1]
+        expect(last.kind).toBe('state')
+        // Not before the remove had its time limit.
+        expect(last.at - remove.at).toBeGreaterThanOrEqual(limitMs - 1000)
+        expect(last.queue).toHaveLength(ids.length - 1)
+        await expect(page.getByTestId('offline-banner')).toHaveCount(0)
+    })
+
+    // Nothing in a paused player asks the server anything, so a dead zone that ends
+    // would go unnoticed: the app asks on its own.
+    test('a dead zone that ends is noticed without the user doing anything', async ({ page }) => {
+        test.setTimeout(60000)
+        await page.addInitScript(() => { (window as unknown as Record<string, number>).__probeIntervalMs = 500 })
+        const lib = new LibraryPage(page)
+        const player = new PlayerBar(page)
+        await lib.goto()
+        await lib.waitForSongs()
+        await playLibraryPaused(page)
+
+        await page.route('**/v1/**', route => route.abort())
+        // A change to the player is saved after two seconds, and that save is the
+        // first request to fail.
+        await player.repeat.click()
+        await expect(page.getByTestId('offline-banner')).toBeVisible({ timeout: 15000 })
+
+        await page.unroute('**/v1/**')
+        await expect(page.getByTestId('offline-banner')).toHaveCount(0, { timeout: 15000 })
     })
 })

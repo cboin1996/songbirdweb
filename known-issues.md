@@ -6,14 +6,20 @@ The SW is **disabled in development** (`sw-register.tsx` checks `NODE_ENV`). It 
 
 ## Playback and offline
 
-### Tapping a song ends cross-device resync for the session
-`play()` and `playNow()` set `hasUserPlayedRef`, and nothing clears it. Once set, the visibility resync (and the localStorage restore) stand down for the rest of the session, so a tab that has played a song never picks up another device's queue. The play/pause button does not set it. Deliberate in the original design (never override what the user chose), but the flag is broader than the intent. Fix: clear it when the tab has been hidden past the stale threshold, or compare timestamps instead of using a flag.
-
 ### The launch scan trusts any file it finds
 `cacheSong` now rejects a short download and removes a partial write, but the scan that builds the saved-songs list checks only that a file exists. A truncated file from before that change still counts as saved: it plays cut short, and offline advance does not step over it. Fix: size check in the scan (needs the expected size stored with the index). Deferred to the offline-storage flow.
 
-### Offline detection is `navigator.onLine`
-Connected to Wi-Fi with no internet, the browser reports online, so offline advance does not pre-filter: the player falls back to the error cascade (one silent retry, then up to five skips) instead of going straight to the saved songs. Bounded and ends in a stop, but slower than airplane mode.
+### A saved name can stand for a missing or empty file
+The launch scan lists names without opening files, so a song whose file is missing or empty is offered as saved until it is opened. A tap, skip back or first play checks the file first and refuses with "not saved offline", and the song is then dropped from the list. The first walk after an offline launch cannot check before it moves: that song becomes current, stopped, and the walk steps on from there. Library sync (`/v1/library/offline/sync`) is built from the same unverified list, so an empty file can be offered to another device as saved; that device's download works.
+
+### The first walk after an offline launch may need a second tap on iOS
+`audio.play()` has to run inside the user's gesture. The one-press play after an offline launch walks past songs whose files turn out to be empty, and that walk happens after the gesture window. Not verified on a device.
+
+### A hung request at launch delays the restore
+The player-state and library requests at launch have no time limit of their own, so a connection that accepts and never answers holds the restore until the browser gives up. A time limit on the launch fetches would fix it. Predates the offline-launch work.
+
+### The verified IndexedDB scan reads every blob
+Where OPFS is unavailable, the saved-songs scan that verifies copies (`getCachedSongIds()` with its default, used by the settings page and after a save) reads every stored blob. Cost is unmeasured and Chromium's blobs are lazy. The launch scan does not do this.
 
 ### A session the API rejects but the middleware accepts
 The middleware passes any unexpired access token through, and bounces `/` to `/download` when it sees one. If the API rejects a token that has not expired (secret rotated, user deleted, refresh token revoked early), the player's "session expired" redirect to `/?next=…` is bounced straight back to the app. The ordinary case — the 15-minute token has expired — shows the login form as intended. Fix: have the redirect clear the cookies, or have middleware verify against the API.

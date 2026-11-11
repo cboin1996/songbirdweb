@@ -52,10 +52,10 @@ and starts a prod server automatically; just run `npx playwright test --project=
 | `library.spec.ts`      | View tabs, search, letter rail, scrub bar                        |
 | `bulk-select.spec.ts`  | Select mode, bulk action bar, bulk add to playlist               |
 | `player.spec.ts`       | Play/pause, skip, shuffle, repeat (a repeat-all lap plays every song once), queue drag, source links |
-| `player-sync.spec.ts`  | Server-state restore, cross-device resync on tab return (what it adopts, what it must not clobber), token refresh on return |
+| `player-sync.spec.ts`  | Server-state restore, cross-device resync on tab return (what it adopts, what it must not clobber, a toggle the server never heard is kept and sent again), a stored copy of the state is not taken for the server's, token refresh on return |
 | `error-states.spec.ts` | API failures per page, and playback failure: one silent retry, bounded error cascade, stop on the last song, expired session sends the user to sign in |
 | `search.spec.ts`       | Library search and queue-panel search                            |
-| `queue.spec.ts`        | Queue panel, skip-next, manual-next                              |
+| `queue.spec.ts`        | Queue panel, skip-next, manual-next; the order queue changes reach the server in, a write that times out, a dead zone that ends on its own |
 | `playlist.spec.ts`     | Create / add / rename / delete                                    |
 | `editor.spec.ts`       | Modal open, properties, cuts/fades, draft save                    |
 | `import.spec.ts`       | Drop file, dove banner, status counts, history                    |
@@ -72,9 +72,9 @@ and starts a prod server automatically; just run `npx playwright test --project=
 
 | File              | Coverage                                                              |
 |-------------------|-----------------------------------------------------------------------|
-| `sw.spec.ts`      | SW registers, becomes controller, version bumps purge old caches      |
+| `sw.spec.ts`      | SW registers, becomes controller, version bumps purge old caches, an install while signed out does not store the sign-in page as the library, a library visit made online is stored and opens on the next offline launch |
 | `offline.spec.ts` | `/library` from cache when offline, `/offline` fallback, manifest, cache audit — read-only, main test user |
-| `offline-songs.spec.ts` | Saving songs and playing them offline: saved song plays, offline advance steps over unsaved songs (shuffle, repeat-all laps, end of queue), first play in airplane mode, the 401-on-download retry, save-all's refresh (before each song, dead refresh, refused downloads). Serial, own `E2E_OFFLINE` user — these write the user's server-side offline list and player state |
+| `offline-songs.spec.ts` | Saving songs and playing them offline: saved song plays, offline advance steps over unsaved songs (also in a dead zone, where the browser still says online), taps and skip-back that cannot play change nothing, a launch offline on an empty file plays on with one press, the queue marks unsaved songs and counts the saved ones, shuffle and repeat-all laps, end of queue, first play in airplane mode, the 401-on-download retry, save-all's refresh (before each song, dead refresh, refused downloads). Serial, own `E2E_OFFLINE` user — these write the user's server-side offline list and player state |
 
 ### `e2e-mobile/` (mobile project)
 
@@ -142,6 +142,10 @@ UI for setup.
 | `recordDownloads(page, respond?)`     | Intercept song downloads, recording ids; `respond` decides the answer |
 | `restoredSongId(page)`                | The song the player restored on load, read off the stream URL |
 | `expectStable(read, ms?)`             | Assert a value does not change for `ms` — for "nothing happens" checks without a sleep |
+| `emptySavedFile(page, uuid)`          | Leave a song listed as saved with nothing in its file      |
+| `enterDeadZone(page, context)`        | Network gone while the browser still reports online        |
+| `failAnApiRequest(page, player)`      | Make the app's first failed request, so it learns the server is gone |
+| `routeStalePlayerState(page, body)`   | Answer player-state reads the way the service worker does with a stored copy |
 
 ## State isolation
 
