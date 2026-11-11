@@ -1,6 +1,8 @@
-import { cacheLibraryData, getCachedData } from './offline-db'
+import { cacheLibraryData, getCachedData, clearLibraryCache } from './offline-db'
 import { EVENTS } from './events'
 import { readTestOverride } from './test-overrides'
+import { isOffline, subscribeOffline } from './offline-signal'
+import { createWriteChain } from './queue-writes'
 
 const isServer = typeof window === 'undefined'
 export const BASE_URL = isServer
@@ -84,6 +86,9 @@ export function isSigningOut(): boolean {
 export function redirectToLogin(): boolean {
   if (signingOut) return false
   if (window.location.pathname === '/') return false
+  // The browser's own word on the connection, not the shared offline signal: what
+  // matters is whether the sign-in page can be loaded, which the web server decides,
+  // and it can be reachable while the API is not.
   if (!navigator.onLine) return false
   window.location.href = loginRedirectUrl(window.location.pathname, window.location.search)
   return true
@@ -188,6 +193,60 @@ async function buildFetchOptions(method: string, body?: unknown): Promise<Reques
   return options;
 }
 
+// The API could not be reached. Offline lasts until the server answers, and in a dead
+// zone nothing else may ask it anything (a paused player makes no requests), so
+// while the app believes the server is gone it asks on its own: a light request every
+// fifteen seconds, stopped once an answer comes back or the browser itself says
+// offline (its own `online` event ends that case).
+let probeTimer: ReturnType<typeof setInterval> | undefined
+
+function stopProbe() {
+  if (probeTimer !== undefined) clearInterval(probeTimer)
+  probeTimer = undefined
+}
+
+function markServerUnreachable() {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent(EVENTS.serverUnreachable))
+  if (probeTimer !== undefined) return
+  probeTimer = setInterval(async () => {
+    if (!isOffline()) { stopProbe(); return }
+    if (!navigator.onLine) return
+    try {
+      const r = await fetch(`${API_V1}/health`, { cache: 'no-store' })
+      if (answeredByServer(r)) window.dispatchEvent(new CustomEvent(EVENTS.serverReachable))
+    } catch { /* still unreachable */ }
+  }, readTestOverride('__probeIntervalMs', 15000))
+}
+
+// Any answer the API itself gave shows it is there, whatever it says: a 404 or a 500
+// came from the server. A 502 is the proxy saying the API is not, and a copy the
+// service worker served from its cache says nothing about the server.
+function answeredByServer(r: Response): boolean {
+  return r.status !== 502 && !r.headers.get('X-SW-Stale')
+}
+
+// One request, and what it says about the server: no answer or a 502 means it cannot
+// be reached, any other answer from the server itself means it can. Throws a
+// FetchError with status 0 for the first.
+async function sendRequest(args: { url: string; method: string; signal?: AbortSignal }, options: RequestInit): Promise<Response> {
+  let response: Response;
+  try {
+    response = await fetch(args.url, options);
+  } catch {
+    // The caller gave up waiting: a slow answer is not an unreachable server.
+    if (args.signal?.aborted) throw new FetchError(`gave up waiting: ${args.method} ${args.url}`, 0);
+    markServerUnreachable();
+    throw new FetchError(`server unavailable: ${args.method} ${args.url}`, 0);
+  }
+  if (response.status === 502) {
+    markServerUnreachable();
+    throw new FetchError(`server unavailable: ${args.method} ${args.url}`, 0);
+  }
+  if (typeof window !== 'undefined' && answeredByServer(response)) window.dispatchEvent(new CustomEvent(EVENTS.serverReachable))
+  return response;
+}
+
 async function fetchData<T>(args: {
   url: string;
   method: string;
@@ -199,6 +258,11 @@ async function fetchData<T>(args: {
   // A caller that would act on the content as current, rather than show it
   // because nothing better exists, asks for no answer instead.
   rejectSwStale?: boolean;
+  // Called when the answer came from the service worker's cache, for a caller
+  // that wants the stale copy but needs to know it is one.
+  onSwStale?: () => void;
+  // Ends the request when aborted, for a caller that gives up waiting.
+  signal?: AbortSignal;
 }): Promise<T | undefined> {
   const responseType = args.responseType ?? ResponseTypes.json;
   let options: RequestInit;
@@ -209,19 +273,10 @@ async function fetchData<T>(args: {
   } else {
     options = await buildFetchOptions(args.method, args.body);
   }
-  let response: Response;
-  try {
-    response = await fetch(args.url, options);
-  } catch {
-    if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(EVENTS.serverUnreachable))
-    throw new FetchError(`server unavailable: ${args.method} ${args.url}`, 0);
-  }
-  if (response.status === 502) {
-    if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(EVENTS.serverUnreachable))
-    throw new FetchError(`server unavailable: ${args.method} ${args.url}`, 0);
-  }
-  if (response.ok && typeof window !== 'undefined' && !response.headers.get('X-SW-Stale')) window.dispatchEvent(new CustomEvent(EVENTS.serverReachable))
+  if (args.signal) options.signal = args.signal;
+  const response = await sendRequest(args, options);
   if (response.ok && args.rejectSwStale && response.headers.get('X-SW-Stale')) return undefined
+  if (response.ok && args.onSwStale && response.headers.get('X-SW-Stale')) args.onSwStale()
   if (!response.ok) {
     const silent = args.silentStatuses ?? []
     if (response.status === 401 && typeof window !== 'undefined' && !SKIP_REFRESH_URLS.has(args.url)) {
@@ -234,7 +289,13 @@ async function fetchData<T>(args: {
         } else {
           retryOptions = await buildFetchOptions(args.method, args.body)
         }
-        const retryResponse = await fetch(args.url, retryOptions)
+        if (args.signal) retryOptions.signal = args.signal;
+        // The same handling as the first attempt: a retry the network drops is an
+        // unreachable server, not a raw error, and a copy the service worker
+        // answers with is still only a copy.
+        const retryResponse = await sendRequest(args, retryOptions)
+        if (retryResponse.ok && args.rejectSwStale && retryResponse.headers.get('X-SW-Stale')) return undefined
+        if (retryResponse.ok && args.onSwStale && retryResponse.headers.get('X-SW-Stale')) args.onSwStale()
         if (retryResponse.ok) {
           if (responseType === ResponseTypes.json) {
             try {
@@ -252,7 +313,7 @@ async function fetchData<T>(args: {
       if (refreshed === 'unavailable') {
         // The session may be fine; only the refresh could not be answered, so
         // this is a connection failure like any other, not a reason to sign out.
-        window.dispatchEvent(new CustomEvent(EVENTS.serverUnreachable))
+        markServerUnreachable()
         throw new FetchError(`server unavailable: ${args.method} ${args.url}`, 0)
       }
       redirectToLogin()
@@ -308,7 +369,26 @@ export async function logout(): Promise<void> {
     });
   } catch (error) {
     console.error("Logout error:", error);
+  } finally {
+    await forgetSignedInData()
   }
+}
+
+// What this device keeps of the account that is leaving, apart from the songs the user
+// saved to it: the player's last state, the library lists, and the service worker's
+// copies of API answers. Left behind, the next person to sign in on a shared device
+// would be offered the previous one's queue and library. The saved songs stay until
+// the user removes them (settings), as does the list of which songs those are.
+async function forgetSignedInData(): Promise<void> {
+  try { localStorage.removeItem('playerState') } catch { /* storage unavailable */ }
+  try { await clearLibraryCache() } catch { /* nothing to clear */ }
+  try {
+    if (typeof caches !== 'undefined') {
+      for (const name of await caches.keys()) {
+        if (name.startsWith('songbird-api-')) await caches.delete(name)
+      }
+    }
+  } catch { /* nothing to clear */ }
 }
 
 export interface LibraryEntry {
@@ -375,6 +455,17 @@ export async function fetchLibrarySongs(): Promise<LibrarySong[]> {
       return await getCachedData<LibrarySong[]>('library-songs') ?? []
     }
     throw error
+  }
+}
+
+// The library as the player's launch needs it. A server that answers with an error
+// (503, 504 from the proxy) must not skip the restore of the player: the page shows
+// the error, the launch carries on with the copy kept from the last good answer.
+export async function fetchLibrarySongsAtLaunch(): Promise<LibrarySong[]> {
+  try {
+    return await fetchLibrarySongs()
+  } catch {
+    return await getCachedData<LibrarySong[]>('library-songs') ?? []
   }
 }
 
@@ -785,6 +876,23 @@ export interface PlayerState {
   updated_at?: string | null
 }
 
+export type LocalPlayerState = PlayerState & { saved_at?: string }
+
+// This device's own copy of the player, written on every save. Read back only if it
+// has the shape a restore depends on: a copy that parses but has no queue (a partial
+// write, an older format) would otherwise beat a good server copy and restore nothing.
+export function readLocalPlayerState(): LocalPlayerState | undefined {
+  try {
+    const raw = localStorage.getItem('playerState')
+    if (!raw) return undefined
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.queue)) return undefined
+    return parsed as LocalPlayerState
+  } catch {
+    return undefined
+  }
+}
+
 // `current` is for a caller that means to apply the state to a live player: it
 // gets nothing rather than the service worker's cached copy, which is older than
 // anything the user has done since the connection dropped.
@@ -792,20 +900,56 @@ export async function fetchPlayerState(opts: { current?: boolean } = {}): Promis
   return fetchData<PlayerState>({ url: `${API_V1}/player/state`, method: 'GET', rejectSwStale: opts.current })
 }
 
-export async function savePlayerState(state: PlayerState): Promise<void> {
-  await fetchData({ url: `${API_V1}/player/state`, method: 'PUT', body: state, responseType: ResponseTypes.none })
+// For the launch, which has a local copy to prefer: the state, and whether the
+// service worker answered from its cache instead of the server.
+export async function fetchPlayerStateAtLaunch(): Promise<{ state: PlayerState; stale: boolean } | undefined> {
+  let stale = false
+  const state = await fetchData<PlayerState>({ url: `${API_V1}/player/state`, method: 'GET', onSwStale: () => { stale = true } })
+  return state ? { state, stale } : undefined
 }
 
-export async function queueInsert(songId: string, position?: number, source?: { id: string; label: string; href: string }): Promise<void> {
-  await fetchData({ url: `${API_V1}/player/queue`, method: 'POST', body: { song_id: songId, position: position ?? null, source: source ?? null }, responseType: ResponseTypes.none })
+// A write that waits behind a slow one is not timed until its turn comes.
+const playerWrites = createWriteChain<PlayerState>(() => readTestOverride('__playerWriteLimitMs', 15000), (state, signal) =>
+  fetchData({ url: `${API_V1}/player/state`, method: 'PUT', body: state, responseType: ResponseTypes.none, signal }).then(() => {}))
+
+// A save that failed because the server was gone is sent again the moment it is back:
+// nothing else would send it until the user changed something.
+if (typeof window !== 'undefined') {
+  let wasOffline = isOffline()
+  subscribeOffline(() => {
+    const now = isOffline()
+    if (wasOffline && !now) playerWrites.resendIfFailed()
+    wasOffline = now
+  })
 }
 
-export async function queueRemove(songId: string): Promise<void> {
-  await fetchData({ url: `${API_V1}/player/queue/${songId}`, method: 'DELETE', responseType: ResponseTypes.none })
+// `build` runs when the save is sent, so it carries what the player holds then, not
+// what it held when the save was asked for.
+export function savePlayerState(build: () => PlayerState): Promise<void> {
+  return playerWrites.enqueueState(build)
 }
 
-export async function queueReorder(fromPosition: number, toPosition: number): Promise<void> {
-  await fetchData({ url: `${API_V1}/player/queue/reorder`, method: 'PUT', body: { from_position: fromPosition, to_position: toPosition }, responseType: ResponseTypes.none })
+// The server has not yet heard everything the user has done.
+export function playerWritesPending(): boolean {
+  return playerWrites.pending()
+}
+
+// A queue change, sent through the same chain as the whole-state save so the server
+// hears them in the order the user made them.
+function queueWrite(url: string, method: string, body?: unknown): Promise<void> {
+  return playerWrites.enqueue(signal => fetchData({ url, method, body, responseType: ResponseTypes.none, signal }).then(() => {}))
+}
+
+export function queueInsert(songId: string, position?: number, source?: { id: string; label: string; href: string }): Promise<void> {
+  return queueWrite(`${API_V1}/player/queue`, 'POST', { song_id: songId, position: position ?? null, source: source ?? null })
+}
+
+export function queueRemove(songId: string): Promise<void> {
+  return queueWrite(`${API_V1}/player/queue/${songId}`, 'DELETE')
+}
+
+export function queueReorder(fromPosition: number, toPosition: number): Promise<void> {
+  return queueWrite(`${API_V1}/player/queue/reorder`, 'PUT', { from_position: fromPosition, to_position: toPosition })
 }
 
 export async function updatePosition(songId: string, position: number): Promise<void> {

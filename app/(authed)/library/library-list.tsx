@@ -9,6 +9,7 @@ import SongPickerModal, { PickerSong } from "../../components/song-picker-modal"
 import { saveSongsOffline, reportSaveResult, uncacheSong, cacheArtworkUrls } from "../../lib/offline"
 import { useOfflineSave } from "../../lib/offline-save-context"
 import { useOnline } from "../../lib/use-online"
+import { isOffline } from "../../lib/offline-signal"
 import Song from "../../components/song"
 import { usePlayer } from "../../components/player"
 import { routes } from "../../lib/routes"
@@ -164,7 +165,7 @@ export default function LibraryList() {
     const sectionRefs = useRef<Record<string, HTMLElement | null>>({})
     const stickyHeaderRef = useRef<HTMLDivElement | null>(null)
     const isDesktop = useIsDesktop()
-    const { savingAll, progress: saveAllProgress, failedIds, clearFailedIds, cachedIds, setCachedIds, cacheSongsById, refreshCachedIds } = useOfflineSave()
+    const { savingAll, progress: saveAllProgress, failedIds, clearFailedIds, cachedIds, setCachedIds, cacheSongsById, refreshCachedIds, readSavedAfterLaunch } = useOfflineSave()
     const [offlineReady, setOfflineReady] = useState(false)
     const [syncPromptIds, setSyncPromptIds] = useState<string[]>([])
     const eligibleIds = useMemo(() => new Set(eligibleSongs.filter(s => s.eligible).map(s => s.uuid)), [eligibleSongs])
@@ -195,7 +196,7 @@ export default function LibraryList() {
         const handler = () => {
             setCachedIds(new Set())
             setSyncPromptIds([])
-            if (navigator.onLine) queryClient.invalidateQueries({ queryKey: queryKeys.librarySongs })
+            if (!isOffline()) queryClient.invalidateQueries({ queryKey: queryKeys.librarySongs })
         }
         window.addEventListener(EVENTS.offlineCleared, handler)
         return () => window.removeEventListener(EVENTS.offlineCleared, handler)
@@ -216,7 +217,9 @@ export default function LibraryList() {
     const playlistStubs = useMemo(() => playlists.map(p => ({ id: p.id, name: p.name })), [playlists])
 
     useEffect(() => {
-        refreshCachedIds().then(async ids => {
+        // The launch has already listed what is saved, so opening the library does not
+        // open every file again. "Save all offline" still checks them all.
+        readSavedAfterLaunch().then(async ids => {
             if (!online || songs.length === 0) {
                 try {
                     const cached = await fetchLibrarySongs()
@@ -225,7 +228,7 @@ export default function LibraryList() {
                 } catch {}
             }
             setOfflineReady(true)
-            if (navigator.onLine) {
+            if (!isOffline()) {
                 try {
                     const serverOnly = await syncOfflineSongs([...ids])
                     const resolvable = serverOnly.filter(id => songs.some(s => s.uuid === id))

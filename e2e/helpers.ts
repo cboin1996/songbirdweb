@@ -1,4 +1,4 @@
-import { Page, Route, expect, APIRequestContext, request as pwRequest } from '@playwright/test'
+import { Page, BrowserContext, Route, expect, APIRequestContext, request as pwRequest } from '@playwright/test'
 import { routes } from './routes'
 import { LibraryPage, PlayerBar } from './pages'
 
@@ -164,6 +164,52 @@ export async function saveSongOffline(page: Page, uuid: string): Promise<void> {
     await expect(page.getByRole('button', { name: /remove offline copy/i })).toBeVisible({ timeout: 30000 })
     await page.mouse.click(5, 5)
     await expect(lib.kebabMenu()).toBeHidden()
+}
+
+// A phone between towers still reports a connection, and every request to the API
+// fails. Playwright's offline mode also flips the browser's own report, so this
+// puts it back: the network is gone and the browser has not noticed.
+export async function enterDeadZone(page: Page, context: BrowserContext): Promise<void> {
+    await context.setOffline(true)
+    await page.evaluate(() => Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => true }))
+}
+
+// The first request to fail is what tells the app the server is gone. A change to
+// the player is saved after two seconds, and that save is such a request.
+export async function failAnApiRequest(page: Page, player: PlayerBar): Promise<void> {
+    const failed = page.waitForEvent('requestfailed', { predicate: r => r.url().includes('/v1/player/state'), timeout: 15000 })
+    await player.repeat.click()
+    await failed
+}
+
+// Answers every GET of the player state the way the service worker does when the
+// network is gone: with its cached copy, marked stale. The real marker is added by
+// a worker on the page's own origin and is always readable; the API is another
+// origin here, so the header has to be exposed for the page to see it at all.
+export async function routeStalePlayerState(page: Page, body: Record<string, unknown>): Promise<void> {
+    await page.route('**/v1/player/state', async route => {
+        if (route.request().method() !== 'GET') return route.continue()
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            headers: { 'X-SW-Stale': '1', 'Access-Control-Expose-Headers': 'X-SW-Stale' },
+            body: JSON.stringify(body),
+        })
+    })
+}
+
+// Leaves the song listed as saved with nothing in it: the file is still there, empty,
+// as after a write that was cut off. The scan lists names, so it still counts as saved.
+export async function emptySavedFile(page: Page, uuid: string): Promise<void> {
+    await page.evaluate(async id => {
+        const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('audio')
+        for (const ext of ['mp3', 'm4a']) {
+            try {
+                const writable = await (await dir.getFileHandle(`${id}.${ext}`)).createWritable()
+                await writable.close()
+            } catch { /* the other format */ }
+        }
+    }, uuid)
 }
 
 // Queue the whole library with Play All, set shuffle and repeat, then pause.

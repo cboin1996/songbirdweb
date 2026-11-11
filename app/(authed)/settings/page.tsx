@@ -51,6 +51,8 @@ function OfflineStorage() {
         Promise.all([getStorageEstimate(), getCachedSongIds()]).then(([est, ids]) => {
             setEstimate(est)
             setCachedCount(ids.size)
+        }).catch(() => {
+            // A count that could not be read is left at zero rather than shown as the truth.
         })
     }, [])
 

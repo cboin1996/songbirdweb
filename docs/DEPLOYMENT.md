@@ -50,7 +50,7 @@ Both are behind SSL (nginx Proxy Manager on the host).
 - Manual deploy from `*-enhancements` branches with `keebox-beta-2` tags for now.
 
 **Semver bumps:**
-- web: `package.json`, `sw.js` cache version (`v6` → `v7`), app config versioning.
+- web: `package.json` (the service worker's cache name is generated from it at build), app config versioning.
 - api: `version.py`, `pyproject.toml`.
 - All must move together — a future PR check will enforce version-sync.
 

@@ -56,3 +56,53 @@ describe('loginRedirectUrl', () => {
         expect(data.loginRedirectUrl('/download', '')).toBe('/?next=%2Fdownload&expired=1')
     })
 })
+
+// A shared device: the next person to sign in must not be offered the previous
+// account's queue or library lists.
+describe('what a logout leaves on the device', () => {
+    function installCaches(names: string[]) {
+        const kept = new Set(names)
+        Object.defineProperty(globalThis, 'caches', {
+            configurable: true,
+            value: {
+                keys: async () => [...kept],
+                delete: async (name: string) => kept.delete(name),
+            },
+        })
+        return kept
+    }
+
+    afterEach(() => {
+        Object.defineProperty(globalThis, 'caches', { configurable: true, value: undefined })
+        localStorage.clear()
+    })
+
+    it("forgets the player's last state", async () => {
+        localStorage.setItem('playerState', JSON.stringify({ queue: ['a'] }))
+        localStorage.setItem('playerVolume', '0.4')
+        await (await load()).logout()
+        expect(localStorage.getItem('playerState')).toBeNull()
+        // Not the account's: the volume belongs to the device.
+        expect(localStorage.getItem('playerVolume')).toBe('0.4')
+    })
+
+    it("forgets the service worker's copies of API answers and keeps the rest", async () => {
+        const kept = installCaches(['songbird-api-v2', 'songbird-shell-v0.5.15', 'songbird-artwork-v1'])
+        await (await load()).logout()
+        expect([...kept].sort()).toEqual(['songbird-artwork-v1', 'songbird-shell-v0.5.15'])
+    })
+
+    it('still signs out when the request fails, and still forgets', async () => {
+        fetchMock.mockRejectedValue(new TypeError('failed to fetch'))
+        localStorage.setItem('playerState', JSON.stringify({ queue: ['a'] }))
+        silenceConsole()
+        const data = await load()
+        await data.logout()
+        expect(data.isSigningOut()).toBe(true)
+        expect(localStorage.getItem('playerState')).toBeNull()
+    })
+})
+
+function silenceConsole() {
+    jest.spyOn(console, 'error').mockImplementation(() => {})
+}

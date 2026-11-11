@@ -38,6 +38,9 @@ jobs:
       - name: Typecheck
         run: make typecheck
 
+      - name: Unit tests
+        run: make unit
+
       - name: Build
         run: make build
         env:

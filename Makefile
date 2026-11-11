@@ -61,8 +61,12 @@ test-e2e-prod:
 test-e2e-mobile:
 	npx playwright test --project=mobile --workers=2
 
+.PHONY: unit
+unit:
+	npx jest --ci
+
 .PHONY: test
-test: lint typecheck
+test: lint typecheck unit
 
 # ----------------------------------------------------------------------------
 # Local CI-parity e2e harness — same cboin/songbirdapi:latest Docker image
