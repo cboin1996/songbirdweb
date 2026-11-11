@@ -1,5 +1,5 @@
 import { routes, sharePath } from './routes'
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures/test'
 import { login, apiLogin, pickFirstLibrarySong, API_V1, ignoreError } from './helpers'
 
 // Locks in share-link behaviour at keebox-beta-1: kebab "Copy share link"

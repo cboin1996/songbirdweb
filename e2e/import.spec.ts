@@ -1,5 +1,5 @@
 import { routes } from './routes'
-import { test, expect, Page } from '@playwright/test'
+import { test, expect, Page } from './fixtures/test'
 import { login, apiLoginAs, API_V1, IMPORT_USERNAME, IMPORT_PASSWORD } from './helpers'
 import path from 'path'
 import fs from 'fs'
@@ -18,7 +18,7 @@ function makeRealAudioCopy(name: string): string {
 
 test.describe('import page', () => {
     test.describe.configure({ mode: 'serial' })
-    test.use({ storageState: 'e2e/.auth/import-user.json' })
+    test.use({ authUser: 'import-user' })
 
     test.beforeEach(async ({ page }) => {
         await login(page, IMPORT_USERNAME, IMPORT_PASSWORD)

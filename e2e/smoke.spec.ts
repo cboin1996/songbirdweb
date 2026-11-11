@@ -1,5 +1,5 @@
 import { routes } from './routes'
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures/test'
 import { login, ignoreError } from './helpers'
 import { LibraryPage, PlayerBar, CommonPage } from './pages'
 

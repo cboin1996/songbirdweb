@@ -1,5 +1,5 @@
 import { routes } from './routes'
-import { test, expect, Page } from '@playwright/test'
+import { test, expect, Page } from './fixtures/test'
 import { login, apiLoginAs, setVisibility, expectStable, libraryIds, restoredSongId, routeStalePlayerState, API_V1, SYNC_USERNAME, SYNC_PASSWORD } from './helpers'
 import { LibraryPage, PlayerBar } from './pages'
 
@@ -17,7 +17,7 @@ async function apiReturnsUpdatedAt(): Promise<boolean> {
 
 test.describe('player state sync', () => {
     test.describe.configure({ mode: 'serial' })
-    test.use({ storageState: 'e2e/.auth/sync-user.json' })
+    test.use({ authUser: 'sync-user' })
 
     test.beforeEach(async ({ page }) => {
         await login(page, SYNC_USERNAME, SYNC_PASSWORD)

@@ -1,5 +1,5 @@
 import { routes, editSongRoute } from './routes'
-import { test, expect, Page, Locator } from '@playwright/test'
+import { test, expect, Page, Locator } from './fixtures/test'
 import { USERNAME, PASSWORD, login, ignoreError, apiLogin, apiLoginAs, API_V1, EDITOR_USERNAME, EDITOR_PASSWORD } from './helpers'
 import { EditorPage } from './pages'
 import { execSync } from 'child_process'
@@ -9,7 +9,7 @@ import * as path from 'path'
 
 
 test.describe('editor modal', () => {
-    test.use({ storageState: 'e2e/.auth/editor-user.json' })
+    test.use({ authUser: 'editor-user' })
 
     test.beforeEach(async ({ page }) => {
         await login(page, EDITOR_USERNAME, EDITOR_PASSWORD)
@@ -537,7 +537,7 @@ async function getSongFromLibrary(api: any, songId: string) {
 
 test.describe('editor modal — destructive flows', () => {
     test.describe.configure({ mode: 'serial' })
-    test.use({ storageState: 'e2e/.auth/editor-user.json' })
+    test.use({ authUser: 'editor-user' })
 
     test.beforeEach(async ({ page }) => {
         await login(page, EDITOR_USERNAME, EDITOR_PASSWORD)

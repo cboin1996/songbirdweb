@@ -1,5 +1,5 @@
 import { routes } from './routes'
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures/test'
 import { login, apiLoginAs, SETTINGS_USERNAME, SETTINGS_PASSWORD } from './helpers'
 
 const API_BASE = `${process.env.E2E_API_BASE_URL ?? `http://${process.env.NEXT_PUBLIC_API_HOST ?? 'localhost'}:8000`}/v1`
@@ -111,7 +111,7 @@ test.describe('settings - change password', () => {
 })
 
 test.describe('settings - audio format', () => {
-    test.use({ storageState: 'e2e/.auth/settings-user.json' })
+    test.use({ authUser: 'settings-user' })
 
     test.beforeEach(async () => {
         const api = await apiLoginAs(SETTINGS_USERNAME, SETTINGS_PASSWORD)

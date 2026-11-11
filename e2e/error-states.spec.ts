@@ -1,9 +1,9 @@
 import { routes, editSongRoute, downloadSongQuery, downloadAlbumQuery } from './routes'
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures/test'
 import { login, apiLoginAs, expectStable, API_V1, ERROR_USERNAME, ERROR_PASSWORD, libraryIds } from './helpers'
 import { EditorPage, CommonPage, LibraryPage, DownloadPage, PlayerBar } from './pages'
 
-test.use({ storageState: 'e2e/.auth/error-user.json' })
+test.use({ authUser: 'error-user' })
 
 test.describe('error states — page boundaries', () => {
     test.beforeEach(async ({ page }) => {

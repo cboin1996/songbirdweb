@@ -1,5 +1,5 @@
 import { routes } from './routes'
-import { test, expect, APIRequestContext } from '@playwright/test'
+import { test, expect, APIRequestContext } from './fixtures/test'
 import { login, apiLogin, uniq, purgePlaylistsByPrefix, pickFirstLibrarySong, API_V1 } from './helpers'
 import { LibraryPage } from './pages'
 

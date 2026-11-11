@@ -1,4 +1,4 @@
-import { request } from '@playwright/test'
+import { request, type FullConfig } from '@playwright/test'
 const fs = require('fs')
 const path = require('path')
 
@@ -103,8 +103,24 @@ async function importAndWait(ctx: Awaited<ReturnType<typeof request.newContext>>
     console.warn(`[global-setup] import timed out: ${filename}`)
 }
 
-// Login as username, purge library + playlists, re-seed, save storageState.
-async function seedUser(username: string, password: string, storageFile: string): Promise<void> {
+// One login per Playwright worker, saved as <name>.w<N>.json. The API rotates
+// refresh tokens and revokes a session when it sees a token it already replaced,
+// so tests running in parallel must not start from the same login.
+async function saveWorkerSessions(username: string, password: string, name: string, workers: number): Promise<void> {
+    const authDir = path.resolve(__dirname, '.auth')
+    if (!fs.existsSync(authDir)) fs.mkdirSync(authDir, { recursive: true })
+    for (let w = 0; w < workers; w++) {
+        const ctx = await request.newContext({ baseURL: API_BASE })
+        const res = await ctx.post(`${API_V1}/auth/login`, { data: { username, password } })
+        if (!res.ok()) throw new Error(`Login failed for ${username} (worker ${w}): ${res.status()}`)
+        await ctx.storageState({ path: path.join(authDir, `${name}.w${w}.json`) })
+        await ctx.dispose()
+    }
+    console.log(`[global-setup] saved ${workers} worker sessions for ${username}`)
+}
+
+// Login as username, purge library + playlists, re-seed, save a login per worker.
+async function seedUser(username: string, password: string, name: string, workers: number): Promise<void> {
     const ctx = await request.newContext({ baseURL: API_BASE })
     const loginRes = await ctx.post(`${API_V1}/auth/login`, { data: { username, password } })
     if (!loginRes.ok()) throw new Error(`Login failed for ${username}: ${loginRes.status()}`)
@@ -135,16 +151,13 @@ async function seedUser(username: string, password: string, storageFile: string)
         await importAndWait(ctx, path.join(FIXTURES_DIR, filename))
     }
 
-    // Persist storage state (cookies) to avoid per-test login.
-    const authDir = path.resolve(__dirname, '.auth')
-    if (!fs.existsSync(authDir)) fs.mkdirSync(authDir, { recursive: true })
-    await ctx.storageState({ path: path.join(authDir, storageFile) })
-    console.log(`[global-setup] saved storageState ${storageFile} for ${username}`)
+    await saveWorkerSessions(username, password, name, workers)
 
     await ctx.dispose()
 }
 
-async function globalSetup() {
+async function globalSetup(config: FullConfig) {
+    const workers = config.workers
     if (!TEST_USER || !TEST_PASS) throw new Error('TEST_USERNAME and TEST_PASSWORD must be set in .env.local')
     if (!ADMIN_USER || !ADMIN_PASS) throw new Error('E2E_ADMIN_USERNAME and E2E_ADMIN_PASSWORD must be set in .env.local')
     if (!EDITOR_USER || !EDITOR_PASS) throw new Error('E2E_EDITOR_USERNAME and E2E_EDITOR_PASSWORD must be set')
@@ -211,23 +224,23 @@ async function globalSetup() {
     }
     await admin.dispose()
 
-    // --- Seed each user's library and save their storageState ---
+    // --- Seed each user's library and save a login per worker ---
     // First user does real imports; the rest are duplicate-adds which are fast.
     // Seed the first user sequentially, then parallelize the rest.
-    await seedUser(TEST_USER, TEST_PASS, 'test-user.json')
+    await seedUser(TEST_USER, TEST_PASS, 'test-user', workers)
     await Promise.all([
-        seedUser(EDITOR_USER, EDITOR_PASS, 'editor-user.json'),
-        seedUser(BULK_USER, BULK_PASS, 'bulk-user.json'),
-        seedUser(IMPORT_USER, IMPORT_PASS, 'import-user.json'),
-        seedUser(QUEUE_USER, QUEUE_PASS, 'queue-user.json'),
-        seedUser(PLAYER_USER, PLAYER_PASS, 'player-user.json'),
-        seedUser(SYNC_USER, SYNC_PASS, 'sync-user.json'),
-        seedUser(DOWNLOAD_USER, DOWNLOAD_PASS, 'download-user.json'),
-        seedUser(SETTINGS_USER, SETTINGS_PASS, 'settings-user.json'),
-        seedUser(LIBRARY_USER, LIBRARY_PASS, 'library-user.json'),
-        seedUser(SEARCH_USER, SEARCH_PASS, 'search-user.json'),
-        seedUser(ERROR_USER, ERROR_PASS, 'error-user.json'),
-        seedUser(OFFLINE_USER, OFFLINE_PASS, 'offline-user.json'),
+        seedUser(EDITOR_USER, EDITOR_PASS, 'editor-user', workers),
+        seedUser(BULK_USER, BULK_PASS, 'bulk-user', workers),
+        seedUser(IMPORT_USER, IMPORT_PASS, 'import-user', workers),
+        seedUser(QUEUE_USER, QUEUE_PASS, 'queue-user', workers),
+        seedUser(PLAYER_USER, PLAYER_PASS, 'player-user', workers),
+        seedUser(SYNC_USER, SYNC_PASS, 'sync-user', workers),
+        seedUser(DOWNLOAD_USER, DOWNLOAD_PASS, 'download-user', workers),
+        seedUser(SETTINGS_USER, SETTINGS_PASS, 'settings-user', workers),
+        seedUser(LIBRARY_USER, LIBRARY_PASS, 'library-user', workers),
+        seedUser(SEARCH_USER, SEARCH_PASS, 'search-user', workers),
+        seedUser(ERROR_USER, ERROR_PASS, 'error-user', workers),
+        seedUser(OFFLINE_USER, OFFLINE_PASS, 'offline-user', workers),
     ])
 }
 
