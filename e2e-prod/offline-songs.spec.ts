@@ -408,6 +408,9 @@ test.describe('Offline saving and playback', () => {
     await lib.playAllBtn.click()
     await player.waitForBar()
     await player.waitForTrackName()
+    // The first song is the emptied one: online it falls back to streaming, and a
+    // pause that lands before that settles is undone by it. Let it settle first.
+    await expectStable(async () => `${await player.trackName.textContent()}|${await player.playPause.getAttribute('title')}`, 1500)
     await player.playPause.click()
     await expect(player.playPause).toHaveAttribute('title', 'play')
     await queueSaved
@@ -422,8 +425,11 @@ test.describe('Offline saving and playback', () => {
 
     await expect(player.trackName).toHaveText(nextSaved!, { timeout: 20000 })
     await expect(player.playPause).toHaveAttribute('title', 'pause')
-    await expectStable(async () => (await page.getByTestId('toast').count()) + (await page.getByTestId('toast-error').count()), 2000)
-    expect(await page.getByTestId('toast').count() + await page.getByTestId('toast-error').count()).toBe(0)
+    // The walk may say "not saved offline" about the emptied song while it steps on;
+    // that depends on timing and is harmless. Anything else, or any error, is not.
+    await expectStable(async () => page.getByTestId('toast-error').count(), 2000)
+    expect(await page.getByTestId('toast-error').count()).toBe(0)
+    for (const text of await page.getByTestId('toast').allTextContents()) expect(text).toMatch(/not saved offline/i)
 
     await context.setOffline(false)
     void common
