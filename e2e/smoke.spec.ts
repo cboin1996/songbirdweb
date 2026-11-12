@@ -15,6 +15,9 @@ test.describe('smoke: login → library → play', () => {
         const player = new PlayerBar(page)
         const common = new CommonPage(page)
 
+        // This test logs out, which now revokes the session on the API. Sign in on its own
+        // session; the worker's saved login must stay alive for the tests that follow.
+        await page.context().clearCookies()
         await login(page)
 
         await lib.goto()
