@@ -121,14 +121,17 @@ npm test        # Jest + React Testing Library
 **End-to-end tests**:
 
 ```bash
-make test-e2e-local        # CI-parity: spins up isolated Docker API + Postgres, runs dev suite
+make test-e2e              # dev suite on a fresh Docker API + Postgres (same image as CI)
+make test-e2e-prod         # prod suite, fresh stack
+make test-e2e-mobile       # mobile viewport suite, fresh stack
 make e2e-down              # tear down containers when done
-
-make test-e2e              # dev suite against your local API on :8000 (single worker required)
-make test-e2e-mobile       # mobile viewport suite
 ```
 
-`make test-e2e-local` is the canonical way to run e2e — it uses the same `cboin/songbirdapi:latest` Docker image as CI with seeded test data. Use `make test-e2e` only for quick iteration against your own dev API.
+Each run recreates the database, so leftover users or songs from an earlier run can't
+break it. The Next.js build is reused when nothing it depends on has changed. Pass
+`E2E_ARGS` for extra Playwright flags: `make test-e2e E2E_ARGS="e2e/library.spec.ts"`.
+Use `make e2e-run-dev` (and `-prod`, `-mobile`) only to run against a stack that is
+already up, which is what CI does.
 
 For manual debugging:
 ```bash

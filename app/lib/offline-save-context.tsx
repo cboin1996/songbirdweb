@@ -1,6 +1,7 @@
 'use client'
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { LibrarySong, artworkUrl, songArtworkUrl } from './data'
+import { ARTWORK_SMALL_PX, ARTWORK_LARGE_PX } from './artwork'
 import { saveSongsOffline, reportSaveResult, getCachedSongIds, cacheArtworkUrls } from './offline'
 import { useToast } from '../components/toast'
 
@@ -129,11 +130,14 @@ export function OfflineSaveProvider({ children }: { children: React.ReactNode })
                 const song = byId.get(id)
                 if (song?.properties) {
                     const artUrls = [
-                        artworkUrl(song.properties.artworkUrl100, 400),
+                        // The same sizes the lock screen lists: see mediaSessionArtwork.
                         ...(song.artwork_cached ? [
-                            songArtworkUrl(song.uuid, true, undefined, 200)!,
-                            songArtworkUrl(song.uuid, true, undefined, 400)!,
-                        ] : []),
+                            songArtworkUrl(song.uuid, true, undefined, ARTWORK_SMALL_PX)!,
+                            songArtworkUrl(song.uuid, true, undefined, ARTWORK_LARGE_PX)!,
+                        ] : [
+                            artworkUrl(song.properties.artworkUrl100, ARTWORK_SMALL_PX),
+                            artworkUrl(song.properties.artworkUrl100, ARTWORK_LARGE_PX),
+                        ]),
                     ].filter(Boolean)
                     cacheArtworkUrls(artUrls)
                 }
@@ -166,8 +170,12 @@ export function OfflineSaveProvider({ children }: { children: React.ReactNode })
         return scanned ? cachedRef.current : refreshCachedIds()
     }, [refreshCachedIds])
 
+    const value = useMemo(() => (
+        { savingAll, progress, failedIds, clearFailedIds, cachedIds, cachedIdsStatus, setCachedIds, savedNow, dropSaved, cacheSongsById, refreshCachedIds, readSavedAfterLaunch }
+    ), [savingAll, progress, failedIds, clearFailedIds, cachedIds, cachedIdsStatus, setCachedIds, savedNow, dropSaved, cacheSongsById, refreshCachedIds, readSavedAfterLaunch])
+
     return (
-        <OfflineSaveContext.Provider value={{ savingAll, progress, failedIds, clearFailedIds, cachedIds, cachedIdsStatus, setCachedIds, savedNow, dropSaved, cacheSongsById, refreshCachedIds, readSavedAfterLaunch }}>
+        <OfflineSaveContext.Provider value={value}>
             {children}
         </OfflineSaveContext.Provider>
     )

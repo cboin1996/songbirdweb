@@ -1,8 +1,10 @@
 import { cacheLibraryData, getCachedData, clearLibraryCache } from './offline-db'
+import { writeIfChanged, forgetLastWritten } from './write-if-changed'
 import { EVENTS } from './events'
 import { readTestOverride } from './test-overrides'
 import { isOffline, subscribeOffline } from './offline-signal'
 import { createWriteChain } from './queue-writes'
+import { normalizeArtworkSize, artworkVersionQuery, resetArtworkVersions, ARTWORK_VERSIONS_KEY } from './artwork'
 
 const isServer = typeof window === 'undefined'
 export const BASE_URL = isServer
@@ -205,18 +207,25 @@ function stopProbe() {
   probeTimer = undefined
 }
 
-function markServerUnreachable() {
-  if (typeof window === 'undefined') return
-  window.dispatchEvent(new CustomEvent(EVENTS.serverUnreachable))
+function startProbe() {
   if (probeTimer !== undefined) return
   probeTimer = setInterval(async () => {
     if (!isOffline()) { stopProbe(); return }
-    if (!navigator.onLine) return
+    // The browser says it has no network: stop the timer instead of waking every
+    // fifteen seconds to do nothing. The browser's online event ends the offline belief by itself (offline-signal), and
+    // a request that then fails finds the server gone and starts the probe again.
+    if (!navigator.onLine) { stopProbe(); return }
     try {
       const r = await fetch(`${API_V1}/health`, { cache: 'no-store' })
       if (answeredByServer(r)) window.dispatchEvent(new CustomEvent(EVENTS.serverReachable))
     } catch { /* still unreachable */ }
   }, readTestOverride('__probeIntervalMs', 15000))
+}
+
+function markServerUnreachable() {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent(EVENTS.serverUnreachable))
+  startProbe()
 }
 
 // Any answer the API itself gave shows it is there, whatever it says: a 404 or a 500
@@ -263,6 +272,8 @@ async function fetchData<T>(args: {
   onSwStale?: () => void;
   // Ends the request when aborted, for a caller that gives up waiting.
   signal?: AbortSignal;
+  // Lets the request finish after the page is closed or hidden.
+  keepalive?: boolean;
 }): Promise<T | undefined> {
   const responseType = args.responseType ?? ResponseTypes.json;
   let options: RequestInit;
@@ -274,6 +285,7 @@ async function fetchData<T>(args: {
     options = await buildFetchOptions(args.method, args.body);
   }
   if (args.signal) options.signal = args.signal;
+  if (args.keepalive) options.keepalive = true;
   const response = await sendRequest(args, options);
   if (response.ok && args.rejectSwStale && response.headers.get('X-SW-Stale')) return undefined
   if (response.ok && args.onSwStale && response.headers.get('X-SW-Stale')) args.onSwStale()
@@ -290,6 +302,7 @@ async function fetchData<T>(args: {
           retryOptions = await buildFetchOptions(args.method, args.body)
         }
         if (args.signal) retryOptions.signal = args.signal;
+        if (args.keepalive) retryOptions.keepalive = true;
         // The same handling as the first attempt: a retry the network drops is an
         // unreachable server, not a raw error, and a copy the service worker
         // answers with is still only a copy.
@@ -382,6 +395,9 @@ export async function logout(): Promise<void> {
 async function forgetSignedInData(): Promise<void> {
   try { localStorage.removeItem('playerState') } catch { /* storage unavailable */ }
   try { await clearLibraryCache() } catch { /* nothing to clear */ }
+  forgetLastWritten()
+  try { localStorage.removeItem(ARTWORK_VERSIONS_KEY) } catch { /* storage unavailable */ }
+  resetArtworkVersions()
   try {
     if (typeof caches !== 'undefined') {
       for (const name of await caches.keys()) {
@@ -442,11 +458,17 @@ export async function fetchDrafts(): Promise<DraftSummary[]> {
 }
 
 
+// The library is written to the device only when it differs from what this session
+// last wrote; rewriting a 1000-song list on every refetch is wasted work.
+function cacheLibraryDataIfChanged(key: string, data: unknown) {
+  void writeIfChanged(key, data, cacheLibraryData)
+}
+
 export async function fetchLibrarySongs(): Promise<LibrarySong[]> {
   try {
     const result = await fetchData<LibrarySong[]>({ url: `${API_V1}/songs/library`, method: 'GET' })
     if (result !== undefined) {
-      if (typeof window !== 'undefined') cacheLibraryData('library-songs', result)
+      if (typeof window !== 'undefined') cacheLibraryDataIfChanged('library-songs', result)
       return result
     }
     return []
@@ -465,8 +487,13 @@ export async function fetchLibrarySongsAtLaunch(): Promise<LibrarySong[]> {
   try {
     return await fetchLibrarySongs()
   } catch {
-    return await getCachedData<LibrarySong[]>('library-songs') ?? []
+    return await getCachedLibrarySongs()
   }
+}
+
+/** The library as the device last kept it, or empty. */
+export async function getCachedLibrarySongs(): Promise<LibrarySong[]> {
+  return await getCachedData<LibrarySong[]>('library-songs') ?? []
 }
 
 export async function fetchSongById(id: string): Promise<PlayableSong | undefined> {
@@ -587,13 +614,14 @@ export function toPlayableSong(raw: SongLike, source?: { label: string; href: st
 }
 
 export function artworkUrl(url: string, size: number): string {
-  return url.replace(/\d+x\d+bb/, `${size}x${size}bb`)
+  const px = normalizeArtworkSize(size)
+  return url.replace(/\d+x\d+bb/, `${px}x${px}bb`)
 }
 
 export function songArtworkUrl(songId: string | undefined, artworkCached: boolean | undefined, artworkUrl100: string | undefined, size: number): string | null {
   if (songId && artworkCached) {
     const sizeParam = size <= 300 ? 'thumb' : 'full'
-    return `${API_V1_PATH}/songs/${songId}/artwork/${sizeParam}`
+    return `${API_V1_PATH}/songs/${songId}/artwork/${sizeParam}${artworkVersionQuery(songId)}`
   }
   return artworkUrl100 ? artworkUrl(artworkUrl100, size) : null
 }
@@ -952,8 +980,8 @@ export function queueReorder(fromPosition: number, toPosition: number): Promise<
   return queueWrite(`${API_V1}/player/queue/reorder`, 'PUT', { from_position: fromPosition, to_position: toPosition })
 }
 
-export async function updatePosition(songId: string, position: number): Promise<void> {
-  await fetchData({ url: `${API_V1}/library/${songId}/position`, method: 'PATCH', body: { position }, responseType: ResponseTypes.none })
+export async function updatePosition(songId: string, position: number, opts: { keepalive?: boolean } = {}): Promise<void> {
+  await fetchData({ url: `${API_V1}/library/${songId}/position`, method: 'PATCH', body: { position }, responseType: ResponseTypes.none, keepalive: opts.keepalive })
 }
 
 export async function registerUser(username: string, email: string, password: string): Promise<UserInfo> {

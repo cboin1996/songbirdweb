@@ -3,7 +3,8 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   output: "standalone",
   allowedDevOrigins: ['10.0.0.2'],
-  // Audio uploads routed through middleware can exceed the default 10MB.
+  // Middleware no longer sees uploads: its matcher skips /v1 except song downloads, which
+  // are GETs. The limit stays as a guard for any future matched route that takes a body.
   experimental: {
     middlewareClientMaxBodySize: '100mb',
   },
@@ -25,6 +26,10 @@ const nextConfig: NextConfig = {
     ignoreDuringBuilds: true,
   },
   images: {
+    // Remote artwork is requested at two widths (app/lib/artwork.ts), cached 30 days.
+    minimumCacheTTL: 60 * 60 * 24 * 30,
+    imageSizes: [200],
+    deviceSizes: [600],
     localPatterns: [
       { pathname: "/v1/**" },
     ],

@@ -1,4 +1,5 @@
 'use client'
+import { useIsDesktop } from "../../lib/use-is-desktop"
 import { useEffect, useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useQuery } from "@tanstack/react-query"
@@ -17,17 +18,6 @@ const WINDOWS: { value: ExploreWindow; label: string }[] = [
     { value: 'all', label: 'all time' },
 ]
 
-function useIsDesktop() {
-    const [isDesktop, setIsDesktop] = useState(false)
-    useEffect(() => {
-        const mq = window.matchMedia('(min-width: 768px)')
-        setIsDesktop(mq.matches)
-        const handler = (e: MediaQueryListEvent) => setIsDesktop(e.matches)
-        mq.addEventListener('change', handler)
-        return () => mq.removeEventListener('change', handler)
-    }, [])
-    return isDesktop
-}
 
 type ViewFilter = 'everyone' | 'you'
 const VIEWS: { value: ViewFilter; label: string }[] = [
@@ -193,7 +183,9 @@ export default function ExploreClient() {
         } else {
             params.delete('q')
         }
-        router.replace(`${routes.explore}?${params.toString()}`)
+        // The URL follows the typing without a server round trip per keystroke
+        // (router.replace re-renders the page on the server each time).
+        window.history.replaceState(null, '', `${routes.explore}?${params.toString()}`)
     }
 
     const rawList: AnyItem[] = data
@@ -219,7 +211,7 @@ export default function ExploreClient() {
 
     return (
         <div className="flex flex-col gap-6">
-            <div className="sticky top-11 z-40 bg-[var(--background)]/90 backdrop-blur-md py-3 flex flex-col md:flex-row gap-2 border-b border-gray-100 dark:border-gray-800 -mt-px">
+            <div className="sticky top-11 z-40 bg-[var(--background)]/90 backdrop-blur-md frosted-bar py-3 flex flex-col md:flex-row gap-2 border-b border-gray-100 dark:border-gray-800 -mt-px">
                 <div className="flex gap-2 items-center">
                     <SearchInput
                         value={search}

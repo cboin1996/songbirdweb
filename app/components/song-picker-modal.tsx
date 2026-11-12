@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import Image from 'next/image'
 import { FaTimes, FaCheck, FaBars, FaMusic } from 'react-icons/fa'
 import { Properties, artworkUrl, songArtworkUrl } from '../lib/data'
+import { ArtImage } from './art-image'
 import { useMultiSelect } from '../lib/use-multi-select'
 import { useVirtualList } from '../lib/use-virtual-list'
 
@@ -244,12 +245,12 @@ export default function SongPickerModal({
                                                 )}
 
                                                 {/* artwork */}
-                                                {art
-                                                    ? <Image src={art} alt="" width={36} height={36} className="rounded shrink-0 object-cover" unoptimized={song.artwork_cached} />
-                                                    : <div className="w-9 h-9 rounded shrink-0 bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
-                                                        <FaMusic size={11} className="text-gray-400" />
-                                                    </div>
-                                                }
+                                                {(() => {
+                                                    const stand = <div className="w-9 h-9 rounded shrink-0 bg-gray-100 dark:bg-gray-800 flex items-center justify-center"><FaMusic size={11} className="text-gray-400" /></div>
+                                                    return art
+                                                        ? <ArtImage src={art} alt="" width={36} height={36} className="rounded shrink-0 object-cover" unoptimized={song.artwork_cached} fallback={stand} />
+                                                        : stand
+                                                })()}
 
                                                 {/* text */}
                                                 <div className="flex-1 min-w-0">

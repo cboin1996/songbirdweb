@@ -1,17 +1,8 @@
 'use client'
+import { useIsDesktop } from "../lib/use-is-desktop"
+import { addSongToLibraryCache } from '../lib/library-cache'
 import { useEffect, useMemo, useRef, useState } from "react";
 
-function useIsDesktop() {
-    const [isDesktop, setIsDesktop] = useState(false)
-    useEffect(() => {
-        const mq = window.matchMedia('(min-width: 768px)')
-        setIsDesktop(mq.matches)
-        const handler = (e: MediaQueryListEvent) => setIsDesktop(e.matches)
-        mq.addEventListener('change', handler)
-        return () => mq.removeEventListener('change', handler)
-    }, [])
-    return isDesktop
-}
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DownloadedSong, LibraryEntry, downloadSongViaUrl, downloadSongToFile, addToLibrary, fetchLibrary, tagSong, toPlayableSong } from "../lib/data";
 import { queryKeys } from "../lib/query-keys";
@@ -63,11 +54,8 @@ export default function Songs({ songs: initialSongs }: { songs: DownloadedSong[]
         setStatus('saving')
         try {
             await addToLibrary(readySong.songId)
-            queryClient.setQueryData<LibraryEntry[]>(queryKeys.library, prev =>
-                [...(prev ?? []), { song_id: readySong.songId!, added_at: new Date().toISOString(), last_position: 0, last_played_at: null }]
-            )
+            addSongToLibraryCache(queryClient, { uuid: readySong.songId!, properties: readySong.properties })
             queryClient.invalidateQueries({ queryKey: ['index-search'] })
-            queryClient.invalidateQueries({ queryKey: queryKeys.librarySongs })
             onLibraryAdd({ uuid: readySong.songId!, properties: readySong.properties })
             dismiss()
         } catch {

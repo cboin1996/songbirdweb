@@ -2,7 +2,9 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { routes } from '@/app/lib/routes'
 
-const API_BASE = `http://${process.env.NEXT_PUBLIC_API_HOST ?? 'localhost'}:8000`
+// The same setting the app's server-side fetches use (app/lib/data.ts); the old
+// NEXT_PUBLIC_API_HOST stays as a fallback for deployments that set only that.
+const API_BASE = process.env.API_BASE_URL ?? `http://${process.env.NEXT_PUBLIC_API_HOST ?? 'localhost'}:8000`
 
 function isExpired(token: string): boolean {
   try {
@@ -88,5 +90,9 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|sw.js|manifest.json|icon-.*\\.png).*)'],
+  // API paths are skipped except song downloads: audio has no client-side 401
+  // recovery (a resume after a long pause fetches ranges with no visibility event
+  // first), so an expired session is still refreshed on that request. Other API
+  // calls use the client's single-flight refresh.
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|sw.js|manifest.json|icon-.*\\.png|v1/(?!download/)).*)'],
 }

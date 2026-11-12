@@ -52,19 +52,30 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # The dev suite is the longest, so it runs as two shards on two runners.
           - project: dev
+            shard: 1/2
             browser: chromium
-            make_target: test-e2e
+            make_target: e2e-run-dev
+            needs_dev_server: true
+          - project: dev
+            shard: 2/2
+            browser: chromium
+            make_target: e2e-run-dev
             needs_dev_server: true
           - project: mobile
             browser: webkit
-            make_target: test-e2e-mobile
+            make_target: e2e-run-mobile
+            needs_dev_server: true
+          - project: bench
+            browser: chromium
+            make_target: e2e-run-bench
             needs_dev_server: true
           - project: prod
             browser: chromium
-            make_target: test-e2e-prod
+            make_target: e2e-run-prod
             needs_dev_server: false
-    name: e2e (${{ matrix.project }})
+    name: e2e (${{ matrix.project }}${{ matrix.shard && format(' {0}', matrix.shard) || '' }})
     steps:
       - uses: actions/checkout@v4
 
@@ -76,8 +87,22 @@ jobs:
       - name: Install dependencies
         run: make install
 
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ matrix.browser }}-${{ hashFiles('package-lock.json') }}
+
       - name: Install Playwright browsers
         run: npx playwright install --with-deps ${{ matrix.browser }}
+
+      - name: Cache Next.js build cache
+        uses: actions/cache@v4
+        with:
+          path: .next/cache
+          key: nextjs-${{ hashFiles('package-lock.json') }}-${{ hashFiles('app/**', 'middleware.ts', 'next.config.ts') }}
+          restore-keys: |
+            nextjs-${{ hashFiles('package-lock.json') }}-
 
       - name: Start API stack
         run: make e2e-api-up E2E_API_PORT=8000 E2E_WEB_PORT=3000
@@ -86,11 +111,17 @@ jobs:
         if: matrix.needs_dev_server
         run: make e2e-next-up E2E_WEB_PORT=3000 E2E_API_PORT=8000
 
+      # Build-time inputs (see Makefile e2e-build): the app source, public/, middleware.ts,
+      # next.config.ts, package-lock.json and the .env* files, plus NEXT_PUBLIC_API_BASE_URL
+      # and API_BASE_URL, which are baked in when the build runs.
       - name: Run E2E tests (${{ matrix.project }})
         env:
           NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
           E2E_API_BASE_URL: http://localhost:8000
           E2E_WEB_URL: http://localhost:3000
+          E2E_SEED_BENCH: '1'
+          E2E_BENCH_USERNAME: e2e-bench
+          E2E_BENCH_PASSWORD: e2e-BenchPass-1
           TEST_USERNAME: e2e-user
           TEST_PASSWORD: e2e-user-pass
           E2E_ADMIN_USERNAME: e2e-admin
@@ -119,12 +150,35 @@ jobs:
           E2E_ERROR_PASSWORD: e2e-ErrorPass-1
           E2E_OFFLINE_USERNAME: e2e-offline
           E2E_OFFLINE_PASSWORD: e2e-OfflinePass-1
-        run: make ${{ matrix.make_target }}
+        run: make ${{ matrix.make_target }} E2E_ARGS="${{ matrix.shard && format('--shard={0}', matrix.shard) || '' }}"
+
+      - name: Lighthouse CI (library page)
+        if: matrix.project == 'bench'
+        env:
+          E2E_BENCH_USERNAME: e2e-bench
+          E2E_BENCH_PASSWORD: e2e-BenchPass-1
+        run: make lighthouse-run E2E_API_PORT=8000 E2E_WEB_PORT=3000
+
+      - name: Upload Lighthouse results
+        if: always() && matrix.project == 'bench'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lighthouse-results
+          path: lhci-results
+          if-no-files-found: ignore
+
+      - name: Upload bench metrics
+        if: always() && matrix.project == 'bench'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-metrics
+          path: bench-results
+          if-no-files-found: ignore
 
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report-${{ matrix.project }}
+          name: playwright-report-${{ matrix.project }}${{ matrix.shard && format('-{0}', strategy.job-index) || '' }}
           path: playwright-report/
           retention-days: 7

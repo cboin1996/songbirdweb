@@ -1,4 +1,6 @@
 'use client'
+import { Switch } from "../../components/switch";
+import { getFrostedBars, setFrostedBars, getPerfOverlay, setPerfOverlay } from "../../lib/device-settings";
 import { useEffect, useRef, useState } from "react";
 import { AuthExpiredError, RefreshUnavailableError, changePassword, fetchLibrarySongs } from "../../lib/data";
 import { clearOfflineCache, getCachedSongIds, getStorageEstimate, formatBytes, getSongFile, uncacheSong, cacheSong, reportSaveResult, SaveOutcome } from "../../lib/offline";
@@ -248,6 +250,44 @@ function AudioFormatSetting() {
     )
 }
 
+function FrostedBarsSetting() {
+    const [on, setOn] = useState(true)
+    useEffect(() => { setOn(getFrostedBars()) }, [])
+    function choose(next: boolean) {
+        setOn(next)
+        setFrostedBars(next)
+    }
+    return (
+        <div>
+            <div className="flex items-center justify-between gap-4 max-w-xs">
+                <p className="text-gray-400 text-sm">frosted bars</p>
+                <Switch checked={on} onChange={choose} label="frosted bars" data-testid="frosted-switch" />
+            </div>
+            <p className="text-xs text-gray-400 mt-1.5">blurred top and bottom bars; off is smoother on slower phones</p>
+        </div>
+    )
+}
+
+function PerfOverlaySetting() {
+    const [on, setOn] = useState(false)
+    useEffect(() => { setOn(getPerfOverlay()) }, [])
+    function choose(next: boolean) {
+        setOn(next)
+        setPerfOverlay(next)
+        // The counter behind the overlay is decided when a page loads.
+        window.location.reload()
+    }
+    return (
+        <div>
+            <div className="flex items-center justify-between gap-4 max-w-xs">
+                <p className="text-gray-400 text-sm">performance overlay</p>
+                <Switch checked={on} onChange={choose} label="performance overlay" data-testid="perf-setting-switch" />
+            </div>
+            <p className="text-xs text-gray-400 mt-1.5">live render, request and frame counts; reloads the page. On a keyboard, Alt+Shift+P</p>
+        </div>
+    )
+}
+
 export default function Page() {
     const [currentPassword, setCurrentPassword] = useState('')
     const [newPassword, setNewPassword] = useState('')
@@ -287,7 +327,12 @@ export default function Page() {
         <main className="p-4">
             <div className="flex flex-col gap-8 py-4">
                 <AudioFormatSetting />
-                <OfflineStorage />
+                <div className="flex flex-col gap-8" data-testid="this-device">
+                    <p className="text-sky-500 text-xs uppercase tracking-wide -mb-4">this device</p>
+                    <FrostedBarsSetting />
+                    <PerfOverlaySetting />
+                    <OfflineStorage />
+                </div>
                 <CacheAudit />
                 <div>
                     <p className="text-gray-400 text-sm pb-2">change password</p>

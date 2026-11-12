@@ -152,6 +152,29 @@ describe('asking whether the server is back', () => {
     })
 })
 
+describe('the probe while the browser has no network', () => {
+    it('stops its timer instead of ticking, and a later failed request starts it again', async () => {
+        fetchMock.mockRejectedValue(new TypeError('failed to fetch'))
+        const { data, signal } = await load()
+        await expect(data.fetchPlayerState()).rejects.toThrow()
+        fetchMock.mockClear()
+
+        Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => false })
+        await jest.advanceTimersByTimeAsync(15000)
+        expect(jest.getTimerCount()).toBe(0)
+        expect(fetchMock).not.toHaveBeenCalled()
+
+        // Network back: the browser's event ends the belief; the next failure re-arms the probe.
+        Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => true })
+        window.dispatchEvent(new Event('online'))
+        expect(signal.isOffline()).toBe(false)
+        await expect(data.fetchPlayerState()).rejects.toThrow()
+        fetchMock.mockClear()
+        await jest.advanceTimersByTimeAsync(15000)
+        expect(fetchMock).toHaveBeenLastCalledWith(expect.stringMatching(/\/v1\/health$/), expect.anything())
+    })
+})
+
 describe('a player save that failed because the server was gone', () => {
     it('is sent again when the server is back, with nothing else asking', async () => {
         fetchMock.mockRejectedValueOnce(new TypeError('failed to fetch'))

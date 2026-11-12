@@ -1,10 +1,10 @@
+import { BROWSE_ARTWORK_CACHE, OFFLINE_ARTWORK_CACHE, optimizerWidth } from './artwork'
 import {
     DOWNLOAD_URL, AuthExpiredError, RefreshUnavailableError,
     addServerOfflineSong, ensureFreshToken, redirectToLogin, tryRefresh,
 } from './data'
 
 const AUDIO_DIR = 'audio'
-const ARTWORK_CACHE_NAME = 'songbird-artwork-v1'
 const IDB_DB_NAME = 'songbird-audio'
 const IDB_STORE = 'files'
 const IDB_VERSION = 1
@@ -366,7 +366,10 @@ export async function clearOfflineCache(): Promise<void> {
     }
     try { await idbClearAll() } catch { /* nothing to clear */ }
     try {
-        if ('caches' in self) await caches.delete(ARTWORK_CACHE_NAME)
+        if ('caches' in self) {
+            await caches.delete(BROWSE_ARTWORK_CACHE)
+            await caches.delete(OFFLINE_ARTWORK_CACHE)
+        }
     } catch { /* nothing to clear */ }
 }
 
@@ -380,15 +383,29 @@ export async function getStorageEstimate(): Promise<StorageEstimate> {
     return { used: est.usage ?? 0, quota: est.quota ?? 0 }
 }
 
+/** Drops every stored artwork copy of one song (all sizes and versions). */
+export async function dropStoredArtwork(songId: string): Promise<void> {
+    if (!('caches' in self)) return
+    try {
+        for (const name of [BROWSE_ARTWORK_CACHE, OFFLINE_ARTWORK_CACHE]) {
+            const cache = await caches.open(name)
+            const stored = await cache.keys()
+            await Promise.all(stored
+                .filter(r => new URL(r.url).pathname.startsWith(`/v1/songs/${songId}/artwork/`))
+                .map(r => cache.delete(r)))
+        }
+    } catch { /* non-fatal */ }
+}
+
 export async function cacheArtworkUrls(urls: string[]): Promise<void> {
     if (!('caches' in self)) return
     try {
-        const cache = await caches.open(ARTWORK_CACHE_NAME)
+        const cache = await caches.open(OFFLINE_ARTWORK_CACHE)
         await Promise.allSettled(urls.map(async url => {
             if (await cache.match(url)) return
             // Local paths are same-origin — fetch directly
             // External URLs route through Next.js image proxy to avoid CORS
-            const fetchUrl = url.startsWith('/') ? url : `/_next/image?url=${encodeURIComponent(url)}&w=384&q=75`
+            const fetchUrl = url.startsWith('/') ? url : `/_next/image?url=${encodeURIComponent(url)}&w=${optimizerWidth(url)}&q=75`
             const res = await fetch(fetchUrl)
             if (res.ok) await cache.put(url, res)
         }))

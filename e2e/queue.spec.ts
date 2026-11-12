@@ -250,6 +250,9 @@ test.describe('player queue', () => {
 
             await player.openQueue()
             const rows = player.queueRows()
+            // The queue fills in as the panel opens; reading it early captured only
+            // the first rows and made this test flake. Wait for the full queue.
+            await expect(rows).toHaveCount(songs.length)
             const beforeNames: string[] = []
             const count = await rows.count()
             for (let i = 0; i < count; i++) {

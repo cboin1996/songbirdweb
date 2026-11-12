@@ -12,7 +12,9 @@ This doc maps the contexts and the most state-heavy components. For the page/rou
 
 Mounted once in `app/layout.tsx` so a single `<audio>` element survives every navigation. Owns queue, current song, shuffle/repeat, queue sources, and persists all of it to the server (`/v1/player/state`). Server is the source of truth; localStorage holds a mirror that's used as a fallback if the server fetch fails on restore.
 
-### Public API — `usePlayer()`
+### Public API — actions, selectors, `usePlayer()`
+
+The state is split so a tick or a track change re-renders only what reads it. The actions (`play`, `pause`, `resume`, `skipNext`, ...) are one object that never changes (`usePlayerActions()`); the state lives in an external store (`app/lib/player-store.ts`) read through `usePlayerSelector(s => ...)` (a component re-renders only when its answer changes) or `usePlayerStateNow()` (a getter for handlers). `usePlayer()` still returns both merged and re-renders on any change, so prefer the other three in lists. The shape below is what `usePlayer()` returns.
 
 ```ts
 interface PlayerContextValue {
@@ -71,6 +73,10 @@ interface PlayerContextValue {
 - **Queue + shuffle + repeat + queue_sources:** `scheduleSave()` debounces a `PUT /v1/player/state` (2 s) after every queue mutation, and after a stop, so a reload opens on the song the stop restored rather than the one the cascade died on. On page load, `GET /v1/player/state` restores the entire state from the server (queue sources are now server-of-truth, not localStorage).
 - **Position (`last_position` on `user_songs`):** `PATCH /v1/library/{id}/position` every 10 s while playing and on pause.
 - **Play event:** `POST /v1/songs/{id}/play` after 30 s of continuous play.
+
+### Playback position — `app/lib/progress-store.ts`
+
+`timeupdate` (about 4 a second) no longer sets React state. It writes `{ time, duration, buffered }` into a small store, which tells its subscribers only when a whole second passes (always on a seek or a duration change; NaN compares equal to NaN). Only the progress bar and the time labels subscribe, so the player and the lists do not render once per tick. The bar's fill glides across each second with a width transition while playing; a seek, a track change or a pause moves it at once. The lock-screen position is set on events (play, pause, seek, duration, rate), not per tick. Updates stop while the page is hidden and are re-synced when it shows.
 
 ### Keyboard shortcuts
 
@@ -133,6 +139,18 @@ interface UserCtx {
 ```
 
 Populated in `app/components/app-layout.tsx` from a server-side `fetchCurrentUser()` call. Used by `nav-links.tsx` (to conditionally render the admin link) and any client component that needs to gate UI on role. Read via `useUser()`.
+
+## Library lists in the query cache — `app/lib/library-cache.ts`
+
+The library, playlists and drafts are react-query entries that stay fresh for 5 minutes (`LIST_STALE_MS`); every other query for 30 seconds. A cold load asks the server for the whole library once, and returning within five minutes asks nothing. A song added or removed in the app is patched into the cached lists (`addSongToLibraryCache` / `removeSongFromLibraryCache`) and the patched list is written to the device's IndexedDB copy (`writeIfChanged`: a value is written only when it differs from the last one written, and recorded once the write finishes). Removing while the list is not loaded (the stored rows are showing as a placeholder) asks for the list again instead of patching nothing. While the server was unreachable the lists held the device's copy; `QueryProvider` refetches them when the server answers again. The stored copy (`getCachedLibrarySongs`) shows as `placeholderData` while the first request is out. Grouping and sorting for each view are pure functions in `app/lib/library-grouping.ts` (one collator, titles compared trimmed).
+
+## Device settings — `app/lib/device-settings.ts`
+
+Per-device choices kept in `localStorage`, never synced: the frosted bars switch (`songbird-frosted-bars`; default on for desktop, `PHONE_FROSTED_DEFAULT` for phones, off when the system asks for reduced transparency). `DeviceSettingsApplier` sets `data-frosted` on `<html>`; `.frosted-bar` elements (navbar, sticky headers, player bar) go solid when it is `off`. The settings page has a "This device" block with the switch, a "performance overlay" switch (`songbird-perf`, read once per page load by `app/lib/perf.ts`, so flipping it reloads; Alt+Shift+P does the same on a keyboard; `?perf=1` / `?perf=0` still win for a load) and offline storage.
+
+## Artwork versions — `app/lib/artwork.ts`
+
+Remote art is requested at two widths only (200 and 600; the optimizer rejects others). A replaced local image gets a per-device version: `?v=N` is appended to its URLs, so stored copies of the old image are not matched. Versions are validated when read (whole positive numbers only) and forgotten on sign-out.
 
 ## Library state — `app/library/library-list.tsx`
 

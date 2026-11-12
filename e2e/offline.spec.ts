@@ -79,6 +79,9 @@ test.describe('offline mode', () => {
     test('OfflineGuard: clicking "go to library" lands on /library', async ({ page }) => {
         const common = new CommonPage(page)
         await page.goto(routes.explore)
+        // The library route is prefetched in the background; going offline before that lands leaves nothing to navigate to.
+        await page.waitForLoadState('networkidle')
+        await page.waitForTimeout(1500)
         await common.goOffline()
         const link = page.getByRole('link', { name: /go to library/i })
         await expect(link).toBeVisible({ timeout: 5000 })

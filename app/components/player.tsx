@@ -1,5 +1,5 @@
 'use client'
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { useToast } from "./toast"
 import { useVirtualList } from "../lib/use-virtual-list"
 import Image from "next/image"
@@ -10,13 +10,21 @@ import { FaPause, FaPlay, FaStepBackward, FaStepForward, FaRandom, FaRedo, FaLis
 import { filterSongs } from "../lib/use-filtered-songs"
 import SearchInput from "./search-input"
 import Spinner from "./spinner"
-import { DOWNLOAD_URL, LibrarySong, RefreshResult, PlayableSong, PlayerState, artworkUrl, songArtworkUrl, ensureFreshToken, isSigningOut, redirectToLogin, tryRefresh, fetchLibrarySongs, fetchLibrarySongsAtLaunch, fetchPlayerState, fetchPlayerStateAtLaunch, fetchSongById, recordPlay, savePlayerState, playerWritesPending, readLocalPlayerState, updatePosition, queueInsert, queueRemove, queueReorder as apiQueueReorder } from "../lib/data"
+import { DOWNLOAD_URL, LibrarySong, RefreshResult, PlayableSong, PlayerState, artworkUrl, songArtworkUrl, ensureFreshToken, isSigningOut, redirectToLogin, tryRefresh, fetchLibrarySongs, getCachedLibrarySongs, fetchPlayerState, fetchPlayerStateAtLaunch, fetchSongById, recordPlay, savePlayerState, playerWritesPending, readLocalPlayerState, updatePosition, queueInsert, queueRemove, queueReorder as apiQueueReorder } from "../lib/data"
+import { ArtImage } from './art-image'
 import { isOffline } from "../lib/offline-signal"
 import { useOnline } from "../lib/use-online"
 import { getSongFile, cacheArtworkUrls } from "../lib/offline"
 import { useOfflineSave } from "../lib/offline-save-context"
 import { createBlobSlot } from "../lib/blob-slot"
 import { readTestOverride } from "../lib/test-overrides"
+import { useRenderCount } from "../lib/perf"
+import { createProgressStore, type ProgressStore } from "../lib/progress-store"
+import { createPlayerStore, type PlayerStore, type PlayerSnapshot, type RepeatMode, type PlayContext } from "../lib/player-store"
+import { createListenClock } from "../lib/listen-clock"
+import { useQueryClient } from "@tanstack/react-query"
+import { queryKeys } from "../lib/query-keys"
+import { mediaSessionArtwork } from "../lib/artwork"
 import { isValidShuffleOrder } from "../lib/shuffle-order"
 import Slider from "./slider"
 import { routes } from "../lib/routes"
@@ -35,8 +43,7 @@ function contextFromId(id: string | null): PlayContext | null {
     return null
 }
 
-export type RepeatMode = 'off' | 'one' | 'all'
-export type PlayContext = { label: string; href: string; id: string }
+export type { RepeatMode, PlayContext } from "../lib/player-store"
 
 function seededShuffle(arr: number[], seed: number): number[] {
     // Mulberry32 PRNG — deterministic, fast, good distribution
@@ -55,13 +62,7 @@ function seededShuffle(arr: number[], seed: number): number[] {
     return out
 }
 
-interface PlayerContextValue {
-    current: PlayableSong | null
-    isPlaying: boolean
-    queue: PlayableSong[]
-    shuffle: boolean
-    repeat: RepeatMode
-    playContext: PlayContext | null
+export interface PlayerActions {
     play: (song: PlayableSong, queue?: PlayableSong[], context?: PlayContext) => void
     pause: () => void
     resume: () => void
@@ -77,31 +78,35 @@ interface PlayerContextValue {
     onLibraryRemove: (songId: string) => void
 }
 
-const PlayerContext = createContext<PlayerContextValue>({
-    current: null,
-    isPlaying: false,
-    queue: [],
-    shuffle: false,
-    repeat: 'all',
-    playContext: null,
-    play: () => {},
-    pause: () => {},
-    resume: () => {},
-    skipNext: () => {},
-    skipPrev: () => {},
-    toggleShuffle: () => {},
-    toggleRepeat: () => {},
-    insertNext: () => {},
-    playNow: () => {},
-    removeFromQueue: () => {},
-    reorderQueue: () => {},
-    onLibraryAdd: () => {},
-    onLibraryRemove: () => {},
+const noop = () => {}
+const PlayerActionsContext = createContext<PlayerActions>({
+    play: noop, pause: noop, resume: noop, skipNext: noop, skipPrev: noop, toggleShuffle: noop, toggleRepeat: noop,
+    insertNext: noop, playNow: noop, removeFromQueue: noop, reorderQueue: noop, onLibraryAdd: noop, onLibraryRemove: noop,
 })
+// Outside a provider (the share page renders without one) the store just never changes.
+const PlayerStoreContext = createContext<PlayerStore>(createPlayerStore())
 
+/** The player's actions. The object never changes, so reading it re-renders nothing. */
+export function usePlayerActions(): PlayerActions {
+    return useContext(PlayerActionsContext)
+}
 
-export function usePlayer() {
-    return useContext(PlayerContext)
+/** One answer from the player's state; the caller re-renders only when that answer changes. */
+export function usePlayerSelector<T>(selector: (s: PlayerSnapshot) => T): T {
+    const store = useContext(PlayerStoreContext)
+    return useSyncExternalStore(store.subscribe, () => selector(store.get()), () => selector(store.get()))
+}
+
+/** The player's state as of now, for handlers that read it when called. */
+export function usePlayerStateNow(): () => PlayerSnapshot {
+    return useContext(PlayerStoreContext).get
+}
+
+/** Actions and the whole state: re-renders on any player change. Prefer the two above. */
+export function usePlayer(): PlayerActions & PlayerSnapshot {
+    const actions = usePlayerActions()
+    const state = usePlayerSelector(s => s)
+    return useMemo(() => ({ ...actions, ...state }), [actions, state])
 }
 
 const QUEUE_ROW_H = 52
@@ -113,6 +118,8 @@ const MAX_CONSECUTIVE_FAILURES = 5
 // weak cellular a song buffers, starts, stalls and fails, which would zero the
 // failure budget on every hop and recreate the runaway.
 const PROGRESS_RESET_SEC = 10
+// Listening time before a play counts.
+const PLAY_RECORD_AFTER_MS = 30000
 
 // Everything an error cascade moves while it walks the queue. Restoring the
 // index alone is not enough — the walk also moves the shuffle position, shifts
@@ -133,14 +140,21 @@ function fmt(s: number) {
     return `${m}:${sec.toString().padStart(2, '0')}`
 }
 
-function ProgressBar({ current, duration, buffered, onSeek }: {
-    current: number
-    duration: number
-    buffered: number
+function ProgressBar({ store, playing, onSeek }: {
+    store: ProgressStore
+    playing: boolean
     onSeek: (t: number) => void
 }) {
+    useRenderCount('progress')
+    const { time: current, duration, buffered } = useSyncExternalStore(store.subscribe, store.get, store.get)
     const barRef = useRef<HTMLDivElement>(null)
     const dragging = useRef(false)
+    // The store only changes once a second, so the fill glides across that second. A seek, a
+    // track change or a pause moves it at once: only a normal forward step is smoothed.
+    const lastTime = useRef(current)
+    const step = current - lastTime.current
+    const smooth = playing && !dragging.current && step > 0 && step <= 1.5
+    useEffect(() => { lastTime.current = current })
 
     function posFromX(clientX: number) {
         const rect = barRef.current!.getBoundingClientRect()
@@ -197,7 +211,8 @@ function ProgressBar({ current, duration, buffered, onSeek }: {
                     />
                     {/* played track */}
                     <div
-                        className="h-full bg-sky-500 rounded-full relative"
+                        data-smooth={smooth ? 'true' : 'false'}
+                        className={`h-full bg-sky-500 rounded-full relative ${smooth ? 'transition-[width] duration-1000 ease-linear' : ''}`}
                         style={{ width: `${pct}%` }}
                     >
                         <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-sky-500 rounded-full opacity-0 group-hover:opacity-100 group-active:opacity-100 transition-opacity" />
@@ -282,6 +297,7 @@ function QueueRowList({
     reorderQueue, removeFromQueue, onPlayAt, onPause, onResume, onSourceNav,
     variant,
 }: QueueRowListProps) {
+    useRenderCount('queueList')
     const s = QUEUE_STYLES[variant]
 
     function handlePointerMove(e: React.PointerEvent) {
@@ -310,13 +326,15 @@ function QueueRowList({
                 </p>
             )}
             {showSearch && (
-                <div className="shrink-0 pb-2">
+                // Room around the field so its focus ring is not clipped and it never touches the panel edge.
+                <div className="shrink-0 px-1 pt-1 pb-3">
                     <SearchInput value={queueSearch} onChange={setQueueSearch} placeholder="search queue…" testId={searchTestId ?? 'queue-search'} />
                 </div>
             )}
             <div
                 ref={containerRef}
-                className="overflow-y-auto flex-1"
+                data-testid="queue-scroll"
+                className="thin-scroll overflow-y-auto overflow-x-hidden flex-1 min-w-0"
                 onPointerMove={handlePointerMove}
                 onPointerUp={handlePointerUp}
                 onPointerLeave={handlePointerUp}
@@ -342,7 +360,7 @@ function QueueRowList({
                                     data-dpos={dpos}
                                     data-unsaved={unsaved ? 'true' : undefined}
                                     style={{ height: QUEUE_ROW_H }}
-                                    className={`flex items-center gap-3 ${s.px} border-t-2 border-b-2 transition-colors select-none ${isDropTarget ? 'border-t-sky-500' : 'border-t-transparent'} ${isDropAfter ? 'border-b-sky-500' : 'border-b-transparent'} ${isBeingDragged ? 'opacity-40' : unsaved ? 'opacity-50' : ''} ${isActive ? s.activeRow : s.hoverRow}`}
+                                    className={`flex items-center gap-3 min-w-0 overflow-hidden ${s.px} border-t-2 border-b-2 transition-colors select-none ${isDropTarget ? 'border-t-sky-500' : 'border-t-transparent'} ${isDropAfter ? 'border-b-sky-500' : 'border-b-transparent'} ${isBeingDragged ? 'opacity-40' : unsaved ? 'opacity-50' : ''} ${isActive ? s.activeRow : s.hoverRow}`}
                                 >
                                     <span
                                         data-testid={variant === 'panel' ? 'queue-drag-handle' : undefined}
@@ -355,10 +373,12 @@ function QueueRowList({
                                         onClick={() => isActive ? (isPlaying ? onPause() : onResume()) : onPlayAt(qi)}
                                         className="flex items-center gap-3 flex-1 text-left min-w-0"
                                     >
-                                        {art
-                                            ? <Image src={art} alt="" width={36} height={36} className="rounded shrink-0 object-cover" unoptimized={!!song.artwork_cached} />
-                                            : <div className={`w-9 h-9 rounded shrink-0 ${s.artFallback} flex items-center justify-center`}><FaMusic size={11} className={s.artIcon} /></div>
-                                        }
+                                        {(() => {
+                                            const stand = <div className={`w-9 h-9 rounded shrink-0 ${s.artFallback} flex items-center justify-center`}><FaMusic size={11} className={s.artIcon} /></div>
+                                            return art
+                                                ? <ArtImage src={art} alt="" width={36} height={36} className="rounded shrink-0 object-cover" unoptimized={!!song.artwork_cached} fallback={stand} />
+                                                : stand
+                                        })()}
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-center gap-1.5">
                                                 <p className={`text-sm font-medium truncate ${isActive ? s.activeTrack : s.normalTrack}`}>{sp?.trackName ?? '—'}</p>
@@ -394,15 +414,20 @@ function QueueRowList({
 }
 
 export function PlayerProvider({ children }: { children: React.ReactNode }) {
+    useRenderCount('player')
+    const queryClient = useQueryClient()
     const audioRef = useRef<HTMLAudioElement>(null)
     const playerBarRef = useRef<HTMLDivElement>(null)
     const [current, setCurrent] = useState<PlayableSong | null>(null)
     const currentRef = useRef<PlayableSong | null>(null)
     const [isPlaying, setIsPlaying] = useState(false)
     const [isBuffering, setIsBuffering] = useState(false)
-    const [currentTime, setCurrentTime] = useState(0)
-    const [buffered, setBuffered] = useState(0)
-    const [duration, setDuration] = useState(0)
+    // Position, duration and buffered live in a store the bars subscribe to, not
+    // in state: a timeupdate must not re-render the player.
+    const [progressStore] = useState(createProgressStore)
+    // A play is recorded once per load of a song, after 30 s of actual listening.
+    const listenClockRef = useRef(createListenClock())
+    const playRecordedRef = useRef<string | null>(null)
     const [queue, setQueue] = useState<PlayableSong[]>([])
     const [shuffle, setShuffle] = useState(false)
     const [repeat, setRepeat] = useState<RepeatMode>('all')
@@ -438,7 +463,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const [shuffleOrder, setShuffleOrder] = useState<number[]>([])
     const shuffleOrderRef = useRef<number[]>([])
     const shufflePosRef = useRef(0)
-    const [audioSrc, setAudioSrc] = useState('')
     const dragFromRef = useRef<number | null>(null)
     const queueContainerRef = useRef<HTMLDivElement>(null)
     const expandedQueueContainerRef = useRef<HTMLDivElement>(null)
@@ -473,6 +497,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     // a direct read would pin the provider's initial empty set for the whole
     // session and report "no offline copies left" with a full offline library.
     const { cachedIds, cachedIdsStatus, savedNow, dropSaved } = useOfflineSave()
+    // What the launch scan found saved, readable from callbacks that outlive a render.
+    const savedScanRef = useRef({ ids: cachedIds, status: cachedIdsStatus })
+    savedScanRef.current = { ids: cachedIds, status: cachedIdsStatus }
     const online = useOnline()
     const cachedIdsStatusRef = useRef(cachedIdsStatus)
     useEffect(() => { cachedIdsStatusRef.current = cachedIdsStatus }, [cachedIdsStatus])
@@ -527,6 +554,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     async function resolveAudioSrc(songUuid: string, gen?: number): Promise<string | null> {
         const superseded = () => gen !== undefined && gen !== loadGenRef.current
         if (superseded()) return null
+        // A song the finished launch scan did not list has no copy on the device: skip the
+        // lookup (it opens the file system) and stream it.
+        const scan = savedScanRef.current
+        if (scan.status === 'scanned' && !scan.ids.has(songUuid)) return `${DOWNLOAD_URL}/${songUuid}`
         let cached: File | null = null
         let lookupSucceeded = false
         try {
@@ -567,7 +598,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         blobSlotRef.current.adopt(src)
         srcUuidRef.current = uuid
         srcGenRef.current = loadGenRef.current
-        setAudioSrc(src)
     }
 
     // Called on real playback progress and on anything the user started.
@@ -680,7 +710,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             queueIndexRef.current = 0
             setQueue([song])
             if (!keepSource) {
-                setCurrentTime(last.last_position ?? 0)
+                progressStore.update({ time: last.last_position ?? 0 }, { force: true })
                 if (audio && src !== null) {
                     pendingPosition.current = last.last_position ?? 0
                     applyAudioSrc(audio, src, song.uuid)
@@ -740,7 +770,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
         setCurrent(song)
         if (!keepSource) {
-            setCurrentTime(song.last_position ?? 0)
+            progressStore.update({ time: song.last_position ?? 0 }, { force: true })
             if (audio && src !== null) {
                 pendingPosition.current = song.last_position ?? 0
                 applyAudioSrc(audio, src, song.uuid)
@@ -818,8 +848,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         }
     }
 
-    const savePosition = useCallback((song: PlayableSong, time: number) => {
-        updatePosition(song.uuid, time).catch(() => {})
+    // No saves while offline: they would only fail, and the player keeps its own copy.
+    // `keepalive` lets the one sent as the page hides or closes outlive the page.
+    const savePosition = useCallback((song: PlayableSong, time: number, keepalive = false) => {
+        if (isOffline()) return
+        updatePosition(song.uuid, time, { keepalive }).catch(() => {})
     }, [])
 
     // `startAt` overrides the stored last-played position. The error retry needs
@@ -836,16 +869,16 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         loadStartPositionRef.current = startPosition
         lastPositionRef.current = startPosition
 
-        setCurrentTime(0)
-        setDuration(0)
+        progressStore.reset()
+        listenClockRef.current.reset()
+        playRecordedRef.current = null
         setCurrent(song)
         setIsPlaying(true)
 
         if (autoplayActivatedRef.current) {
-            // Not a gesture path — this already awaits src resolution, so a stale
-            // token can be refreshed before the stream request carries it.
-            await ensureFreshToken()
-            if (gen !== loadGenRef.current) return
+            // Not a gesture path. The device is asked first: a saved song plays from its
+            // file and needs no token. Only a stream waits for the token to be fresh, so
+            // the request carries a good one (and a dead zone cannot hold up a saved song).
             const src = await resolveAudioSrc(song.uuid, gen)
             if (src === null) return
             // Offline there is no stream to fall back on. A song the list called saved
@@ -854,6 +887,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             if (src.startsWith(DOWNLOAD_URL) && offlineOnlyIds()) {
                 stopForMissingCopy(audio, walk)
                 return
+            }
+            if (src.startsWith(DOWNLOAD_URL)) {
+                await ensureFreshToken()
+                if (gen !== loadGenRef.current) return
             }
             shouldPlayRef.current = true
             applyAudioSrc(audio, src, song.uuid)
@@ -1108,14 +1145,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         if (!('mediaSession' in navigator) || !song.properties) return
         const p = song.properties
         const origin = typeof window !== 'undefined' ? window.location.origin : ''
-        const sizes = [128, 192, 256, 384, 512]
-        const artwork: { src: string; sizes: string; type: string }[] = []
-        for (const s of sizes) {
-            const url = songArtworkUrl(song.uuid, song.artwork_cached, p.artworkUrl100, s)
-            if (!url) continue
-            const absolute = url.startsWith('/') ? `${origin}${url}` : url
-            artwork.push({ src: absolute, sizes: `${s}x${s}`, type: 'image/jpeg' })
-        }
+        const artwork = mediaSessionArtwork(song, s => songArtworkUrl(song.uuid, song.artwork_cached, p.artworkUrl100, s), origin)
         navigator.mediaSession.metadata = new MediaMetadata({
             title: p.trackName,
             artist: p.artistName,
@@ -1130,7 +1160,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             const audio = audioRef.current
             if (!audio || details.seekTime == null) return
             audio.currentTime = details.seekTime
-            setCurrentTime(details.seekTime)
+            progressStore.update({ time: details.seekTime }, { force: true })
             updatePositionState()
         })
     }
@@ -1192,7 +1222,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         const audio = audioRef.current
         if (!audio) return
         audio.currentTime = t
-        setCurrentTime(t)
+        progressStore.update({ time: t }, { force: true })
     }
 
     // One step of the advance order. Mutates the shuffle position, the manual-next
@@ -1321,7 +1351,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         clearFailureState()
         if (audio.currentTime > 3) {
             audio.currentTime = 0
-            setCurrentTime(0)
+            progressStore.update({ time: 0 }, { force: true })
             return
         }
         const q = queueRef.current
@@ -1445,7 +1475,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             setIsBuffering(false)
             if (pendingPosition.current > 0) {
                 audio!.currentTime = pendingPosition.current
-                setCurrentTime(pendingPosition.current)
+                progressStore.update({ time: pendingPosition.current }, { force: true })
                 pendingPosition.current = 0
             }
             if (shouldPlayRef.current) {
@@ -1456,27 +1486,35 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         function onPlay() {
             setIsPlaying(true); setIsBuffering(false); autoplayActivatedRef.current = true
             if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing'
+            updatePositionState()
         }
         function onPause() {
             if (!shouldPlayRef.current) setIsPlaying(false)
             setIsBuffering(false)
+            updatePositionState()
         }
-        function onLoadStart() { setIsBuffering(true); setBuffered(0) }
+        function onLoadStart() { setIsBuffering(true); progressStore.update({ buffered: 0 }, { force: true }) }
         function onWaiting() { setIsBuffering(true) }
         function onPlaying() { setIsBuffering(false) }
         function onTimeUpdate() {
-            setCurrentTime(audio!.currentTime)
             lastPositionRef.current = audio!.currentTime
-            if (audio!.buffered.length > 0) setBuffered(audio!.buffered.end(audio!.buffered.length - 1))
+            // Nobody sees the bar while the page is hidden; the return to visible re-syncs it.
+            if (document.visibilityState !== 'hidden') {
+                progressStore.update({
+                    time: audio!.currentTime,
+                    ...(audio!.buffered.length > 0 ? { buffered: audio!.buffered.end(audio!.buffered.length - 1) } : {}),
+                })
+            }
             // Enough real progress past where this load started means the song is
             // genuinely playing, so the failure budget resets.
             if ((failureCountRef.current > 0 || stoppedRef.current)
                 && audio!.currentTime - loadStartPositionRef.current >= readTestOverride('__playerProgressResetSec', PROGRESS_RESET_SEC)) {
                 clearFailureState()
             }
-            updatePositionState()
         }
-        function onDurationChange() { setDuration(audio!.duration); updatePositionState() }
+        // The lock screen extrapolates from the position it was given, so it is only
+        // told on the events that change that line, not on every tick.
+        function onDurationChange() { progressStore.update({ duration: audio!.duration }); updatePositionState() }
         function onError() {
             setIsBuffering(false)
             setIsPlaying(false)
@@ -1489,6 +1527,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         audio.addEventListener('canplay', onCanPlay)
         audio.addEventListener('timeupdate', onTimeUpdate)
         audio.addEventListener('durationchange', onDurationChange)
+        audio.addEventListener('seeked', updatePositionState)
+        audio.addEventListener('ratechange', updatePositionState)
         audio.addEventListener('error', onError)
         return () => {
             audio.removeEventListener('play', onPlay)
@@ -1499,6 +1539,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             audio.removeEventListener('canplay', onCanPlay)
             audio.removeEventListener('timeupdate', onTimeUpdate)
             audio.removeEventListener('durationchange', onDurationChange)
+            audio.removeEventListener('seeked', updatePositionState)
+            audio.removeEventListener('ratechange', updatePositionState)
             audio.removeEventListener('error', onError)
         }
 
@@ -1517,8 +1559,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             const audio = audioRef.current
             if (audio) {
                 setIsPlaying(!audio.paused)
-                setCurrentTime(audio.currentTime)
-                if (isFinite(audio.duration)) setDuration(audio.duration)
+                progressStore.update({
+                    time: audio.currentTime,
+                    ...(isFinite(audio.duration) ? { duration: audio.duration } : {}),
+                }, { force: true })
             }
             const wasHiddenMs = hiddenAt !== null ? Date.now() - hiddenAt : 0
             hiddenAt = null
@@ -1652,17 +1696,40 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     useEffect(() => {
         if (!isPlaying || !current) return
+        const clock = listenClockRef.current
+        clock.start()
         const posTimer = setInterval(() => {
             if (audioRef.current && current) savePosition(current, audioRef.current.currentTime)
         }, 10000)
-        const playTimer = setTimeout(() => {
-            if (current) recordPlay(current.uuid).catch(() => {})
-        }, 30000)
+        const remaining = clock.remainingMs(PLAY_RECORD_AFTER_MS)
+        const loadKey = `${current.uuid}:${loadGenRef.current}`
+        const playTimer = playRecordedRef.current === loadKey ? undefined : setTimeout(() => {
+            playRecordedRef.current = loadKey
+            recordPlay(current.uuid).catch(() => {})
+        }, remaining)
         return () => {
+            clock.stop()
             clearInterval(posTimer)
-            clearTimeout(playTimer)
+            if (playTimer !== undefined) clearTimeout(playTimer)
         }
     }, [isPlaying, current, savePosition])
+
+    // One more save as the page is hidden or closed, so the place is not up to
+    // ten seconds stale when the phone locks or the tab goes.
+    useEffect(() => {
+        function saveNow() {
+            const audio = audioRef.current
+            const song = currentRef.current
+            if (audio && song && !audio.paused) savePosition(song, audio.currentTime, true)
+        }
+        function onVisibility() { if (document.visibilityState === 'hidden') saveNow() }
+        document.addEventListener('visibilitychange', onVisibility)
+        window.addEventListener('pagehide', saveNow)
+        return () => {
+            document.removeEventListener('visibilitychange', onVisibility)
+            window.removeEventListener('pagehide', saveNow)
+        }
+    }, [savePosition])
 
     useEffect(() => {
         if (current) syncMediaSession(current)
@@ -1693,7 +1760,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     useEffect(() => {
         // A failed request is no answer, like a 401: this device's own copy still restores.
-        Promise.all([fetchPlayerStateAtLaunch().catch(() => undefined), fetchLibrarySongsAtLaunch()]).then(async ([answer, libSongs]) => {
+        // The library comes through the shared query cache: the library page's own request
+        // is the same one, so a cold load asks the server once. A server error falls back
+        // to the copy kept from the last good answer, as fetchLibrarySongsAtLaunch does.
+        const librarySongs = queryClient.fetchQuery({ queryKey: queryKeys.librarySongs, queryFn: fetchLibrarySongs })
+            .catch(() => getCachedLibrarySongs())
+        Promise.all([fetchPlayerStateAtLaunch().catch(() => undefined), librarySongs]).then(async ([answer, libSongs]) => {
             const libMap = new Map((libSongs ?? []).map(s => [s.uuid, s]))
             libMapRef.current = libMap
             // Whatever the user picked while the request was out stands; no answer, fresh or
@@ -1802,15 +1874,36 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         showToast('Kept local player state')
     }
 
-    const contextValue = useMemo(() => ({
-        current, isPlaying, queue, shuffle, repeat, playContext,
-        play, pause, resume, skipNext, skipPrev, toggleShuffle, toggleRepeat, insertNext, playNow, removeFromQueue, reorderQueue, onLibraryAdd, onLibraryRemove,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }), [current, isPlaying, queue, shuffle, repeat, playContext])
+    // Consumers read state through the store and call actions through an object
+    // that never changes; the actions it holds are swapped for this render's after
+    // each commit, so a call always runs the latest one.
+    const [playerStore] = useState(createPlayerStore)
+    useLayoutEffect(() => {
+        playerStore.set({ current, isPlaying, queue, shuffle, repeat, playContext })
+    }, [playerStore, current, isPlaying, queue, shuffle, repeat, playContext])
+    const latestActions = useRef<PlayerActions>(null as unknown as PlayerActions)
+    latestActions.current = { play, pause, resume, skipNext, skipPrev, toggleShuffle, toggleRepeat, insertNext, playNow, removeFromQueue, reorderQueue, onLibraryAdd, onLibraryRemove }
+    const [actions] = useState<PlayerActions>(() => ({
+        play: (...a) => latestActions.current.play(...a),
+        pause: () => latestActions.current.pause(),
+        resume: () => latestActions.current.resume(),
+        skipNext: () => latestActions.current.skipNext(),
+        skipPrev: () => latestActions.current.skipPrev(),
+        toggleShuffle: () => latestActions.current.toggleShuffle(),
+        toggleRepeat: () => latestActions.current.toggleRepeat(),
+        insertNext: (...a) => latestActions.current.insertNext(...a),
+        playNow: (...a) => latestActions.current.playNow(...a),
+        removeFromQueue: (...a) => latestActions.current.removeFromQueue(...a),
+        reorderQueue: (...a) => latestActions.current.reorderQueue(...a),
+        onLibraryAdd: (...a) => latestActions.current.onLibraryAdd(...a),
+        onLibraryRemove: (...a) => latestActions.current.onLibraryRemove(...a),
+    }))
 
     return (
-        <PlayerContext.Provider value={contextValue}>
-            <audio ref={audioRef} src={audioSrc || undefined} preload="metadata" playsInline/>
+        <PlayerActionsContext.Provider value={actions}>
+        <PlayerStoreContext.Provider value={playerStore}>
+            {/* src is set on the element by applyAudioSrc, once per track; a src prop would make React set it a second time and the browser reload the file */}
+            <audio ref={audioRef} preload="metadata" playsInline/>
             {children}
             {syncPrompt && (
                 <div data-testid="sync-prompt" className="fixed inset-0 z-[70] flex items-end justify-center bg-black/40">
@@ -1879,9 +1972,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                 <div className="flex-1 flex items-center justify-center">
                                     {(() => {
                                         const a = songArtworkUrl(current.uuid, current.artwork_cached, p.artworkUrl100, 600)
+                                        const stand = <div className="w-full max-w-[72vmin] md:max-w-[min(600px,70vh)] aspect-square rounded-lg bg-gray-100 dark:bg-gray-800 flex items-center justify-center"><FaMusic size={64} className="text-gray-400" /></div>
                                         return a
-                                            ? <Image src={a} alt="" width={480} height={480} className="rounded-lg w-full max-w-[72vmin] md:max-w-[360px] aspect-square object-cover shadow-2xl" unoptimized={!!current.artwork_cached} />
-                                            : <div className="w-full max-w-[72vmin] md:max-w-[360px] aspect-square rounded-lg bg-gray-100 dark:bg-gray-800 flex items-center justify-center"><FaMusic size={64} className="text-gray-400" /></div>
+                                            ? <ArtImage src={a} alt="" width={600} height={600} className="rounded-lg w-full max-w-[72vmin] md:max-w-[min(600px,70vh)] aspect-square object-cover shadow-2xl" unoptimized={!!current.artwork_cached} fallback={stand} />
+                                            : stand
                                     })()}
                                 </div>
                             )}
@@ -1924,7 +2018,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
                             {/* Progress */}
                             <div className="mb-1">
-                                <ProgressBar current={currentTime} duration={duration} buffered={buffered} onSeek={handleSeek} />
+                                <ProgressBar store={progressStore} playing={isPlaying} onSeek={handleSeek} />
                             </div>
 
                             {/* Transport + volume inline */}
@@ -2022,7 +2116,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                         </div>
                     )}
 
-                    <div ref={playerBarRef} data-testid="player-bar" className="fixed bottom-0 left-0 right-0 z-50 bg-[var(--background)]/90 backdrop-blur-md border-t border-gray-100 dark:border-gray-800">
+                    <div ref={playerBarRef} data-testid="player-bar" className="fixed bottom-0 left-0 right-0 z-50 bg-[var(--background)]/90 backdrop-blur-md frosted-bar border-t border-gray-100 dark:border-gray-800">
                         <div className="flex flex-col" style={{ paddingLeft: 'env(safe-area-inset-left, 0px)', paddingRight: 'env(safe-area-inset-right, 0px)', paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
                             {/* Mobile: single row. Desktop: three-column layout */}
                             <div className="flex items-center gap-3 px-4 pt-3 pb-1.5 md:grid md:grid-cols-[1fr_auto_1fr]">
@@ -2033,9 +2127,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                     onClick={() => setShowExpanded(true)}
                                 >
                                     <div data-testid="player-expand-art" className="shrink-0">
-                                        {(() => { const a = songArtworkUrl(current?.uuid, current?.artwork_cached, p.artworkUrl100, 200); return a
-                                            ? <Image src={a} alt="" width={44} height={44} className="rounded w-11 h-11 md:w-9 md:h-9 pointer-events-none" unoptimized={!!current?.artwork_cached} />
-                                            : <div className="w-11 h-11 md:w-9 md:h-9 rounded bg-gray-100 dark:bg-gray-800 flex items-center justify-center pointer-events-none"><FaMusic size={14} className="text-gray-400" /></div>
+                                        {(() => { const a = songArtworkUrl(current?.uuid, current?.artwork_cached, p.artworkUrl100, 200)
+                                            const stand = <div className="w-11 h-11 md:w-9 md:h-9 rounded bg-gray-100 dark:bg-gray-800 flex items-center justify-center pointer-events-none"><FaMusic size={14} className="text-gray-400" /></div>
+                                            return a
+                                                ? <ArtImage src={a} alt="" width={44} height={44} className="rounded w-11 h-11 md:w-9 md:h-9 pointer-events-none" unoptimized={!!current?.artwork_cached} fallback={stand} />
+                                                : stand
                                         })()}
                                     </div>
                                     {(() => {
@@ -2116,12 +2212,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                 </div>
                             </div>
                             <div data-testid="player-progress" className="flex px-4">
-                                <ProgressBar current={currentTime} duration={duration} buffered={buffered} onSeek={handleSeek} />
+                                <ProgressBar store={progressStore} playing={isPlaying} onSeek={handleSeek} />
                             </div>
                         </div>
                     </div>
                 </>
             )}
-        </PlayerContext.Provider>
+        </PlayerStoreContext.Provider>
+        </PlayerActionsContext.Provider>
     )
 }
