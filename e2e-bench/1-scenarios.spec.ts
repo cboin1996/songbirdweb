@@ -143,7 +143,12 @@ test('a seek', async () => {
     await player.next.click()
     await expect.poll(() => player.getTrackName()).not.toBe(before)
     await page.waitForTimeout(6000)
-    results.seek = { all: seen.slice(mark) }
+    // Where the player ended up, so a surprising request offset can be read against it.
+    const played = await page.evaluate(() => {
+        const a = document.querySelector('audio')!
+        return { currentTime: a.currentTime, duration: a.duration }
+    })
+    results.seek = { all: seen.slice(mark), played }
 })
 
 test('search keystrokes', async () => {

@@ -167,6 +167,14 @@ jobs:
           path: lhci-results
           if-no-files-found: ignore
 
+      - name: Upload bench metrics
+        if: always() && matrix.project == 'bench'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-metrics
+          path: bench-results
+          if-no-files-found: ignore
+
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@v4
