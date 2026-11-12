@@ -1,6 +1,6 @@
 /** @jest-environment node */
 // middleware.ts refreshes server-side on a page navigation when the access
-// token has expired. The API now rotates the refresh token on every refresh, so
+// token has expired. The API now rotates the refresh token, so
 // the rotated cookie has to reach the browser; dropping it makes the browser's
 // next refresh look like token reuse and the API revokes the session.
 import { NextRequest } from 'next/server'

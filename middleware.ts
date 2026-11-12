@@ -14,7 +14,7 @@ function isExpired(token: string): boolean {
   }
 }
 
-// The API rotates the refresh token on every refresh and sets both cookies.
+// The API rotates the refresh token (once it is over a minute old) and sets both cookies.
 // Hand its Set-Cookie lines to the browser exactly as sent (they carry the
 // Max-Age and flags the API chose) and remember each cookie's new value so the
 // page being rendered sees the same cookies the browser will hold.
