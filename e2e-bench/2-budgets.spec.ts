@@ -17,6 +17,7 @@ type Metrics = {
     playback: { counts: Counts; layouts: number }
     trackChange: Counts
     trackChangeAudioRequests: number
+    trackChangeAudioRanges: string[]
     playPause: { pause: Counts; resume: Counts }
     toast: Counts
     seek: { all: { status: number; range: string | null; contentRange: string | null; contentLength: string | null }[]; played?: { currentTime: number; duration: number } }
@@ -61,7 +62,8 @@ test('play and pause re-render at most 2 rows each (T3)', () => {
 })
 
 test('a track change asks for the audio once (T5)', () => {
-    expect(m.trackChangeAudioRequests).toBeLessThanOrEqual(1)
+    // Requests from the start of the file; a later range is the browser reading the tail.
+    expect(m.trackChangeAudioRequests, JSON.stringify(m.trackChangeAudioRanges)).toBeLessThanOrEqual(1)
 })
 
 test('a toast re-renders no library rows (T3)', () => {

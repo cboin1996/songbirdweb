@@ -85,11 +85,20 @@ test('playback window', async () => {
 
 test('track change', async () => {
     const before = await player.getTrackName()
-    const requests = watchRequests(page)
+    // Every range the audio was asked for. A second request that starts late in the file is
+    // the browser reading the tail to learn a track's length; only requests that start at
+    // the beginning are the app asking for the song again.
+    const ranges: string[] = []
+    const onRequest = (r: { url(): string; headers(): Record<string, string> }) => {
+        if (r.url().includes('/v1/download/')) ranges.push(r.headers()['range'] ?? '')
+    }
+    page.on('request', onRequest)
     const counts = await countsAfter(page, async () => { await player.next.click() })
     await expect.poll(() => player.getTrackName()).not.toBe(before)
+    page.off('request', onRequest)
     results.trackChange = counts
-    results.trackChangeAudioRequests = requests.since(0).byKind.audio
+    results.trackChangeAudioRanges = ranges
+    results.trackChangeAudioRequests = ranges.filter(r => r === '' || /^bytes=0-/.test(r)).length
 })
 
 test('play and pause', async () => {
