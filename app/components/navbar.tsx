@@ -6,7 +6,7 @@ import { routes } from "../lib/routes";
 
 export default function NavBar() {
     return (
-        <nav className="sticky top-0 z-50 h-11 flex flex-row justify-between items-center bg-[var(--background)]/90 backdrop-blur-md border-b border-gray-100 dark:border-gray-800">
+        <nav className="sticky top-0 z-50 h-11 flex flex-row justify-between items-center bg-[var(--background)]/90 backdrop-blur-md frosted-bar border-b border-gray-100 dark:border-gray-800">
             <div className="flex flex-row gap-4 items-center">
                 <Link href={routes.download} className="flex flex-row gap-2 items-center">
                     <FaDove size="20" className="hover:text-sky-600" />

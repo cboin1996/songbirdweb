@@ -1,5 +1,5 @@
 'use client'
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 
 const ADMIN_KEY = 'songbird:isAdmin'
 
@@ -31,8 +31,11 @@ export function UserProvider({ children, isAdmin, username, userLoaded }: {
     }
   }, [userLoaded, isAdmin])
 
+  const shownAdmin = userLoaded ? isAdmin : cachedAdmin
+  const value = useMemo(() => ({ isAdmin: shownAdmin, username, userLoaded }), [shownAdmin, username, userLoaded])
+
   return (
-    <UserContext.Provider value={{ isAdmin: userLoaded ? isAdmin : cachedAdmin, username, userLoaded }}>
+    <UserContext.Provider value={value}>
       {children}
     </UserContext.Provider>
   )

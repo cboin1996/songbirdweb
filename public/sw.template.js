@@ -1,5 +1,32 @@
 const SHELL_CACHE = 'songbird-shell-v__SW_VERSION__'
+// Artwork seen while browsing: capped, oldest first out. Same names as
+// app/lib/artwork.ts (BROWSE_ARTWORK_CACHE, OFFLINE_ARTWORK_CACHE).
 const ARTWORK_CACHE = 'songbird-artwork-v1'
+// Artwork stored on purpose for offline songs: never trimmed here.
+const SAVED_ARTWORK_CACHE = 'songbird-artwork-saved-v1'
+// Newest entries win: cache.keys() lists oldest first, so the front is trimmed.
+const ARTWORK_MAX_ENTRIES = 2000
+// cache.keys() is O(n), so trim once per this many puts, not on every one.
+const ARTWORK_TRIM_EVERY = 25
+let artworkPuts = 0
+async function trimCache(cache, max) {
+    const keys = await cache.keys()
+    await Promise.all(keys.slice(0, Math.max(0, keys.length - max)).map(k => cache.delete(k)))
+}
+function storeArtwork(cache, request, response) {
+    return cache.put(request, response).then(() => {
+        artworkPuts += 1
+        if (artworkPuts % ARTWORK_TRIM_EVERY === 0) return trimCache(cache, ARTWORK_MAX_ENTRIES)
+    })
+}
+// Saved copies win over browsed ones.
+async function matchArtwork(request) {
+    const saved = await caches.open(SAVED_ARTWORK_CACHE)
+    const hit = await saved.match(request)
+    if (hit) return hit
+    const browse = await caches.open(ARTWORK_CACHE)
+    return browse.match(request)
+}
 // Unlike the shell cache, this name is not versioned with the app. Rename it when
 // copies already stored under the old name must go: activate deletes every cache
 // that is not in its keep list.
@@ -39,7 +66,7 @@ self.addEventListener('install', event => {
 })
 
 self.addEventListener('activate', event => {
-    const keep = new Set([SHELL_CACHE, ARTWORK_CACHE, API_CACHE])
+    const keep = new Set([SHELL_CACHE, ARTWORK_CACHE, SAVED_ARTWORK_CACHE, API_CACHE])
     event.waitUntil(
         caches.keys().then(keys =>
             Promise.all(keys.filter(k => !keep.has(k)).map(k => caches.delete(k)))
@@ -56,21 +83,21 @@ self.addEventListener('fetch', event => {
     if (url.pathname.startsWith('/_next/image')) {
         event.respondWith(
             caches.open(ARTWORK_CACHE).then(async cache => {
-                const cached = await cache.match(event.request)
+                const cached = await matchArtwork(event.request)
                 if (cached) return cached
 
                 const rawUrl = url.searchParams.get('url')
                 if (rawUrl) {
-                    const rawCached = await cache.match(rawUrl)
+                    const rawCached = await matchArtwork(rawUrl)
                     if (rawCached) return rawCached
                 }
 
                 return fetch(event.request).then(r => {
-                    if (r.ok) cache.put(event.request, r.clone())
+                    if (r.ok) storeArtwork(cache, event.request, r.clone())
                     return r
                 }).catch(async () => {
                     if (rawUrl) {
-                        const rawCached = await cache.match(rawUrl)
+                        const rawCached = await matchArtwork(rawUrl)
                         if (rawCached) return rawCached
                     }
                     return Response.error()
@@ -84,10 +111,10 @@ self.addEventListener('fetch', event => {
     if (url.pathname.match(/^\/v1\/songs\/[^/]+\/artwork\//)) {
         event.respondWith(
             caches.open(ARTWORK_CACHE).then(async cache => {
-                const cached = await cache.match(event.request)
+                const cached = await matchArtwork(event.request)
                 if (cached) return cached
                 return fetch(event.request).then(r => {
-                    if (r.ok) cache.put(event.request, r.clone())
+                    if (r.ok) storeArtwork(cache, event.request, r.clone())
                     return r
                 }).catch(() => Response.error())
             })

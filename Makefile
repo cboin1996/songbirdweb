@@ -47,19 +47,25 @@ typecheck:
 build:
 	npm run build
 
-.PHONY: test-e2e
-# Destructive specs (editor, bulk-select, import) run on isolated users (phase 3).
-# Workers=2 is safe: destructive specs can't corrupt the shared test-user library.
-test-e2e:
-	npx playwright test --project=dev --workers=2
+# Raw runners: run the suite against whatever API and web are already up. CI calls
+# these after it starts its own stack; locally use test-e2e* (fresh Docker stack).
+# Destructive specs (editor, bulk-select, import) run on isolated users.
+# E2E_ARGS passes extra Playwright flags, e.g. --shard=1/2.
+.PHONY: e2e-run-dev
+e2e-run-dev:
+	npx playwright test --project=dev --workers=2 $(E2E_ARGS)
 
-.PHONY: test-e2e-prod
-test-e2e-prod:
-	npx playwright test --project=prod --workers=2
+.PHONY: e2e-run-prod
+e2e-run-prod:
+	npx playwright test --project=prod --workers=2 $(E2E_ARGS)
 
-.PHONY: test-e2e-mobile
-test-e2e-mobile:
-	npx playwright test --project=mobile --workers=2
+.PHONY: e2e-run-bench
+e2e-run-bench:
+	npx playwright test --project=bench --workers=1 $(E2E_ARGS)
+
+.PHONY: e2e-run-mobile
+e2e-run-mobile:
+	npx playwright test --project=mobile --workers=2 $(E2E_ARGS)
 
 .PHONY: unit
 unit:
@@ -72,7 +78,10 @@ test: lint typecheck unit
 # Local CI-parity e2e harness — same cboin/songbirdapi:latest Docker image
 # as CI, so local and CI run identical server code.
 # Usage:
-#   make test-e2e-local        # spins up everything, runs dev suite, tears down
+#   make test-e2e              # fresh DB + stack, runs the dev suite (alias of test-e2e-local)
+#   make test-e2e-prod         # fresh DB + stack, runs the prod suite
+#   make test-e2e-mobile       # fresh DB + stack, runs the mobile suite
+#   (the API database is recreated on every run; the Next.js build is reused when fresh)
 #   make e2e-api-up            # start API stack only (postgres + API containers)
 #   make e2e-api-down          # stop and remove containers
 # ----------------------------------------------------------------------------
@@ -144,18 +153,36 @@ e2e-api-down:
 	@docker rm -f $(E2E_API_CONTAINER) $(E2E_PG_CONTAINER) 2>/dev/null || true
 	@docker network rm $(E2E_NETWORK) 2>/dev/null || true
 
+# Production build for e2e. Skipped when .next is newer than every input and was
+# built for the same API URL (the URL is baked in at build time). A rebuild stops
+# the running server first: it would otherwise keep serving chunks that are gone.
+E2E_BUILD_STAMP=.next/.e2e-build-stamp
+E2E_BUILD_KEY=http://localhost:$(E2E_API_PORT)
+E2E_BUILD_INPUTS=app public middleware.ts next.config.ts package.json package-lock.json tsconfig.json postcss.config.mjs $(wildcard .env*)
+
+.PHONY: e2e-build
+e2e-build:
+	@if [ -f .next/BUILD_ID ] && [ "$$(cat $(E2E_BUILD_STAMP) 2>/dev/null)" = "$(E2E_BUILD_KEY)" ] \
+		&& [ -z "$$(find $(E2E_BUILD_INPUTS) -newer .next/BUILD_ID -print -quit)" ]; then \
+		echo "e2e build is fresh, reusing it"; \
+	else \
+		echo "Building Next.js for e2e (production build — no hot-reload watcher)..."; \
+		rm -f $(E2E_BUILD_STAMP); \
+		$(MAKE) --no-print-directory e2e-next-down; \
+		if ! NEXT_PUBLIC_API_BASE_URL=$(E2E_BUILD_KEY) API_BASE_URL=$(E2E_BUILD_KEY) \
+			npm run build > /tmp/songbirdweb-e2e-build.log 2>&1; then \
+			echo "✗ next build failed — check /tmp/songbirdweb-e2e-build.log"; exit 1; \
+		fi; \
+		echo "$(E2E_BUILD_KEY)" > $(E2E_BUILD_STAMP); \
+	fi
+
 .PHONY: e2e-next-up
-e2e-next-up:
+e2e-next-up: e2e-build
 	@curl -sf http://localhost:$(E2E_API_PORT)/v1/version >/dev/null || \
 		(echo "✗ e2e api not reachable on :$(E2E_API_PORT). Run make e2e-api-up first." && exit 1)
 	@if [ -f $(E2E_NEXT_PIDFILE) ] && kill -0 $$(cat $(E2E_NEXT_PIDFILE)) 2>/dev/null; then \
 		echo "e2e next already running (pid=$$(cat $(E2E_NEXT_PIDFILE)))"; \
 	else \
-		echo "Building Next.js for e2e (production build — no hot-reload watcher)..."; \
-		NEXT_PUBLIC_API_BASE_URL=http://localhost:$(E2E_API_PORT) \
-		API_BASE_URL=http://localhost:$(E2E_API_PORT) \
-		npm run build > /tmp/songbirdweb-e2e-build.log 2>&1 || \
-			(echo "✗ next build failed — check /tmp/songbirdweb-e2e-build.log" && exit 1); \
 		nohup env \
 			NEXT_PUBLIC_API_BASE_URL=http://localhost:$(E2E_API_PORT) \
 			API_BASE_URL=http://localhost:$(E2E_API_PORT) \
@@ -174,11 +201,14 @@ e2e-next-down:
 		rm -f $(E2E_NEXT_PIDFILE); \
 	fi
 
-.PHONY: test-e2e-local
-test-e2e-local: e2e-api-up e2e-next-up
-	E2E_WEB_URL=http://localhost:$(E2E_WEB_PORT) \
+# Each local target recreates the API database (e2e-api-down then e2e-api-up), so
+# a run never meets users or songs left by an earlier one. Credentials not set
+# here come from .env.local.
+E2E_LOCAL_ENV = \
+	E2E_SEED_BENCH=1 \
 	E2E_API_BASE_URL=http://localhost:$(E2E_API_PORT) \
 	NEXT_PUBLIC_API_BASE_URL=http://localhost:$(E2E_API_PORT) \
+	API_BASE_URL=http://localhost:$(E2E_API_PORT) \
 	TEST_USERNAME=e2e-testuser \
 	TEST_PASSWORD=e2e-TestPass-9917 \
 	E2E_ADMIN_USERNAME=e2e-admin \
@@ -190,19 +220,42 @@ test-e2e-local: e2e-api-up e2e-next-up
 	E2E_IMPORT_USERNAME=e2e-import \
 	E2E_IMPORT_PASSWORD=e2e-ImportPass-1 \
 	E2E_QUEUE_USERNAME=e2e-queue \
-	E2E_QUEUE_PASSWORD=e2e-QueuePass-1 \
-	npx playwright test --project=dev --workers=2
+	E2E_QUEUE_PASSWORD=e2e-QueuePass-1
+
+.PHONY: test-e2e-local
+test-e2e-local: e2e-api-down e2e-api-up e2e-next-up
+	$(E2E_LOCAL_ENV) E2E_WEB_URL=http://localhost:$(E2E_WEB_PORT) \
+	npx playwright test --project=dev --workers=2 $(E2E_ARGS)
 
 .PHONY: test-e2e-local-mobile
-test-e2e-local-mobile: e2e-api-up e2e-next-up
-	E2E_WEB_URL=http://localhost:$(E2E_WEB_PORT) \
-	E2E_API_BASE_URL=http://localhost:$(E2E_API_PORT) \
-	NEXT_PUBLIC_API_BASE_URL=http://localhost:$(E2E_API_PORT) \
-	TEST_USERNAME=e2e-testuser \
-	TEST_PASSWORD=e2e-TestPass-9917 \
-	E2E_ADMIN_USERNAME=e2e-admin \
-	E2E_ADMIN_PASSWORD=e2e-admin-pass \
-	npx playwright test --project=mobile --workers=2
+test-e2e-local-mobile: e2e-api-down e2e-api-up e2e-next-up
+	$(E2E_LOCAL_ENV) E2E_WEB_URL=http://localhost:$(E2E_WEB_PORT) \
+	npx playwright test --project=mobile --workers=2 $(E2E_ARGS)
+
+# The benchmark project: counts on the 1000-song bench library, one worker.
+.PHONY: test-e2e-local-bench
+test-e2e-local-bench: e2e-api-down e2e-api-up e2e-next-up
+	$(E2E_LOCAL_ENV) E2E_WEB_URL=http://localhost:$(E2E_WEB_PORT) \
+	npx playwright test --project=bench --workers=1 $(E2E_ARGS)
+
+.PHONY: test-e2e-bench
+test-e2e-bench: test-e2e-local-bench
+
+# The prod project serves its own build on :6996; reuse the fresh e2e build.
+.PHONY: test-e2e-local-prod
+test-e2e-local-prod: e2e-api-down e2e-api-up e2e-build
+	$(E2E_LOCAL_ENV) PLAYWRIGHT_SKIP_BUILD=1 \
+	npx playwright test --project=prod --workers=2 $(E2E_ARGS)
+
+# Default names run the fresh-stack harness.
+.PHONY: test-e2e
+test-e2e: test-e2e-local
+
+.PHONY: test-e2e-prod
+test-e2e-prod: test-e2e-local-prod
+
+.PHONY: test-e2e-mobile
+test-e2e-mobile: test-e2e-local-mobile
 
 .PHONY: e2e-down
 e2e-down: e2e-next-down e2e-api-down
@@ -238,3 +291,25 @@ docker-stop-songbirdweb:
 	docker kill $(APP_NAME) || true
 	docker rm $(APP_NAME) || true
 
+
+# Creates the e2e users and the 1000-song bench library: Playwright's global setup
+# does it, so run one cheap test to trigger it.
+.PHONY: e2e-seed
+e2e-seed:
+	$(E2E_LOCAL_ENV) E2E_WEB_URL=http://localhost:$(E2E_WEB_PORT) \
+	npx playwright test --project=bench --workers=1 -g "cold library load"
+
+# Lighthouse CI on the library page against a running stack (make e2e-api-up e2e-next-up).
+# Scores land in lhci-results/; nothing here fails on a millisecond figure.
+# lighthouse-run is the lhci call alone, for CI where the bench leg has already seeded the
+# bench user; `lighthouse` seeds first, for a local stack.
+.PHONY: lighthouse-run
+lighthouse-run:
+	$(E2E_LOCAL_ENV) E2E_WEB_URL=http://localhost:$(E2E_WEB_PORT) \
+	npx lhci autorun --config=lighthouserc.js
+
+.PHONY: lighthouse
+lighthouse: e2e-seed lighthouse-run
+
+.PHONY: test-lighthouse
+test-lighthouse: e2e-api-down e2e-api-up e2e-next-up lighthouse

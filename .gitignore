@@ -51,3 +51,6 @@ data
 
 # generated service worker (built from sw.template.js)
 public/sw.js
+/bench-results/
+/lhci-results/
+/.lighthouseci/

@@ -1,9 +1,11 @@
 import type { Metadata, Viewport } from "next";
+import DeviceSettingsApplier from "./components/device-settings-applier";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import ServiceWorkerRegistrar from "./components/sw-register";
 import OfflineBanner from "./components/offline-banner";
 import QueryProvider from "./components/query-provider";
+import PerfGate from "./components/perf-gate";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -38,6 +40,8 @@ export default function RootLayout({
         <QueryProvider>
           <OfflineBanner />
           <ServiceWorkerRegistrar />
+          <PerfGate />
+          <DeviceSettingsApplier />
           {children}
         </QueryProvider>
       </body>

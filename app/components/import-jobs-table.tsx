@@ -1,4 +1,5 @@
 'use client'
+import { startPoller, pageActive } from '../lib/poller'
 import { useEffect, useImperativeHandle, useRef, useState } from 'react'
 import Link from 'next/link'
 import { FaDove } from 'react-icons/fa6'
@@ -110,8 +111,7 @@ export default function ImportJobsTable({
         })
       } catch {}
     }
-    const interval = setInterval(tick, POLL_INTERVAL_MS)
-    return () => clearInterval(interval)
+    return startPoller({ run: tick, intervalMs: POLL_INTERVAL_MS, canRun: pageActive })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasInFlight, page])
 

@@ -1,4 +1,5 @@
 import { request, type FullConfig } from '@playwright/test'
+import { BENCH_USER, BENCH_PASS, seedBenchLibrary } from './seed-bench'
 const fs = require('fs')
 const path = require('path')
 
@@ -181,7 +182,9 @@ async function globalSetup(config: FullConfig) {
     if (!adminLogin.ok()) throw new Error(`Admin login failed: ${adminLogin.status()}`)
 
     // Fetch users once; create any that are missing.
-    const usersRes = await admin.get(`${API_V1}/admin/users`)
+    // The endpoint pages at 20 by default; ask for the maximum so a database that
+    // already holds more users doesn't look like it is missing ours (409 on register).
+    const usersRes = await admin.get(`${API_V1}/admin/users?limit=200`)
     const usersRaw = usersRes.ok() ? await usersRes.json() : []
     const users: any[] = Array.isArray(usersRaw) ? usersRaw : usersRaw.users ?? []
     const usernames = new Set(users.map((u: any) => u.username))
@@ -200,6 +203,7 @@ async function globalSetup(config: FullConfig) {
         { username: SEARCH_USER, password: SEARCH_PASS },
         { username: ERROR_USER, password: ERROR_PASS },
         { username: OFFLINE_USER, password: OFFLINE_PASS },
+        ...(process.env.E2E_SEED_BENCH ? [{ username: BENCH_USER, password: BENCH_PASS }] : []),
     ]
 
     for (const u of allTestUsers) {
@@ -228,6 +232,12 @@ async function globalSetup(config: FullConfig) {
     // First user does real imports; the rest are duplicate-adds which are fast.
     // Seed the first user sequentially, then parallelize the rest.
     await seedUser(TEST_USER, TEST_PASS, 'test-user', workers)
+
+    // The benchmark user's 1000 synthetic songs reuse the fixture files stored above.
+    if (process.env.E2E_SEED_BENCH) {
+        const seeded = await seedBenchLibrary()
+        console.log(`[global-setup] bench library: ${seeded.skipped ? 'already seeded' : `${seeded.inserted} songs in ${seeded.ms} ms`}`)
+    }
     await Promise.all([
         seedUser(EDITOR_USER, EDITOR_PASS, 'editor-user', workers),
         seedUser(BULK_USER, BULK_PASS, 'bulk-user', workers),

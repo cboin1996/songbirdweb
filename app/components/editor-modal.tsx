@@ -1,4 +1,6 @@
 'use client'
+import { ArtImage } from './art-image'
+import { startPoller, pageActive } from '../lib/poller'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import WaveSurfer from 'wavesurfer.js'
 import RegionsPlugin from 'wavesurfer.js/plugins/regions'
@@ -8,7 +10,8 @@ import {
   addToLibrary, removeFromLibrary, restoreSong, removeServerOfflineSong, uploadSongArtwork, API_V1,
   fetchSongEligibility, SongEligibility, isLosslessEligible,
 } from '../lib/data'
-import { uncacheSong, cacheSong } from '../lib/offline'
+import { uncacheSong, cacheSong, dropStoredArtwork } from '../lib/offline'
+import { bumpArtworkVersion } from '../lib/artwork'
 import { FaPlay, FaPause, FaTimes, FaUndo, FaRedo, FaTrash, FaCut, FaChevronDown } from 'react-icons/fa'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
@@ -135,7 +138,7 @@ export default function EditorModal({
   const paramsRef = useRef<EditParams>(DEFAULT_PARAMS)
   const pendingSnapshotRef = useRef<EditParams | null>(null)
   const regionPreDragRef = useRef<EditParams | null>(null)
-  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const pollIntervalRef = useRef<(() => void) | null>(null)
   const [canUndo, setCanUndo] = useState(false)
   const [canRedo, setCanRedo] = useState(false)
 
@@ -1148,7 +1151,7 @@ export default function EditorModal({
       window.removeEventListener('mouseup', handleRegionDragEnd)
       window.removeEventListener('touchend', handleRegionDragEnd)
       window.removeEventListener('pointerup', handleRegionDragEnd)
-      if (pollIntervalRef.current) { clearInterval(pollIntervalRef.current); pollIntervalRef.current = null }
+      if (pollIntervalRef.current) { pollIntervalRef.current(); pollIntervalRef.current = null }
       if (waveRafRef.current) { cancelAnimationFrame(waveRafRef.current); waveRafRef.current = null }
       if (wsPlayRafRef.current !== null) { cancelAnimationFrame(wsPlayRafRef.current); wsPlayRafRef.current = null }
       peaksRef.current = null
@@ -1965,20 +1968,20 @@ export default function EditorModal({
     }
     if (!job) { setJobStatus('idle'); showToast('failed to start save', true); return }
     setJobStatus('polling')
-    if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
+    if (pollIntervalRef.current) pollIntervalRef.current()
     let attempts = 0
-    pollIntervalRef.current = setInterval(async () => {
+    pollIntervalRef.current = startPoller({ intervalMs: 1500, canRun: pageActive, run: async () => {
       attempts++
       const result = await pollEditJob(job.job_id)
       if (!result || attempts > 60) {
-        clearInterval(pollIntervalRef.current!)
+        pollIntervalRef.current?.()
         pollIntervalRef.current = null
         setJobStatus('idle')
         showToast('save timed out', true, result?.error ?? undefined)
         return
       }
       if (result.status === 'done') {
-        clearInterval(pollIntervalRef.current!)
+        pollIntervalRef.current?.()
         pollIntervalRef.current = null
         setJobStatus('done')
         if (isLossless && result.lossless === false) {
@@ -2000,12 +2003,12 @@ export default function EditorModal({
         router.push(`${routes.library}?song=${landId}`)
       }
       if (result.status === 'failed') {
-        clearInterval(pollIntervalRef.current!)
+        pollIntervalRef.current?.()
         pollIntervalRef.current = null
         setJobStatus('idle')
         showToast('save failed', true, result.error ?? undefined)
       }
-    }, 1500)
+    } })
   }
 
   function paramsChanged(p: EditParams) {
@@ -2330,7 +2333,7 @@ export default function EditorModal({
         {/* header */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 dark:border-gray-800 shrink-0">
           {artSrc && (
-            <Image src={artSrc} alt="" width={36} height={36} className="rounded shrink-0 object-cover" unoptimized={!!artworkCached} />
+            <ArtImage src={artSrc} alt="" width={36} height={36} className="rounded shrink-0 object-cover" unoptimized={!!artworkCached} fallback={null} />
           )}
           <div className="flex-1 min-w-0">
             <p className="font-medium truncate text-base">{props.trackName}</p>
@@ -2856,6 +2859,9 @@ export default function EditorModal({
                     setArtworkUploadStatus('uploading')
                     try {
                       await uploadSongArtwork(songId, file)
+                      // New URLs for this song's local art, and the stored copies of the old ones dropped.
+                      bumpArtworkVersion(songId)
+                      void dropStoredArtwork(songId)
                       setArtworkUploadStatus('done')
                       setProps(p => ({ ...p, artworkUrl100: `${API_V1}/songs/${songId}/artwork` }))
                       setArtworkPreviewError(false)

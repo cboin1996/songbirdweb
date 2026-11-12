@@ -33,6 +33,8 @@ function boot(fetchImpl: (url: string) => Promise<FakeResponse>) {
             return {
                 put: async (k: unknown, r: FakeResponse) => { store.set(keyOf(k), r) },
                 match: async (k: unknown) => store.get(keyOf(k)),
+                keys: async () => [...store.keys()].map(url => ({ url })),
+                delete: async (k: unknown) => store.delete(keyOf(k)),
             }
         },
         match: async (k: unknown) => { for (const s of stores.values()) if (s.has(keyOf(k))) return s.get(keyOf(k)) },
@@ -51,6 +53,12 @@ function boot(fetchImpl: (url: string) => Promise<FakeResponse>) {
 
     return {
         stores,
+        open: (name: string) => caches.open(name),
+        async activate() {
+            let work: Promise<unknown> = Promise.resolve()
+            handlers.activate({ waitUntil: (p: Promise<unknown>) => { work = p } })
+            await work
+        },
         async install(): Promise<'installed' | Error> {
             let work: Promise<unknown> = Promise.resolve()
             handlers.install({ waitUntil: (p: Promise<unknown>) => { work = p } })
@@ -129,5 +137,40 @@ describe('in-app page data', () => {
     it('is left to the network: a page that cannot load it falls back to a full page load', async () => {
         const sw = boot(async () => ok())
         expect((await sw.request('/library?_rsc=abc123')).handled).toBe(false)
+    })
+})
+
+describe('artwork', () => {
+    const SAVED = 'songbird-artwork-saved-v1'
+    const BROWSE = 'songbird-artwork-v1'
+
+    it('answers from the saved cache before the network, and offline', async () => {
+        let up = true
+        const sw = boot(async () => { if (!up) throw new TypeError('network'); return new FakeResponse('net') })
+        const saved = await (sw as unknown as { open(n: string): Promise<{ put(k: string, r: FakeResponse): Promise<void> }> }).open(SAVED)
+        await saved.put('https://is1.mzstatic.com/a/200x200bb.jpg', new FakeResponse('saved'))
+        up = false
+        const r = await sw.request(`/_next/image?url=${encodeURIComponent('https://is1.mzstatic.com/a/200x200bb.jpg')}&w=200&q=75`)
+        expect(r.handled && r.response.body).toBe('saved')
+    })
+
+    it('keeps the saved cache when the worker activates', async () => {
+        const sw = boot(async () => ok())
+        sw.stores.set(SAVED, new Map([['x', ok()]]))
+        await sw.activate()
+        expect(sw.stores.has(SAVED)).toBe(true)
+    })
+
+    it('trims browsed artwork to the cap every 25th put and never touches saved copies', async () => {
+        const sw = boot(async () => new FakeResponse('img'))
+        sw.stores.set(SAVED, new Map([['/v1/songs/keep/artwork/full', ok()]]))
+        for (let i = 0; i < 2025; i++) {
+            await sw.request(`/v1/songs/s${i}/artwork/thumb`)
+            await Promise.resolve()
+        }
+        await new Promise(r => setTimeout(r, 0))
+        expect(sw.stores.get(BROWSE)!.size).toBeLessThanOrEqual(2000 + 24)
+        expect(sw.stores.get(BROWSE)!.size).toBeGreaterThan(1990)
+        expect(sw.stores.get(SAVED)!.size).toBe(1)
     })
 })

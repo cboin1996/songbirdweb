@@ -34,9 +34,17 @@ const projects: ProjectCfg[] = [
     use: { ...devices['Desktop Chrome'], baseURL: PROD_URL, storageState: { cookies: [], origins: [] } },
   },
   {
+    name: 'bench',
+    testDir: './e2e-bench',
+    // Counts renders, requests and layouts on the 1000-song bench library. One worker, in order.
+    fullyParallel: false,
+    use: { ...devices['Desktop Chrome'], baseURL: DEV_URL },
+  },
+  {
     name: 'mobile',
     testDir: './e2e-mobile',
-    use: { ...devices['iPhone 13'], baseURL: DEV_URL },
+    // E2E_MOBILE_CHROMIUM=1 runs the phone viewport in Chromium, for machines without WebKit's system libraries.
+    use: { ...devices['iPhone 13'], ...(process.env.E2E_MOBILE_CHROMIUM ? { defaultBrowserType: 'chromium' as const } : {}), baseURL: DEV_URL },
   },
 ]
 
@@ -55,7 +63,8 @@ export default defineConfig({
   },
   projects,
   webServer: isProd ? {
-    command: 'npm run build && npm run start -- -p 6996',
+    // PLAYWRIGHT_SKIP_BUILD: the Makefile already built (or reused) a fresh build.
+    command: `${process.env.PLAYWRIGHT_SKIP_BUILD ? '' : 'npm run build && '}npm run start -- -p 6996`,
     url: PROD_URL,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,

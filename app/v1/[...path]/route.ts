@@ -12,6 +12,12 @@ async function proxyImpl(req: NextRequest) {
     if (cookie) headers.set('cookie', cookie)
     const auth = req.headers.get('authorization')
     if (auth) headers.set('authorization', auth)
+    // Seeking and resuming audio ask for byte ranges and revalidate with etags;
+    // without these the API sends the whole file every time.
+    for (const name of ['range', 'if-range', 'if-none-match', 'if-modified-since']) {
+        const v = req.headers.get(name)
+        if (v) headers.set(name, v)
+    }
     const contentType = req.headers.get('content-type') ?? ''
 
     const hasBody = req.method !== 'GET' && req.method !== 'HEAD'
@@ -30,9 +36,8 @@ async function proxyImpl(req: NextRequest) {
 
     // Forward headers that affect how the browser handles the response.
     // 'content-disposition' makes downloads save to disk instead of playing
-    // inline; range/accept-ranges are required for media seeking. Do NOT
-    // forward content-length: Next computes its own from the stream and
-    // forwarding the upstream value can mismatch and 500.
+    // inline; range/accept-ranges are required for media seeking.
+    // content-length is forwarded below only when the body is sent as is.
     const FORWARD_HEADERS = [
         'set-cookie',
         'content-type',
@@ -48,6 +53,12 @@ async function proxyImpl(req: NextRequest) {
         const v = res.headers.get(name)
         if (v) resHeaders.set(name, v)
     }
+
+    // Next measures a streamed body itself, so a length is only passed on when
+    // it still describes the bytes sent: fetch() decompresses a gzip/br body,
+    // which makes the upstream length wrong and can break the response.
+    const length = res.headers.get('content-length')
+    if (length && !res.headers.get('content-encoding')) resHeaders.set('content-length', length)
 
     return new NextResponse(res.body, { status: res.status, headers: resHeaders })
 }

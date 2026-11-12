@@ -382,4 +382,67 @@ test.describe('library page', () => {
         expect(activePx).toBeGreaterThan(inactivePx)
     })
 
+    // Rows keep the handlers they mounted with, so these two check that a tap acts
+    // on the view and the order on screen now. The library answer is renamed so the
+    // songs under test stay mounted across the change (same letter section).
+    type Song = { uuid: string; properties?: { trackName: string; artistName: string } | null }
+    async function renameLibrary(page: Page, rename: (songs: Song[]) => void) {
+        await page.route('**/v1/songs/library', async route => {
+            const res = await route.fetch()
+            const songs = await res.json() as Song[]
+            rename(songs)
+            await route.fulfill({ response: res, json: songs })
+        })
+    }
+    const cardOf = (page: Page, uuid: string) => page.locator(`[data-testid="song-card"][data-song-id="${uuid}"]`)
+
+    test('a song tapped after switching to artists is queued from Artists', async ({ page }) => {
+        let id = ''
+        await renameLibrary(page, songs => {
+            const s = songs.find(x => x.properties)!
+            id = s.uuid
+            s.properties = { ...s.properties!, trackName: 'Zz same letter', artistName: 'Zz artist' }
+        })
+        const lib = new LibraryPage(page)
+        const player = new PlayerBar(page)
+        await lib.goto()
+        await expect.poll(() => id, { timeout: 10000 }).not.toBe('')
+        await expect(cardOf(page, id)).toBeVisible({ timeout: 10000 })
+        await page.waitForLoadState('networkidle')
+
+        await lib.tab('artists').click()
+        await expect(page).toHaveURL(/view=artists/, { timeout: 10000 })
+        await cardOf(page, id).click()
+
+        await player.waitForBar()
+        await expect(player.contextLink(/from artists/i)).toBeVisible({ timeout: 5000 })
+    })
+
+    test('a shift-click range after a search covers only the songs shown', async ({ page }) => {
+        const ids: string[] = []
+        const names = ['Aaa match one', 'Abb hidden', 'Acc match two']
+        await renameLibrary(page, songs => {
+            ids.length = 0 // the library may be fetched more than once
+            songs.filter(x => x.properties).slice(0, 3).forEach((s, i) => {
+                ids.push(s.uuid)
+                s.properties = { ...s.properties!, trackName: names[i], artistName: 'Qq' }
+            })
+        })
+        const lib = new LibraryPage(page)
+        await lib.goto()
+        await expect.poll(() => ids.length, { timeout: 10000 }).toBe(3)
+        await expect(cardOf(page, ids[2])).toBeVisible({ timeout: 10000 })
+        // A later library answer re-renders every row, which would hide a stale handler.
+        await page.waitForLoadState('networkidle')
+
+        await lib.enterSelectMode()
+        await expect(lib.cancelBtn).toBeVisible({ timeout: 3000 })
+        await lib.searchInput.fill('match')
+        await expect(lib.songCards).toHaveCount(2)
+
+        await cardOf(page, ids[0]).click()
+        await cardOf(page, ids[2]).click({ modifiers: ['Shift'] })
+        await expect(lib.selectedCount()).toHaveText('2 selected')
+    })
+
 })

@@ -88,7 +88,7 @@ npm run start
 DevTools tips:
 
 - Application → Service Workers → check "Update on reload" while iterating.
-- Application → Cache Storage → inspect the `songbird-shell-vX` and `songbird-artwork-v1` caches.
+- Application → Cache Storage → inspect the `songbird-shell-vX`, `songbird-artwork-v1` (browsed art, capped) and `songbird-artwork-saved-v1` (art stored for offline songs) caches.
 - Network tab → "Offline" mode tests the OfflineGuard fallback. It does not reproduce a dead zone (a connection that reports online and fails every request); the e2e helper `enterDeadZone` does.
 - Application → Storage → "Clear site data" wipes cookies, OPFS, IndexedDB — useful after `dev-wipe` on the API side.
 
@@ -98,30 +98,33 @@ DevTools tips:
 npm test               # Jest (unit); CI runs it as `make unit`
 npm run lint           # next lint (ESLint)
 
-# E2E — recommended (CI-parity Docker harness, isolated API + Postgres)
-make test-e2e-local        # dev project (Desktop Chrome on prod build)
-make test-e2e-local-mobile  # mobile project (iPhone 13 viewport)
+# E2E: fresh Docker API + Postgres on ports 8001/3001, same image as CI
+make test-e2e              # dev suite (alias of test-e2e-local)
+make test-e2e-prod         # prod build: service worker, offline, session
+make test-e2e-mobile       # mobile viewport suite (E2E_MOBILE_CHROMIUM=1 if WebKit libraries are missing)
+make test-e2e-bench        # performance benchmark and budgets on the 1000-song user
+make lighthouse            # Lighthouse CI on the library page (seeds first; lighthouse-run skips the seeding)
 make e2e-down              # tear down containers when done
 
-# E2E — against your local dev API on :8000 (faster iteration)
-make test-e2e              # dev project (single worker)
-make test-e2e-mobile       # mobile project
-make test-e2e-prod         # service worker + offline (prod project)
+# Extra Playwright flags
+make test-e2e E2E_ARGS="e2e/library.spec.ts"
 
 npm run test:e2e           # raw Playwright (no harness, no env injection)
 ```
 
-`make test-e2e-local` is the canonical way to run e2e — same image and seeded data as
-CI. `make test-e2e` is for fast iteration against your own dev API. See
-[`e2e/README.md`](e2e/README.md) for project layout, env vars, and conventions.
+The make targets build the app for the e2e run once and reuse it while no input is newer
+(`make e2e-build`). They need no local API on :8000. The `e2e-run-*` targets run a project
+against a stack you started yourself. See [`e2e/README.md`](e2e/README.md) for project layout,
+env vars, and conventions; the benchmark and budgets are described in the README's testing section.
 
 ## Pre-PR checklist
 
 - [ ] Branch is off `main` and up to date (`git fetch && git rebase origin/main`).
 - [ ] `npm run lint` passes.
 - [ ] `npm test` green.
-- [ ] If you touched the player or offline path, also run `make test-e2e-local` locally.
+- [ ] If you touched the player or offline path, also run `make test-e2e` locally.
 - [ ] If you touched the SW or service-worker registration, do a manual `npm run build && npm run start` smoke (offline + online navigation, login flow, artwork load).
+- [ ] If you touched the player, library lists or images, run `make test-e2e-bench`: the budgets must hold.
 - [ ] If you added an env var, update `docs/ENV.md` and any `.env.*` placeholders.
 - [ ] If you added a route, update `docs/ARCHITECTURE.md`'s route map and `nav-links.tsx`.
 - [ ] Commit messages follow the semantic style (no `Co-Authored-By`, no Claude attribution).

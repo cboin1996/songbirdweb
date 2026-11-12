@@ -57,6 +57,17 @@ test.describe('player bar', () => {
         expect(errors).toHaveLength(0)
     })
 
+    test('the progress fill glides while playing and is still when paused', async ({ page }) => {
+        const player = new PlayerBar(page)
+        await startPlayback(page)
+        const fill = page.getByTestId('player-progress').locator('[data-smooth]')
+        await expect(fill).toHaveAttribute('data-smooth', 'true', { timeout: 15000 })
+        await expect(fill).toHaveClass(/transition-\[width\]/)
+        await player.playPause.click()
+        await expect(fill).toHaveAttribute('data-smooth', 'false', { timeout: 5000 })
+        await expect(fill).not.toHaveClass(/transition-\[width\]/)
+    })
+
     test('shuffle button toggles active class', async ({ page }) => {
         const player = new PlayerBar(page)
         await startPlayback(page)
@@ -160,6 +171,24 @@ test.describe('player bar', () => {
             await page.mouse.click(box.x + box.width * 0.5, box.y + box.height / 2)
         }
         expect(errors).toHaveLength(0)
+    })
+
+    test('a seek moves the clock and the bar at once, even twice inside one second', async ({ page }) => {
+        const player = new PlayerBar(page)
+        await startPlayback(page)
+        // Pause so playback does not move the clock on its own.
+        await player.playPause.click()
+        const box = (await player.progress.boundingBox())!
+        const audioTime = () => page.evaluate(() => document.querySelector('audio')!.currentTime)
+        const barPct = () => player.progress.locator('div.bg-sky-500').first().evaluate(el => parseFloat((el as HTMLElement).style.width))
+        const duration = await page.evaluate(() => document.querySelector('audio')!.duration)
+
+        for (const fraction of [0.5, 0.5 + 0.4 / duration, 0.2]) {
+            await page.mouse.click(box.x + 70 + (box.width - 140) * fraction, box.y + box.height / 2)
+            const t = await audioTime()
+            await expect.poll(() => barPct()).toBeCloseTo((t / duration) * 100, 0)
+            await expect.poll(() => player.getProgressSeconds()).toBe(Math.floor(t))
+        }
     })
 
     test('timestamps render in M:SS format', async ({ page }) => {

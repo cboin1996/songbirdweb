@@ -5,7 +5,7 @@
 Source-of-truth references in code:
 
 - `next.config.ts` — exports `NEXT_PUBLIC_APP_VERSION`, sets up rewrites, image domains, and the 100 MB middleware body limit.
-- `middleware.ts` — uses `process.env.NEXT_PUBLIC_API_HOST` for `auth/refresh` calls during SSR.
+- `middleware.ts` — uses `API_BASE_URL` (falling back to `NEXT_PUBLIC_API_HOST`) for `auth/refresh` calls during SSR.
 - `app/lib/data.ts` — uses `API_BASE_URL` server-side and `NEXT_PUBLIC_API_BASE_URL` client-side to build `BASE_URL`.
 - `app/v1/[...path]/route.ts` — uses `API_BASE_URL` for the dev proxy.
 
@@ -14,11 +14,18 @@ Source-of-truth references in code:
 | Variable | Build-time? | Runtime? | Default | Where used | Purpose |
 |---|---|---|---|---|---|
 | `NEXT_PUBLIC_API_BASE_URL` | yes (inlined into client bundle) | yes (read by client code) | `''` (same-origin via `/v1` proxy) | `app/lib/data.ts` | Client-side API base URL. Empty string makes the browser hit same-origin `/v1/...` and rely on the proxy / nginx. Set to e.g. `https://api.example.com` to bypass the proxy. |
-| `API_BASE_URL` | no | yes (server only) | `http://localhost:8000` | `app/lib/data.ts`, `app/v1/[...path]/route.ts`, `next.config.ts` rewrites | Server-side API base URL — used by RSC fetches, the `/v1` proxy, and the artwork rewrite. In Docker (keebox), set to `http://songbirdapi:8000` so the web container talks to the API container over the Docker network. |
-| `NEXT_PUBLIC_API_HOST` | yes | yes | `localhost` | `middleware.ts` | Constructs `http://${NEXT_PUBLIC_API_HOST}:8000` for the SSR `/v1/auth/refresh` call from middleware. Note: this is the **only** place the host shape is hardcoded; if you ever change the API port, change this and `API_BASE_URL` together. |
+| `API_BASE_URL` | no | yes (server only) | `http://localhost:8000` | `app/lib/data.ts`, `app/v1/[...path]/route.ts`, `middleware.ts`, `next.config.ts` rewrites | Server-side API base URL — used by RSC fetches, the `/v1` proxy (which forwards range and conditional headers), the middleware's session refresh, and the artwork rewrite. In Docker (keebox), set to `http://songbirdapi:8000` so the web container talks to the API container over the Docker network. |
+| `NEXT_PUBLIC_API_HOST` | yes | yes | `localhost` | `middleware.ts` | Fallback when `API_BASE_URL` is unset: constructs `http://${NEXT_PUBLIC_API_HOST}:8000` for the SSR `/v1/auth/refresh` call from middleware. Note: this is the **only** place the host shape is hardcoded; if you ever change the API port, change this and `API_BASE_URL` together. |
 | `NEXT_PUBLIC_APP_VERSION` | yes | yes | `process.env.npm_package_version` (set by `next build`) | UI footer / about page | Auto-injected from `package.json` via `next.config.ts → env`. Don't set this manually. |
 | `TEST_USERNAME` | no | no (test only) | — | `e2e/*.spec.ts` (Playwright) | Login username for e2e tests. Stored in `.env.local`, not committed. |
 | `TEST_PASSWORD` | no | no (test only) | — | Playwright | Password for the e2e user. |
+| `E2E_SEED_BENCH` | no | no (test only) | unset (set by the make targets and CI) | `e2e/global-setup.ts`, bench and perf specs | Seeds the 1000-song bench user. Specs that read it skip when unset locally and fail when unset in CI. |
+| `E2E_BENCH_USERNAME` / `E2E_BENCH_PASSWORD` | no | no (test only) | `e2e-bench` / `e2e-BenchPass-1` (CI) | `e2e/seed-bench.ts`, `scripts/lhci-login.js` | Login of the bench user. |
+| `E2E_WEB_URL` | no | no (test only) | `http://localhost:3000` | `playwright.config.ts`, `lighthouserc.js` | Where the dev, mobile and bench projects and Lighthouse reach the web app. The make targets set it to the e2e web port. |
+| `E2E_PG_CONTAINER` | no | no (test only) | `songbirdweb-e2e-postgres` | `e2e/global-setup.ts` | Docker container the seeding reaches with `docker exec`. |
+| `E2E_MOBILE_CHROMIUM` | no | no (test only) | unset | `playwright.config.ts` | `1` runs the mobile project's phone viewport in Chromium, for machines without WebKit's system libraries. |
+| `PLAYWRIGHT_SKIP_BUILD` | no | no (test only) | unset | `playwright.config.ts` | `1` starts the prod project's server without building first (the make target has already built or reused one). |
+| `E2E_ARGS` | no | no (make only) | empty | `Makefile` | Extra Playwright flags for the `make test-e2e*` targets. |
 
 > **Build-time vs runtime:** `NEXT_PUBLIC_*` is baked into the JS bundle when you run `next build`. Changing it requires a rebuild. The non-public ones (`API_BASE_URL`) are read fresh on every request, so a container restart with new env is enough.
 

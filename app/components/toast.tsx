@@ -1,5 +1,5 @@
 'use client'
-import { createContext, useCallback, useContext, useRef, useState } from 'react'
+import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react'
 import { FaCopy, FaCheck } from 'react-icons/fa'
 
 interface ToastContextValue {
@@ -54,8 +54,11 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         setTimeout(() => setCopied(false), 1500)
     }, [toast])
 
+    // The same object for the provider's life, so showing a toast re-renders no consumer.
+    const value = useMemo(() => ({ showToast }), [showToast])
+
     return (
-        <ToastContext.Provider value={{ showToast }}>
+        <ToastContext.Provider value={value}>
             {children}
             {toast && (
                 <div onClick={dismiss} data-testid={toast.error ? 'toast-error' : 'toast'} className={`fixed bottom-48 left-1/2 -translate-x-1/2 z-[80] px-4 py-2 rounded-full text-xs font-medium shadow-lg cursor-pointer max-w-[90vw] flex items-center gap-2 ${toast.error ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' : 'bg-gray-100 text-gray-900 dark:bg-gray-900 dark:text-white'}`}>

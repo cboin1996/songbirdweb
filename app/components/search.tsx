@@ -1,4 +1,5 @@
 'use client'
+import { useIsDesktop } from "../lib/use-is-desktop"
 import { useSearchParams, useRouter, usePathname } from "next/navigation"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query"
@@ -28,14 +29,7 @@ export default function Search() {
     const inputRef = useRef<HTMLInputElement>(null)
     const queryClient = useQueryClient()
 
-    const [isDesktop, setIsDesktop] = useState(false)
-    useEffect(() => {
-        const mq = window.matchMedia('(min-width: 768px)')
-        setIsDesktop(mq.matches)
-        const handler = (e: MediaQueryListEvent) => setIsDesktop(e.matches)
-        mq.addEventListener('change', handler)
-        return () => mq.removeEventListener('change', handler)
-    }, [])
+    const isDesktop = useIsDesktop()
 
     const [text, setText] = useState(searchParams.get('query') ?? '')
     const [mode, setMode] = useState<Mode>((searchParams.get('mode') as Mode) ?? 'song')
@@ -88,7 +82,11 @@ export default function Search() {
             params.delete('query')
         }
         params.set('mode', mode)
-        router.replace(`${routes.download}?${params.toString()}`)
+        const url = `${routes.download}?${params.toString()}`
+        // Typing on the download page itself only changes the URL text: no server
+        // round trip per keystroke. From another page it is a real navigation.
+        if (pathname === routes.download) window.history.replaceState(null, '', url)
+        else router.replace(url)
     }
 
     function handleModeChange(m: Mode) {
@@ -112,7 +110,7 @@ export default function Search() {
 
     return (
         <>
-            <form onSubmit={handleSubmit} className="sticky top-11 z-40 bg-[var(--background)]/90 backdrop-blur-md border-b border-gray-100 dark:border-gray-800 px-2">
+            <form onSubmit={handleSubmit} className="sticky top-11 z-40 bg-[var(--background)]/90 backdrop-blur-md frosted-bar border-b border-gray-100 dark:border-gray-800 px-2">
                 <div className="flex flex-wrap gap-2 py-3 items-center">
                     {MODES.map(m => (
                         <button

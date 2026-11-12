@@ -19,14 +19,14 @@ The recommended path is the **CI-parity Docker harness** — same image, same po
 seed data as CI:
 
 ```bash
-make test-e2e-local         # project=dev (default)
-make test-e2e-local-mobile  # project=mobile
+make test-e2e         # project=dev
+make test-e2e-prod    # project=prod
+make test-e2e-mobile  # project=mobile
 ```
 
-The harness brings up an isolated API on `:8001` and a Next prod build on `:3001` and
-runs Playwright with `--workers=4`. Bring it down with `make e2e-next-down` /
-`make e2e-api-down` between code changes (otherwise the harness reuses the prior
-build).
+The harness recreates an isolated API and database on `:8001` on every run, and serves a
+Next prod build on `:3001`. The build is reused when nothing it depends on has changed;
+`make e2e-down` stops everything. `E2E_ARGS` passes extra Playwright flags.
 
 For non-Docker iteration:
 

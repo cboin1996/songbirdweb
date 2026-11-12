@@ -4,7 +4,7 @@
 // the rotated cookie has to reach the browser; dropping it makes the browser's
 // next refresh look like token reuse and the API revokes the session.
 import { NextRequest } from 'next/server'
-import { middleware } from '../middleware'
+import { middleware, config } from '../middleware'
 
 const fetchMock = jest.fn()
 
@@ -124,5 +124,33 @@ describe('middleware refresh', () => {
         expect(response.status).toBe(200)
         expect(response.headers.get('x-middleware-next')).toBe('1')
         expect(response.headers.get('location')).toBeNull()
+    })
+})
+
+// Next turns the matcher into a regex over the path; the same shape is built here.
+describe('which requests the middleware sees', () => {
+    const matcher = new RegExp(`^${config.matcher[0]}$`)
+
+    it.each(['/library', '/explore', '/settings', '/v1/download/abc.mp3'])('runs for %s', (path) => {
+        expect(matcher.test(path)).toBe(true)
+    })
+
+    it.each([
+        '/v1/songs/library', '/v1/player/state', '/v1/library/abc/position',
+        '/v1/auth/refresh', '/v1/share/tok/info', '/_next/static/chunk.js', '/sw.js',
+    ])('skips %s', (path) => {
+        expect(matcher.test(path)).toBe(false)
+    })
+})
+
+describe('where the middleware refreshes', () => {
+    it('uses the API base the app is configured with', async () => {
+        jest.resetModules()
+        process.env.API_BASE_URL = 'http://api.internal:9000'
+        const { middleware: fresh } = await import('../middleware')
+        apiResponds(200, [ACCESS_LINE, REFRESH_LINE])
+        await fresh(pageRequest())
+        expect(fetchMock.mock.calls[0][0]).toBe('http://api.internal:9000/v1/auth/refresh')
+        delete process.env.API_BASE_URL
     })
 })

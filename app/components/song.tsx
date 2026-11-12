@@ -1,4 +1,5 @@
 'use client'
+import { addSongToLibraryCache, removeSongFromLibraryCache } from '../lib/library-cache'
 import { memo, useRef, useState, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { createPortal } from "react-dom";
@@ -8,7 +9,9 @@ import { queryKeys } from "../lib/query-keys";
 import { cacheSong, uncacheSong } from "../lib/offline";
 import { FaBookmark, FaRegBookmark, FaEllipsisV, FaLock, FaCloudDownloadAlt } from "react-icons/fa";
 import Image from "next/image";
-import { usePlayer } from "./player";
+import { usePlayerActions, usePlayerSelector, usePlayerStateNow } from "./player";
+import { isCurrentSelector } from "../lib/player-store";
+import { useRenderCount } from "../lib/perf";
 import { useToast } from "./toast";
 import { routes, editSongRoute } from "../lib/routes";
 import { useUser } from "../lib/user-context";
@@ -36,6 +39,7 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
     hasDraft?: boolean,
     isEligible?: boolean,
 }) {
+    useRenderCount('row')
     const { isAdmin } = useUser()
     const online = useOnline()
     const router = useRouter()
@@ -53,7 +57,10 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
     const kebabRef = useRef<HTMLButtonElement>(null)
     const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
     const kebabJustClosed = useRef(false)
-    const { play, pause, resume, current, isPlaying, insertNext, onLibraryAdd, onLibraryRemove } = usePlayer()
+    // Only "is my song current" re-renders a row; whether it plays is read on a tap.
+    const { pause, resume, insertNext, onLibraryAdd, onLibraryRemove } = usePlayerActions()
+    const playerNow = usePlayerStateNow()
+    const isCurrentSong = usePlayerSelector(isCurrentSelector(song.songId))
     const { showToast } = useToast()
     const queryClient = useQueryClient()
     const pathname = usePathname()
@@ -63,7 +70,6 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
             : pathname.includes(routes.download) ? { label: 'Downloads', href, id: 'downloads' }
             : { label: 'Library', href, id: 'library' }
     }
-    const isCurrentSong = current?.uuid === song.songId
     const [artworkFailed, setArtworkFailed] = useState(false)
     useEffect(() => { setArtworkFailed(false) }, [song.songId])
 
@@ -80,8 +86,8 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
             if (inLibrary) await removeFromLibrary(song.songId)
             else await addToLibrary(song.songId)
             setInLibrary(prev => !prev)
-            queryClient.invalidateQueries({ queryKey: queryKeys.library })
-            queryClient.invalidateQueries({ queryKey: queryKeys.librarySongs })
+            if (inLibrary) removeSongFromLibraryCache(queryClient, song.songId)
+            else addSongToLibraryCache(queryClient, { uuid: song.songId, properties: song.properties, artwork_cached: song.artworkCached })
             if (inLibrary) {
                 onRemove?.()
                 onLibraryRemove(song.songId!)
@@ -112,7 +118,7 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
             return
         }
         if (song.songId && isCurrentSong) {
-            if (isPlaying) pause()
+            if (playerNow().isPlaying) pause()
             else resume()
         } else {
             onClick(e)
@@ -446,7 +452,7 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
                     <div className={`flex flex-row rounded-lg min-w-0 transition-all ${selectMode ? 'ml-8' : ''}`}>
                         <div className="shrink-0">
                             {artSrc(400) ? (
-                                <Image className="rounded-md object-contain w-16 h-16 md:w-24 md:h-24" alt="" src={artSrc(400)!} width={96} height={96} unoptimized={song.artworkCached && !artworkFailed} onError={() => setArtworkFailed(true)} />
+                                <Image className="rounded-md object-contain w-16 h-16 md:w-24 md:h-24" alt="" src={artSrc(200)!} width={96} height={96} unoptimized={song.artworkCached && !artworkFailed} onError={() => setArtworkFailed(true)} />
                             ) : (
                                 <div className="rounded-md w-16 h-16 md:w-24 md:h-24 bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-2xl">🎵</div>
                             )}

@@ -35,7 +35,7 @@ App routes that must be reachable while offline are listed in `OFFLINE_SUPPORTED
 
 In **dev** the browser hits same-origin `/v1/...`. The Next.js route handler at `app/v1/[...path]/route.ts` forwards every method (GET/POST/PUT/PATCH/DELETE) to `${API_BASE_URL}/v1/...` and:
 
-- Forwards `cookie` and `authorization` headers verbatim.
+- Forwards `cookie` and `authorization` headers verbatim, plus `range`, `if-range`, `if-none-match` and `if-modified-since` (seeking and resuming audio), and sends back `content-range`, `accept-ranges`, `etag`, `last-modified`, `cache-control` and `content-length` (when the body is not re-encoded).
 - For `multipart/*`, parses via `formData()` so fetch can regenerate the boundary correctly.
 - For everything else, buffers the body via `arrayBuffer()` to avoid stream races on parallel requests.
 - Pipes back `set-cookie` and `content-type` so login still writes httpOnly cookies onto the dev origin.
@@ -60,7 +60,7 @@ Active letter rail (desktop only) is computed from scroll position, not URL.
 
 ## `middleware.ts`
 
-The Next middleware runs on every request that isn't in the negative matcher (`_next/static`, `_next/image`, `favicon.ico`, `sw.js`, `manifest.json`, app icons). Logic:
+The Next middleware runs on every request that isn't in the negative matcher (`_next/static`, `_next/image`, `favicon.ico`, `sw.js`, `manifest.json`, app icons, and every `/v1/` path except `/v1/download/`). API calls are skipped because the client refreshes for itself (single-flight, in `app/lib/data.ts`); song downloads are matched because audio has no client-side 401 recovery (a resume after a long pause asks for ranges with no visibility event first), so an expired session is refreshed on that request. Logic:
 
 1. If `access_token` cookie is present and not expired → forward as-is.
 2. If on `/`, `/share/*`, `/offline`, or `/v1/auth/*` → forward as-is (auth is allowed to call refresh / login pages render unauthenticated).
@@ -105,12 +105,13 @@ Caches:
   - Static `_next/static/*` → cache-first (chunks are content-addressed, safe to cache forever).
   - Page navigations → network-first; a success that did not come by redirect is stored (copied before the page starts reading the answer); on network failure fall back to the stored page or `/offline`.
   - In-app page data (`?_rsc=`) is not handled: it goes to the network, and a page that cannot load it falls back to a full page load, which the navigation rule above answers.
-- `songbird-artwork-v1` — separate cache for two patterns:
+- `songbird-artwork-saved-v1` — artwork stored on purpose for songs saved offline (`cacheArtworkUrls`). Never trimmed; looked up before the browse cache; cleared by "clear offline" and per song on a replaced image.
+- `songbird-artwork-v1` — artwork seen while browsing, capped at 2000 entries (oldest out, trimmed once per 25 stores). Two patterns:
   - `/_next/image*` requests (Next image optimizer): cache-first; falls back to checking the raw `?url=` parameter if the optimized URL isn't cached. This makes the same artwork accessible whether the request hits `Image` or a raw `<img>`.
   - `/v1/songs/{id}/artwork/*` (raw API artwork URL): cache-first.
 - `songbird-api-v2` — the last good answer of `GET /v1/player/state`, `/v1/songs/library` and `/v1/library`, when the API is on the page's own origin (behind the proxy in production; in the e2e harness the API is another origin and this cache is not exercised). Network-first: a success is stored; when the request fails or the proxy answers 502, the stored copy is served with an `X-SW-Stale: 1` header. Callers that need the server's own word (the launch and the return to the tab) read that header and treat the copy as no answer. Writes are never handled. `logout()` deletes every `songbird-api-*` cache.
 
-Cache versioning: the shell cache name follows the app version, so a release changes it and the activate handler deletes every cache that is not in its keep list (shell, artwork, API). The API cache name is **not** versioned with the app: rename it by hand (`songbird-api-v2` → `-v3`) when copies already stored under the old name must go, and add the new name to the keep list.
+Cache versioning: the shell cache name follows the app version, so a release changes it and the activate handler deletes every cache that is not in its keep list (shell, artwork, saved artwork, API). The API cache name is **not** versioned with the app: rename it by hand (`songbird-api-v2` → `-v3`) when copies already stored under the old name must go, and add the new name to the keep list.
 
 ## Offline strategy
 
@@ -119,7 +120,7 @@ Three layers cooperate:
 1. **Service worker** — caches the app shell, JS chunks, visited pages, artwork and the last good answers of three API reads. Lets an offline launch open `/library` and `/settings` and restore the player from the stored state.
 2. **OPFS audio** — `app/lib/offline.ts` streams audio bytes from `/v1/download/{id}` and writes to `audio/<id>.<ext>` in the Origin Private File System. On playback, `loadSong` in `player.tsx` checks OPFS first via `getSongFile()` and creates a blob URL when present, skipping the network entirely. Falls back to IndexedDB (`songbird-audio` db, `files` store) when OPFS is unavailable (older browsers).
 3. **Library snapshot** — `app/lib/offline-db.ts` (`songbird-offline` IndexedDB, `library-cache` store). The library page caches its `LibrarySong[]` so the offline UX still has data to render.
-4. **Artwork warm** — `cacheArtworkUrls()` in `offline.ts` pre-fetches the artwork URLs for every cached song so the SW's `songbird-artwork-v1` cache is populated before the user goes offline.
+4. **Artwork warm** — `cacheArtworkUrls()` in `offline.ts` pre-fetches the artwork URLs for every cached song so the SW's `songbird-artwork-saved-v1` cache is populated (at 200 and 600 px, the widths the rows and the player ask for) before the user goes offline.
 
 The client tells the server which songs the user wants offline via `/v1/library/offline/*`. This is a cross-device hint — if you mark song X offline on phone, when you load library on laptop the UI knows to prompt you to download X locally.
 
@@ -129,7 +130,7 @@ For routes that aren't useful offline (`/admin`, `/explore`, `/import`, `/downlo
 
 ## Image optimization
 
-`next.config.ts` enables `output: 'standalone'` (Docker), `experimental.middlewareClientMaxBodySize: '100mb'` (so import multipart uploads don't 413), and a single rewrite for `/v1/songs/:id/artwork/:size` so the optimizer can fetch raw bytes. `images.localPatterns` allows any `/v1/**` pathname; `images.remotePatterns` allows `**.mzstatic.com` (iTunes CDN) and `localhost`.
+`next.config.ts` enables `output: 'standalone'` (Docker), keeps `experimental.middlewareClientMaxBodySize: '100mb'` as a guard (the middleware matcher now skips `/v1/import`), sets the optimizer's widths to the two the app asks for (`imageSizes: [200]`, `deviceSizes: [600]`; any other `w` answers 400; see `app/lib/artwork.ts`) with a 30-day `minimumCacheTTL`, and a single rewrite for `/v1/songs/:id/artwork/:size` so the optimizer can fetch raw bytes. `images.localPatterns` allows any `/v1/**` pathname; `images.remotePatterns` allows `**.mzstatic.com` (iTunes CDN) and `localhost`.
 
 Cached artwork (e.g. served from the SW) cannot be re-optimized by `next/image` because the URL pattern is locally rewritten. Components that render cached artwork use the `unoptimized` prop to bypass the optimizer.
 

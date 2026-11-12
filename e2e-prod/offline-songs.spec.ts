@@ -944,7 +944,10 @@ test.describe('Offline saving and playback', () => {
       if (askedAtRedirect === null && /\/\?next=/.test(req.url())) askedAtRedirect = [...asked]
     })
 
-    await page.getByTestId('save-all-offline').click()
+    // The dead refresh sends the page to login and the still-valid cookie bounces it straight
+    // back, again and again (every page's first refresh is refused). A real click retries
+    // through those navigations and never returns, so dispatch the event instead.
+    await page.getByTestId('save-all-offline').dispatchEvent('click')
 
     // Sent to log in rather than told that every song failed.
     await expect.poll(() => askedAtRedirect, { timeout: 30000 }).not.toBeNull()
@@ -997,7 +1000,6 @@ test.describe('Offline saving and playback', () => {
     test.setTimeout(90000)
 
     const lib = new LibraryPage(page)
-    const common = new CommonPage(page)
 
     await lib.goto()
     await lib.waitForSongs()
@@ -1005,7 +1007,7 @@ test.describe('Offline saving and playback', () => {
     await page.reload()
     await lib.waitForSongs()
 
-    const asked = await recordDownloads(page, route => route.fulfill({ status: 401, body: 'token expired' }))
+    const asked = await recordDownloads(page, route => route.fulfill({ status: 401, body: 'token expired' }), { saveOnly: true })
     // The server is struggling, not refusing: a 503 says nothing about whether
     // the session is alive.
     await page.route('**/v1/auth/refresh', route => route.fulfill({ status: 503, body: 'unavailable' }))
@@ -1015,12 +1017,23 @@ test.describe('Offline saving and playback', () => {
       if (/\/\?next=/.test(req.url())) redirected = true
     })
 
+    // The player may be stopped by the same dead refresh and show its own toast in the one
+    // toast slot, replacing ours. Collect every error toast so the check does not race it.
+    await page.evaluate(() => {
+      const w = window as unknown as { __toasts: string[] }
+      w.__toasts = []
+      new MutationObserver(() => {
+        const t = document.querySelector('[data-testid="toast-error"]')?.textContent
+        if (t && !w.__toasts.includes(t)) w.__toasts.push(t)
+      }).observe(document.body, { childList: true, subtree: true, characterData: true })
+    })
     await page.getByTestId('save-all-offline').click()
 
     // Nothing could be saved, and the user is told so, with the songs left in
     // the failed list for a retry that works once the server is back.
     await expect(page.getByText(/\d+ songs? failed to download offline/)).toBeVisible({ timeout: 30000 })
-    await expect(common.toastError).toContainText('saving paused')
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __toasts: string[] }).__toasts.join('|')))
+      .toContain('saving paused')
     expect(asked.size).toBe(0)
     // Still on the library page, still signed in.
     expect(redirected).toBe(false)
