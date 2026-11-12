@@ -1,5 +1,5 @@
 import { routes } from './routes'
-import { test, expect, APIRequestContext } from '@playwright/test'
+import { test, expect, APIRequestContext } from './fixtures/test'
 import { login, apiLoginAs, uniq, purgePlaylistsByPrefix, ignoreError, API_V1, BULK_USERNAME, BULK_PASSWORD } from './helpers'
 import { LibraryPage } from './pages'
 
@@ -9,7 +9,7 @@ let api: APIRequestContext
 
 test.describe('library bulk select', () => {
     test.describe.configure({ mode: 'serial' })
-    test.use({ storageState: 'e2e/.auth/bulk-user.json' })
+    test.use({ authUser: 'bulk-user' })
 
     test.beforeAll(async () => {
         api = await apiLoginAs(BULK_USERNAME, BULK_PASSWORD)

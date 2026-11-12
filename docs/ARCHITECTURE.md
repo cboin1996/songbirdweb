@@ -65,9 +65,12 @@ The Next middleware runs on every request that isn't in the negative matcher (`_
 1. If `access_token` cookie is present and not expired → forward as-is.
 2. If on `/`, `/share/*`, `/offline`, or `/v1/auth/*` → forward as-is (auth is allowed to call refresh / login pages render unauthenticated).
 3. Otherwise, if a `refresh_token` cookie exists, hit `${API_BASE}/v1/auth/refresh` and:
-   - On success: rewrite the request with the new `access_token` and set the new cookie on the response so subsequent client fetches pick it up.
-   - On API unreachable: redirect to `/offline` (catches the "lost connection mid-session" case).
+   - On 200 with an `access_token` cookie: the API has rotated the refresh token too, so the response carries **both** `Set-Cookie` lines exactly as the API sent them (with its `Max-Age` and flags), and the request forwarded to the page has its `cookie` header rebuilt with the new values, replacing only the names the API set.
+   - On 401 or 403: the session is gone → redirect to `/`.
+   - On any other status, a 200 without an access cookie, or a network error: the API is failing or unreachable, which says nothing about the session → forward the request unchanged (`NextResponse.next()`); never sign anyone out for it.
 4. Otherwise → redirect to `/`.
+
+Dropping the rotated refresh cookie would make the browser's next refresh look like token reuse and the API would revoke the session, so this forwarding is load-bearing. Tests: `__tests__/middleware.test.ts`.
 
 This is the only place token refresh happens at the SSR boundary — the client also does its own refresh-on-401 in `app/lib/data.ts` (`tryRefresh`), deduplicated via `refreshPromise`.
 

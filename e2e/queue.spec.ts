@@ -1,11 +1,11 @@
 import { routes, downloadSongQuery } from './routes'
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures/test'
 import { login, ignoreError, apiLoginAs, libraryIds, playLibraryPaused, expectStable, API_V1, QUEUE_USERNAME, QUEUE_PASSWORD } from './helpers'
 import { LibraryPage, PlayerBar } from './pages'
 
 test.describe('player queue', () => {
     test.describe.configure({ mode: 'serial' })
-    test.use({ storageState: 'e2e/.auth/queue-user.json' })
+    test.use({ authUser: 'queue-user' })
 
     test.beforeEach(async ({ page }) => {
         await login(page, QUEUE_USERNAME, QUEUE_PASSWORD)

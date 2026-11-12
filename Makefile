@@ -121,6 +121,8 @@ e2e-api-up:
 			-e POSTGRES_DB=songbirdapi \
 			-e API_KEY=ci-test-key \
 			-e JWT_SECRET=ci-test-secret \
+			-e COOKIE_SECURE=false \
+			-e SESSION_MAX_PER_USER=1000 \
 			-e ADMIN_USERNAME=e2e-admin \
 			-e ADMIN_EMAIL=e2e-admin@ci.local \
 			-e ADMIN_PASSWORD=e2e-admin-pass \

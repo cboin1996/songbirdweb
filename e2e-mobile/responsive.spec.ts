@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from '../e2e/fixtures/test'
 import { login } from '../e2e/helpers'
 import { LibraryPage, PlayerBar } from '../e2e/pages'
 

@@ -43,7 +43,7 @@ export function ignoreError(msg: string) {
 
 // Bypass the React form: call the API from inside the browser so httpOnly cookies
 // are set correctly in the Playwright browser context. If already authenticated via
-// storageState, this is a no-op (visit /library to verify auth; if 200, skip login).
+// the worker login (e2e/fixtures/test.ts), this is a no-op (visit /library to verify auth; if 200, skip login).
 export async function login(page: Page, username = USERNAME, password = PASSWORD) {
     // Check if already authenticated by visiting a protected page.
     await page.goto(routes.library, { waitUntil: 'domcontentloaded' })

@@ -1,10 +1,10 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures/test'
 import { login, apiLoginAs, API_V1, ignoreError, SEARCH_USERNAME, SEARCH_PASSWORD, QUEUE_USERNAME, QUEUE_PASSWORD } from './helpers'
 import { LibraryPage, PlayerBar } from './pages'
 
 test.describe('library search', () => {
     test.describe.configure({ mode: 'serial' })
-    test.use({ storageState: 'e2e/.auth/search-user.json' })
+    test.use({ authUser: 'search-user' })
 
     test.beforeEach(async ({ page }) => {
         await login(page, SEARCH_USERNAME, SEARCH_PASSWORD)
@@ -116,7 +116,7 @@ test.describe('library search', () => {
 
 test.describe('queue search', () => {
     test.describe.configure({ mode: 'serial' })
-    test.use({ storageState: 'e2e/.auth/queue-user.json' })
+    test.use({ authUser: 'queue-user' })
 
     test.beforeEach(async ({ page }) => {
         await login(page, QUEUE_USERNAME, QUEUE_PASSWORD)

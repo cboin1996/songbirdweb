@@ -1,12 +1,12 @@
 import { routes, downloadSongQuery, downloadAlbumQuery, downloadUrlQuery } from './routes'
-import { test, expect, Page } from '@playwright/test'
+import { test, expect, Page } from './fixtures/test'
 import { DOWNLOAD_USERNAME, DOWNLOAD_PASSWORD, login, ignoreError, apiLoginAs, API_V1 } from './helpers'
 import { DownloadPage, PlayerBar } from './pages'
 
 
 test.describe('download page', () => {
     test.describe.configure({ mode: 'serial' })
-    test.use({ storageState: 'e2e/.auth/download-user.json' })
+    test.use({ authUser: 'download-user' })
 
     test.beforeEach(async ({ page }) => {
         await login(page, DOWNLOAD_USERNAME, DOWNLOAD_PASSWORD)

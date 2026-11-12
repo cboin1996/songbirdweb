@@ -1,12 +1,12 @@
 import { routes } from './routes'
-import { test, expect, Page } from '@playwright/test'
+import { test, expect, Page } from './fixtures/test'
 import { LIBRARY_USERNAME, LIBRARY_PASSWORD, login, ignoreError, apiLoginAs, API_V1 } from './helpers'
 import { LibraryPage, PlayerBar } from './pages'
 
 
 test.describe('library page', () => {
     test.describe.configure({ mode: 'serial' })
-    test.use({ storageState: 'e2e/.auth/library-user.json' })
+    test.use({ authUser: 'library-user' })
 
     test.beforeEach(async ({ page }) => {
         await login(page, LIBRARY_USERNAME, LIBRARY_PASSWORD)

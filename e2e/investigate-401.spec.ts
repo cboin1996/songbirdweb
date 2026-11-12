@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures/test'
 import { login } from './helpers'
 import { routes, exploreQuery } from './routes'
 

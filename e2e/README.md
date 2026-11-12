@@ -150,7 +150,7 @@ UI for setup.
 ## State isolation
 
 **Most specs get their own isolated user** provisioned in `global-setup.ts`, each with
-a seeded library of 9 fixture songs and its own storageState file. This prevents
+a seeded library of 9 fixture songs and its own logins. This prevents
 cross-spec interference when tests run in parallel across 4 workers.
 
 **Read-only specs** (admin, info, navigation, login, `e2e-prod/offline`, share, smoke, playlist)
@@ -167,7 +167,9 @@ To add a new isolated user:
 1. Add env vars to `.env.local`, `.github/workflows/test.yml`
 2. Add constants to `global-setup.ts` and `helpers.ts`
 3. Register + seed in `globalSetup()`
-4. Use `test.use({ storageState: 'e2e/.auth/<name>-user.json' })` in the spec
+4. Import `test` from `./fixtures/test` and use `test.use({ authUser: '<name>-user' })` in the spec
+
+**Logins are per worker.** The API rotates refresh tokens and revokes a session when it sees a token it already replaced, so parallel tests must never share one login. `global-setup.ts` logs each user in once per Playwright worker (`e2e/.auth/<name>-user.w<N>.json`) and `e2e/fixtures/test.ts` hands each test its own worker's file. The e2e API container runs with `COOKIE_SECURE=false` (plain HTTP) and `SESSION_MAX_PER_USER=1000` (tests log in far more than 10 times); an API image from before those settings ignores them.
 
 User-scoped data created during a test (drafts, playlists, share tokens) should be
 prefixed with `e2e-` and purged in `afterAll`:

@@ -1,5 +1,5 @@
 import { routes } from './routes'
-import { test, expect, Page } from '@playwright/test'
+import { test, expect, Page } from './fixtures/test'
 import { PLAYER_USERNAME, PLAYER_PASSWORD, login, ignoreError, apiLoginAs, API_V1 } from './helpers'
 import { LibraryPage, PlayerBar } from './pages'
 
@@ -15,7 +15,7 @@ async function startPlayback(page: Page) {
 
 test.describe('expanded player', () => {
     test.describe.configure({ mode: 'serial' })
-    test.use({ storageState: 'e2e/.auth/player-user.json' })
+    test.use({ authUser: 'player-user' })
 
     test.beforeEach(async ({ page }) => {
         await login(page, PLAYER_USERNAME, PLAYER_PASSWORD)

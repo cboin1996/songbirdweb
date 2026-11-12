@@ -24,7 +24,8 @@ const projects: ProjectCfg[] = [
   {
     name: 'dev',
     testDir: './e2e',
-    use: { ...devices['Desktop Chrome'], baseURL: DEV_URL, storageState: 'e2e/.auth/test-user.json' },
+    // The logged-in user comes from the authUser fixture (e2e/fixtures/test.ts), one login per worker.
+    use: { ...devices['Desktop Chrome'], baseURL: DEV_URL },
   },
   {
     name: 'prod',
@@ -35,7 +36,7 @@ const projects: ProjectCfg[] = [
   {
     name: 'mobile',
     testDir: './e2e-mobile',
-    use: { ...devices['iPhone 13'], baseURL: DEV_URL, storageState: 'e2e/.auth/test-user.json' },
+    use: { ...devices['iPhone 13'], baseURL: DEV_URL },
   },
 ]
 
