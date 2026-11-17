@@ -113,10 +113,9 @@ test.describe('settings - change password', () => {
 test.describe('settings - audio format', () => {
     test.use({ authUser: 'settings-user' })
 
-    test('says downloads are m4a and offers no picker', async ({ page }) => {
+    test('offers no audio format picker', async ({ page }) => {
         await login(page, SETTINGS_USERNAME, SETTINGS_PASSWORD)
         await page.goto(routes.settings)
-        await expect(page.getByTestId('audio-format-note')).toHaveText("All downloads default to m4a, as it's higher quality than mp3.")
         await expect(page.getByRole('button', { name: 'MP3' })).toHaveCount(0)
         await expect(page.getByRole('button', { name: 'M4A' })).toHaveCount(0)
     })

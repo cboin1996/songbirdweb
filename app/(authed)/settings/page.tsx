@@ -224,15 +224,6 @@ function CacheAudit() {
     )
 }
 
-function AudioFormatNote() {
-    return (
-        <div>
-            <p className="text-gray-400 text-sm pb-2">audio format</p>
-            <p className="text-xs text-gray-400" data-testid="audio-format-note">All downloads default to m4a, as it&apos;s higher quality than mp3.</p>
-        </div>
-    )
-}
-
 function FrostedBarsSetting() {
     const [on, setOn] = useState(true)
     useEffect(() => { setOn(getFrostedBars()) }, [])
@@ -309,7 +300,6 @@ export default function Page() {
     return (
         <main className="p-4">
             <div className="flex flex-col gap-8 py-4">
-                <AudioFormatNote />
                 <div className="flex flex-col gap-8" data-testid="this-device">
                     <p className="text-sky-500 text-xs uppercase tracking-wide -mb-4">this device</p>
                     <FrostedBarsSetting />
