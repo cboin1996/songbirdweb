@@ -40,6 +40,18 @@ test.describe('loading skeletons', () => {
         await expect(page.getByTestId('library-skeleton')).toHaveCount(0)
     })
 
+    test('a skeleton waits 200 ms before it fades in, so a fast load never flashes one', async ({ page }) => {
+        const h = hold(page, '**/v1/songs/library')
+        await page.goto(routes.library)
+        await h.waitHeld()
+        const root = page.getByTestId('library-skeleton').locator('> *').first()
+        await expect(root).toHaveCSS('animation-delay', '0.2s')
+        await expect(root).toHaveCSS('animation-name', 'skeleton-in')
+        // Held for a while, it does show.
+        await expect(root).toHaveCSS('opacity', '1', { timeout: 3000 })
+        await h.answer(r => r.continue())
+    })
+
     test('library skeleton gives way to the error state', async ({ page }) => {
         const h = hold(page, '**/v1/songs/library')
         await page.goto(routes.library)

@@ -2,7 +2,7 @@
 
 export function SongRowsSkeleton({ rows = 8, testId = 'skeleton-rows' }: { rows?: number; testId?: string }) {
     return (
-        <div data-testid={testId} aria-busy="true" aria-label="loading" className="flex flex-col p-4">
+        <div data-testid={testId} aria-busy="true" aria-label="loading" className="skeleton-delay flex flex-col p-4">
             {Array.from({ length: rows }).map((_, i) => (
                 <div key={i} className="flex items-center gap-3 w-full p-2">
                     <div className="w-12 h-12 rounded shrink-0 bg-gray-100 dark:bg-gray-800 animate-pulse" />

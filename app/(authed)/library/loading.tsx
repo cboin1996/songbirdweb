@@ -19,7 +19,7 @@ function SongRowSkeleton({ wide }: { wide?: boolean }) {
 
 export default function Loading() {
     return (
-        <div className="p-4">
+        <div className="skeleton-delay p-4">
             <div className="pr-7">
                 {/* toolbar: sticky only from md up, like the real one */}
                 <div className="md:sticky md:top-11 md:z-40 md:-mx-6 md:px-6 md:bg-[var(--background)]/90 md:border-b border-gray-100 dark:border-gray-800 md:pt-2">

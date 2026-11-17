@@ -1,6 +1,6 @@
 export default function TableSkeleton({ rows = 5, cols = 3 }: { rows?: number; cols?: number }) {
     return (
-        <div className="flex flex-col gap-2 animate-pulse">
+        <div className="skeleton-delay flex flex-col gap-2 animate-pulse">
             {Array.from({ length: rows }, (_, i) => (
                 <div key={i} className="flex gap-4">
                     {Array.from({ length: cols }, (_, j) => (

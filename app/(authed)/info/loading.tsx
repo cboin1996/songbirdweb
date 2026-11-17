@@ -1,6 +1,6 @@
 export default function Loading() {
     return (
-        <main className="p-4">
+        <main className="skeleton-delay p-4">
             <div className="flex flex-col gap-6 py-4">
                 <div className="h-3 w-10 rounded bg-gray-100 dark:bg-gray-800 animate-pulse" />
                 <div className="flex flex-row flex-wrap gap-4">

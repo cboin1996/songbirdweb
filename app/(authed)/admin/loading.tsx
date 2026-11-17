@@ -25,7 +25,7 @@ function TableRowSkeleton({ cols }: { cols: number }) {
 
 export default function Loading() {
     return (
-        <div className="p-4 flex flex-col gap-10">
+        <div className="skeleton-delay p-4 flex flex-col gap-10">
             {/* overview */}
             <div className="flex flex-col gap-4">
                 <SectionLabel />

@@ -20,7 +20,7 @@ function ItemSkeleton() {
 
 export default function Loading() {
     return (
-        <div className="p-4 flex flex-col gap-6">
+        <div className="skeleton-delay p-4 flex flex-col gap-6">
             {/* toolbar: search and sort, then the filter chips; one row from md up */}
             <div className="sticky top-11 z-40 bg-[var(--background)]/90 py-3 flex flex-col md:flex-row gap-2 border-b border-gray-100 dark:border-gray-800 -mt-px">
                 <div className="flex gap-2 items-center">
