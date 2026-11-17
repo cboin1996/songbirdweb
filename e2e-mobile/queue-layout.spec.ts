@@ -43,7 +43,7 @@ test('queue panel fits the phone screen', async ({ page }) => {
     // The field is inset from the panel edge on both sides (room for its focus ring).
     const box = (await search.boundingBox())!
     const panel = (await search.evaluate(el => {
-        const wrap = el.closest('.shrink-0')!.getBoundingClientRect()
+        const wrap = el.closest("[data-testid=\"queue-header\"]")!.getBoundingClientRect()
         return { left: wrap.left, right: wrap.right }
     }))
     expect(box.x - panel.left).toBeGreaterThanOrEqual(4)

@@ -1,14 +1,14 @@
 function StatPill() {
     return (
         <div className="flex flex-col gap-1">
-            <div className="h-7 w-12 rounded bg-gray-100 dark:bg-gray-800 animate-pulse" />
-            <div className="h-2.5 w-16 rounded bg-gray-100 dark:bg-gray-800 animate-pulse" />
+            <div className="h-8 w-14 rounded bg-gray-100 dark:bg-gray-800 animate-pulse" />
+            <div className="h-3.5 w-16 rounded bg-gray-100 dark:bg-gray-800 animate-pulse" />
         </div>
     )
 }
 
 function SectionLabel() {
-    return <div className="h-2.5 w-20 rounded bg-gray-100 dark:bg-gray-800 animate-pulse" />
+    return <div className="h-3.5 w-24 rounded bg-gray-100 dark:bg-gray-800 animate-pulse" />
 }
 
 function TableRowSkeleton({ cols }: { cols: number }) {
@@ -42,6 +42,11 @@ export default function Loading() {
                 </div>
             </div>
 
+            {/* disk bar */}
+            <div className="-mt-6 w-full max-w-sm">
+                <div className="h-2 rounded-full bg-gray-100 dark:bg-gray-800 animate-pulse" />
+            </div>
+
             {/* imports */}
             <div className="flex flex-col gap-4">
                 <SectionLabel />
@@ -57,7 +62,7 @@ export default function Loading() {
                     {Array.from({ length: 2 }).map((_, i) => <StatPill key={i} />)}
                 </div>
                 <div className="overflow-x-auto">
-                    <table className="text-sm w-full">
+                    <table className="text-sm w-full min-w-[560px]">
                         <thead>
                             <tr>
                                 {['job id', 'created', 'user', 'status', 'error'].map(h => (
@@ -74,11 +79,21 @@ export default function Loading() {
                 </div>
             </div>
 
+            {/* errors */}
+            <div className="flex flex-col gap-4">
+                <SectionLabel />
+                <div className="h-9 w-full max-w-sm rounded-full bg-gray-100 dark:bg-gray-800 animate-pulse" />
+                <div className="flex flex-col gap-2">
+                    {Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-5 w-full rounded bg-gray-100 dark:bg-gray-800 animate-pulse" />)}
+                </div>
+            </div>
+
             {/* users */}
             <div className="flex flex-col gap-4">
                 <SectionLabel />
+                <div className="h-9 w-full max-w-sm rounded-full bg-gray-100 dark:bg-gray-800 animate-pulse" />
                 <div className="overflow-x-auto">
-                    <table className="text-sm w-full">
+                    <table className="text-sm w-full min-w-[560px]">
                         <thead>
                             <tr>
                                 {['user', 'role', 'status', 'library', 'plays', 'downloads', 'last active', 'actions'].map(h => (

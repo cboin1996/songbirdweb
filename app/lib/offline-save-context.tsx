@@ -132,8 +132,8 @@ export function OfflineSaveProvider({ children }: { children: React.ReactNode })
                     const artUrls = [
                         // The same sizes the lock screen lists: see mediaSessionArtwork.
                         ...(song.artwork_cached ? [
-                            songArtworkUrl(song.uuid, true, undefined, ARTWORK_SMALL_PX)!,
-                            songArtworkUrl(song.uuid, true, undefined, ARTWORK_LARGE_PX)!,
+                            songArtworkUrl(song.uuid, true, undefined, ARTWORK_SMALL_PX, song.artwork_updated_at)!,
+                            songArtworkUrl(song.uuid, true, undefined, ARTWORK_LARGE_PX, song.artwork_updated_at)!,
                         ] : [
                             artworkUrl(song.properties.artworkUrl100, ARTWORK_SMALL_PX),
                             artworkUrl(song.properties.artworkUrl100, ARTWORK_LARGE_PX),

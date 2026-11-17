@@ -12,6 +12,7 @@ export interface PickerSong {
     uuid: string
     properties: Properties | null
     artwork_cached?: boolean
+    artwork_updated_at?: number | null
 }
 
 interface SongPickerModalProps {
@@ -194,7 +195,7 @@ export default function SongPickerModal({
                                         const art = sp?.artworkUrl100
                                             ? artworkUrl(sp.artworkUrl100, 200)
                                             : song.artwork_cached
-                                                ? songArtworkUrl(song.uuid, true, undefined, 200)
+                                                ? songArtworkUrl(song.uuid, true, undefined, 200, song.artwork_updated_at)
                                                 : null
                                         const isSelected = selected.has(song.uuid)
                                         const isDropTarget = dropTarget === absIdx

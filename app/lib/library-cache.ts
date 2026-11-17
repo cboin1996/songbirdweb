@@ -20,13 +20,13 @@ export const LIST_STALE_MS = 5 * 60_000
 
 export function addSongToLibraryCache(
     qc: QueryClient,
-    song: { uuid: string; properties: Properties | null; artwork_cached?: boolean },
+    song: { uuid: string; properties: Properties | null; artwork_cached?: boolean; artwork_updated_at?: number | null },
 ): void {
     const now = new Date().toISOString()
     qc.setQueryData<LibrarySong[]>(queryKeys.librarySongs, prev => {
         if (!prev || prev.some(s => s.uuid === song.uuid)) return prev
         return [...prev, {
-            uuid: song.uuid, url: '', properties: song.properties, artwork_cached: song.artwork_cached ?? false,
+            uuid: song.uuid, url: '', properties: song.properties, artwork_cached: song.artwork_cached ?? false, artwork_updated_at: song.artwork_updated_at ?? null,
             parent_song_id: null, root_song_id: null, owner_id: null, added_at: now, last_position: 0, last_played_at: null,
         }]
     })

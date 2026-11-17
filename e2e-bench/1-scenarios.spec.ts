@@ -31,6 +31,10 @@ test.beforeAll(async ({ browser }) => {
     const context = await browser.newContext({ storageState: { cookies: [], origins: [] } })
     page = await context.newPage()
     await page.addInitScript(() => { (window as unknown as Record<string, unknown>).__SONGBIRD_PERF__ = true })
+    // The next track is normally fetched whole while one plays and then starts from memory.
+    // These counts are about the page's own work and the stream (a seek is asked for by
+    // range), so that fetch-ahead is held off here; e2e-prod/prefetch.spec.ts covers it.
+    await page.addInitScript(() => { (window as unknown as Record<string, unknown>).__prefetchDelayMs = 1e9 })
     await login(page, BENCH_USER, BENCH_PASS)
     lib = new LibraryPage(page)
     player = new PlayerBar(page)

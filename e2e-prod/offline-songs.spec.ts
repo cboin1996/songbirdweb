@@ -175,7 +175,7 @@ test.describe('Offline saving and playback', () => {
 
     // The browser still says it is online; the queue goes by what the app has found out.
     await player.openQueue()
-    await expect(page.getByTestId('queue-offline-summary')).toHaveText(`Offline — 1 of ${ids.length} available`)
+    await expect(page.getByTestId('queue-offline-summary')).toHaveText(`offline — 1 of ${ids.length} available`)
     await expect(player.queuePanel.locator('[data-unsaved="true"]').first()).toBeVisible()
     await player.closeQueue()
     const mark = requested.length
@@ -543,7 +543,7 @@ test.describe('Offline saving and playback', () => {
 
     await common.goOffline()
 
-    await expect(page.getByTestId('queue-offline-summary')).toHaveText(`Offline — 1 of ${ids.length} available`)
+    await expect(page.getByTestId('queue-offline-summary')).toHaveText(`offline — 1 of ${ids.length} available`)
     const rows = panel.locator('[data-qi]')
     const rendered = await rows.count()
     await expect(panel.locator('[data-unsaved]')).toHaveCount(rendered - 1)
@@ -556,7 +556,7 @@ test.describe('Offline saving and playback', () => {
     // Searching the queue narrows the list, not the count.
     if (ids.length > 5) {
       await player.queueSearch.fill('zzzzzzzz')
-      await expect(page.getByTestId('queue-offline-summary')).toHaveText(`Offline — 1 of ${ids.length} available`)
+      await expect(page.getByTestId('queue-offline-summary')).toHaveText(`offline — 1 of ${ids.length} available`)
       await player.queueSearchClear.click()
     }
 
@@ -573,7 +573,7 @@ test.describe('Offline saving and playback', () => {
     await overlay.getByRole('button', { name: /toggle queue/i }).click()
     const overlayRows = overlay.locator('[data-qi]')
     await expect(overlayRows.first()).toBeVisible()
-    await expect(overlay.getByTestId('queue-offline-summary')).toHaveText(`Offline — 1 of ${ids.length} available`)
+    await expect(overlay.getByTestId('queue-offline-summary')).toHaveText(`offline — 1 of ${ids.length} available`)
     const overlayRendered = await overlayRows.count()
     await expect(overlay.locator('[data-unsaved]')).toHaveCount(overlayRendered - 1)
     await overlayRows.nth(1).locator('button').first().click()
@@ -606,13 +606,13 @@ test.describe('Offline saving and playback', () => {
     await common.goOffline()
 
     await player.openQueue()
-    await expect(page.getByTestId('queue-offline-summary')).toHaveText(`Offline — 2 of ${ids.length} available`)
+    await expect(page.getByTestId('queue-offline-summary')).toHaveText(`offline — 2 of ${ids.length} available`)
     await expect(player.queueRows().nth(1)).not.toHaveAttribute('data-unsaved', 'true')
 
     await player.queueRows().nth(1).getByRole('button').first().click()
     await expect(page.getByTestId('toast')).toContainText(/not saved offline/i)
 
-    await expect(page.getByTestId('queue-offline-summary')).toHaveText(`Offline — 1 of ${ids.length} available`)
+    await expect(page.getByTestId('queue-offline-summary')).toHaveText(`offline — 1 of ${ids.length} available`)
     await expect(player.queueRows().nth(1)).toHaveAttribute('data-unsaved', 'true')
     await expect(player.queueRows().nth(2)).not.toHaveAttribute('data-unsaved', 'true')
 

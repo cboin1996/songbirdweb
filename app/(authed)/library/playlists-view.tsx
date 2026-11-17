@@ -91,7 +91,7 @@ export default function PlaylistsView({
         setLoadingId(pl.id)
         const songs = await fetchPlaylistSongs(pl.id)
         setModalPlaylist(pl)
-        setModalSongs(songs.map(s => ({ uuid: s.uuid, properties: s.properties, artwork_cached: s.artwork_cached })))
+        setModalSongs(songs.map(s => ({ uuid: s.uuid, properties: s.properties, artwork_cached: s.artwork_cached, artwork_updated_at: s.artwork_updated_at })))
         setLoadingId(null)
     }
 
@@ -186,8 +186,8 @@ export default function PlaylistsView({
         const first = playable[0]
         const ctx = { label: `Playlist · ${pl.name}`, href: `${routes.library}?view=playlists`, id: pl.id }
         play(
-            { uuid: first.uuid, properties: first.properties!, artwork_cached: first.artwork_cached, source: ctx },
-            playable.map(s => ({ uuid: s.uuid, properties: s.properties!, artwork_cached: s.artwork_cached, source: ctx })),
+            { uuid: first.uuid, properties: first.properties!, artwork_cached: first.artwork_cached, artwork_updated_at: first.artwork_updated_at, source: ctx },
+            playable.map(s => ({ uuid: s.uuid, properties: s.properties!, artwork_cached: s.artwork_cached, artwork_updated_at: s.artwork_updated_at, source: ctx })),
             ctx
         )
     }

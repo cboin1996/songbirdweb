@@ -3,6 +3,7 @@ import { useSearchParams } from "next/navigation"
 import { useQuery } from "@tanstack/react-query"
 import { fetchPropertiesFromItunes, DownloadedSong } from "../../../lib/data"
 import SongsSelector from "../../../components/songs"
+import { SongRowsSkeleton } from "../../../components/skeletons"
 import QueryError from "../../../components/query-error"
 
 export default function Page() {
@@ -19,7 +20,7 @@ export default function Page() {
     })
 
     if (!query) return null
-    if (isLoading) return <main className="p-4"><p className="text-gray-400 text-sm">searching iTunes…</p></main>
+    if (isLoading) return <main><SongRowsSkeleton testId="download-skeleton" /></main>
     if (error) return <main className="p-4"><QueryError error={error} retry={refetch} context="search results" /></main>
     if (!songs || songs.length === 0) return <main className="p-4"><p className="text-gray-400 text-sm">no iTunes matches</p></main>
 

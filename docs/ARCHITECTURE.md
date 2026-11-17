@@ -16,7 +16,7 @@ The web app is a **thin client**. It owns no domain data — every fetch goes to
 
 | Route | Page file | Auth | Offline-supported | Notes |
 |---|---|---|---|---|
-| `/` | `app/page.tsx` | public | no | Login. Redirects to `/download` if already authenticated (handled in `middleware.ts`). |
+| `/` | `app/page.tsx` | public | no | Login. Redirects to `/download` if already authenticated (handled in `proxy.ts`). |
 | `/download` | `app/download/page.tsx` | cookie | no (`OfflineGuard`) | Hub: by URL, by song search, by album. Subroutes `/url`, `/song`, `/album`. |
 | `/library` | `app/library/page.tsx` | cookie | yes | Personal library. Server-component fetch hydrated into `library-list.tsx`. |
 | `/import` | `app/import/page.tsx` | cookie | no (`OfflineGuard`) | Multipart MP3/M4A upload + jobs table. |
@@ -24,7 +24,7 @@ The web app is a **thin client**. It owns no domain data — every fetch goes to
 | `/admin` | `app/admin/page.tsx` | admin | no (`OfflineGuard`) | User table + system stats. |
 | `/info` | `app/info/page.tsx` | cookie | no (`OfflineGuard`) | About / version page. |
 | `/settings` | `app/settings/page.tsx` | cookie | yes | Change password, manage offline cache. |
-| `/share/[token]` | `app/share/[token]/page.tsx` | public | no | Public share link. Bypassed by middleware. |
+| `/share/[token]` | `app/share/[token]/page.tsx` | public | no | Public share link. Bypassed by the proxy. |
 | `/songs/[id]/edit` | `app/songs/[id]/...` | cookie | no | Editor (WaveSurfer + ffmpeg jobs). |
 | `/offline` | `app/offline/page.tsx` | public | yes | Service-worker fallback when navigation fails. |
 | `/v1/[...path]` | `app/v1/[...path]/route.ts` | passthrough | n/a | **Dev-only proxy** to the API (see below). |
@@ -58,9 +58,9 @@ Handlers in `library-list.tsx` and `explore-client.tsx` watch the URL and call `
 
 Active letter rail (desktop only) is computed from scroll position, not URL.
 
-## `middleware.ts`
+## `proxy.ts`
 
-The Next middleware runs on every request that isn't in the negative matcher (`_next/static`, `_next/image`, `favicon.ico`, `sw.js`, `manifest.json`, app icons, and every `/v1/` path except `/v1/download/`). API calls are skipped because the client refreshes for itself (single-flight, in `app/lib/data.ts`); song downloads are matched because audio has no client-side 401 recovery (a resume after a long pause asks for ranges with no visibility event first), so an expired session is refreshed on that request. Logic:
+The Next proxy (`proxy.ts`) runs on every request that isn't in the negative matcher (`_next/static`, `_next/image`, `favicon.ico`, `sw.js`, `manifest.json`, app icons, and every `/v1/` path except `/v1/download/`). API calls are skipped because the client refreshes for itself (single-flight, in `app/lib/data.ts`); song downloads are matched because audio has no client-side 401 recovery (a resume after a long pause asks for ranges with no visibility event first), so an expired session is refreshed on that request. Logic:
 
 1. If `access_token` cookie is present and not expired → forward as-is.
 2. If on `/`, `/share/*`, `/offline`, or `/v1/auth/*` → forward as-is (auth is allowed to call refresh / login pages render unauthenticated).
@@ -70,7 +70,7 @@ The Next middleware runs on every request that isn't in the negative matcher (`_
    - On any other status, a 200 without an access cookie, or a network error: the API is failing or unreachable, which says nothing about the session → forward the request unchanged (`NextResponse.next()`); never sign anyone out for it.
 4. Otherwise → redirect to `/`.
 
-Dropping the rotated refresh cookie would make the browser's next refresh look like token reuse and the API would revoke the session, so this forwarding is load-bearing. Tests: `__tests__/middleware.test.ts`.
+Dropping the rotated refresh cookie would make the browser's next refresh look like token reuse and the API would revoke the session, so this forwarding is load-bearing. Tests: `__tests__/proxy.test.ts`.
 
 This is the only place token refresh happens at the SSR boundary — the client also does its own refresh-on-401 in `app/lib/data.ts` (`tryRefresh`), deduplicated via `refreshPromise`.
 
@@ -130,7 +130,7 @@ For routes that aren't useful offline (`/admin`, `/explore`, `/import`, `/downlo
 
 ## Image optimization
 
-`next.config.ts` enables `output: 'standalone'` (Docker), keeps `experimental.middlewareClientMaxBodySize: '100mb'` as a guard (the middleware matcher now skips `/v1/import`), sets the optimizer's widths to the two the app asks for (`imageSizes: [200]`, `deviceSizes: [600]`; any other `w` answers 400; see `app/lib/artwork.ts`) with a 30-day `minimumCacheTTL`, and a single rewrite for `/v1/songs/:id/artwork/:size` so the optimizer can fetch raw bytes. `images.localPatterns` allows any `/v1/**` pathname; `images.remotePatterns` allows `**.mzstatic.com` (iTunes CDN) and `localhost`.
+`next.config.ts` enables `output: 'standalone'` (Docker), keeps `experimental.middlewareClientMaxBodySize: '100mb'` as a guard (the proxy matcher now skips `/v1/import`), sets the optimizer's widths to the two the app asks for (`imageSizes: [200]`, `deviceSizes: [600]`; any other `w` answers 400; see `app/lib/artwork.ts`) with a 30-day `minimumCacheTTL`, and a single rewrite for `/v1/songs/:id/artwork/:size` so the optimizer can fetch raw bytes. `images.localPatterns` allows any `/v1/**` pathname; `images.remotePatterns` allows `**.mzstatic.com` (iTunes CDN) and `localhost`.
 
 Cached artwork (e.g. served from the SW) cannot be re-optimized by `next/image` because the URL pattern is locally rewritten. Components that render cached artwork use the `unoptimized` prop to bypass the optimizer.
 

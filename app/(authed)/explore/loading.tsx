@@ -1,41 +1,44 @@
-function SongCardSkeleton() {
-    return (
-        <div className="flex flex-col gap-1 p-2">
-            <div className="w-full aspect-square rounded-lg bg-gray-100 dark:bg-gray-800 animate-pulse" />
-            <div className="h-3 w-3/4 rounded bg-gray-100 dark:bg-gray-800 animate-pulse mt-1" />
-            <div className="h-2.5 w-1/2 rounded bg-gray-100 dark:bg-gray-800 animate-pulse" />
-        </div>
-    )
-}
+const bone = 'bg-gray-100 dark:bg-gray-800 animate-pulse'
 
-function SectionSkeleton({ label, count = 4 }: { label: string; count?: number }) {
+// Mirrors the real list: flat rows on a phone, a 2/3/4-column grid of larger cards from md up.
+function ItemSkeleton() {
     return (
-        <div className="flex flex-col gap-4">
-            <div className="h-3 w-24 rounded bg-gray-100 dark:bg-gray-800 animate-pulse" />
-            <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2 md:gap-8">
-                {Array.from({ length: count }).map((_, i) => <SongCardSkeleton key={i} />)}
+        <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-3 p-3 md:p-2">
+                <div className={`w-12 h-12 md:w-24 md:h-24 rounded shrink-0 ${bone}`} />
+                <div className="flex flex-col gap-2 flex-1 min-w-0 md:px-1">
+                    <div className={`h-4 md:h-5 w-3/5 rounded ${bone}`} />
+                    <div className={`h-3.5 w-2/5 rounded ${bone}`} />
+                    <div className={`hidden md:block h-3.5 w-1/4 rounded ${bone}`} />
+                </div>
+                <div className={`w-5 h-5 rounded-full shrink-0 mr-1 ${bone}`} />
             </div>
+            <div className={`h-3 w-16 rounded mx-1 ${bone}`} />
         </div>
     )
 }
 
 export default function Loading() {
     return (
-        <div className="p-4">
-            {/* toolbar skeleton */}
-            <div className="sticky top-11 z-40 bg-[var(--background)]/90 backdrop-blur-md frosted-bar py-3 flex flex-col gap-3 border-b border-gray-100 dark:border-gray-800 mb-6">
-                <div className="h-8 w-full md:w-80 rounded-lg bg-gray-100 dark:bg-gray-800 animate-pulse" />
-                <div className="flex gap-2 flex-wrap">
-                    {Array.from({ length: 5 }).map((_, i) => (
-                        <div key={i} className="h-7 w-20 rounded-full bg-gray-100 dark:bg-gray-800 animate-pulse" />
-                    ))}
+        <div className="p-4 flex flex-col gap-6">
+            {/* toolbar: search and sort, then the filter chips; one row from md up */}
+            <div className="sticky top-11 z-40 bg-[var(--background)]/90 py-3 flex flex-col md:flex-row gap-2 border-b border-gray-100 dark:border-gray-800 -mt-px">
+                <div className="flex gap-2 items-center">
+                    <div className={`h-9 flex-1 md:max-w-xs rounded-full ${bone}`} />
+                    <div className={`h-7 w-20 rounded-full ${bone}`} />
+                </div>
+                <div className="flex flex-1 flex-wrap gap-2 items-center">
+                    {Array.from({ length: 4 }).map((_, i) => <div key={i} className={`h-7 w-16 rounded-full ${bone}`} />)}
+                    <div className="self-stretch w-px bg-gray-200 dark:bg-gray-700 mx-1" />
+                    {Array.from({ length: 3 }).map((_, i) => <div key={i} className={`h-7 w-14 rounded-full ${bone}`} />)}
                 </div>
             </div>
 
-            <div className="flex flex-col gap-10">
-                <SectionSkeleton label="most played" count={4} />
-                <SectionSkeleton label="recently added" count={4} />
-                <SectionSkeleton label="your most played" count={4} />
+            <div>
+                <div className={`h-4 w-40 rounded mb-4 ${bone}`} />
+                <div className="flex flex-col md:grid md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 md:gap-6">
+                    {Array.from({ length: 12 }).map((_, i) => <ItemSkeleton key={i} />)}
+                </div>
             </div>
         </div>
     )

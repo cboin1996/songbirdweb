@@ -566,7 +566,8 @@ test.describe('error states — bulk operations', () => {
         await library.waitForSongs()
 
         await page.route('**/v1/download/*', route =>
-            route.fulfill({ status: 500, body: 'Internal Server Error' })
+            // An API-style error: a plain-text 500 on a download reads as the proxy failing, which takes the app offline.
+            route.fulfill({ status: 500, contentType: 'application/json', body: '{"detail":"Internal Server Error"}' })
         )
 
         await library.enterSelectMode()

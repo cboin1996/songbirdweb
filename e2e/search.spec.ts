@@ -166,4 +166,27 @@ test.describe('queue search', () => {
         const totalAfter = await player.queueRows().count()
         expect(totalAfter).toBe(totalBefore)
     })
+
+    test('queue search keeps the rows that match and drops the rest', async ({ page }) => {
+        const lib = new LibraryPage(page)
+        const player = new PlayerBar(page)
+        await lib.goto()
+        await lib.waitForSongs()
+        test.skip((await lib.songCards.count()) < 6, 'the e2e queue user has fewer than 6 library songs; the bench user covers this')
+
+        await lib.playAllBtn.click()
+        await player.waitForBar()
+        await player.waitForTrackName()
+        const currentTrack = (await player.getTrackName()).trim()
+        await player.openQueue()
+        const total = await player.queueRows().count()
+        test.skip(total <= 5, 'queue search shows only for 6+ songs')
+
+        await player.queueSearch.fill(currentTrack)
+        await expect(player.queueSearchEmpty).toHaveCount(0)
+        const shown = await player.queueRows().count()
+        expect(shown).toBeGreaterThanOrEqual(1)
+        expect(shown).toBeLessThan(total)
+        await expect(player.queueRows().filter({ hasText: currentTrack }).first()).toBeVisible()
+    })
 })

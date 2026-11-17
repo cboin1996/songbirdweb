@@ -4,7 +4,7 @@ import { EVENTS } from './events'
 import { readTestOverride } from './test-overrides'
 import { isOffline, subscribeOffline } from './offline-signal'
 import { createWriteChain } from './queue-writes'
-import { normalizeArtworkSize, artworkVersionQuery, resetArtworkVersions, ARTWORK_VERSIONS_KEY } from './artwork'
+import { normalizeArtworkSize } from './artwork'
 
 const isServer = typeof window === 'undefined'
 export const BASE_URL = isServer
@@ -231,8 +231,51 @@ function markServerUnreachable() {
 // Any answer the API itself gave shows it is there, whatever it says: a 404 or a 500
 // came from the server. A 502 is the proxy saying the API is not, and a copy the
 // service worker served from its cache says nothing about the server.
-function answeredByServer(r: Response): boolean {
-  return r.status !== 502 && !r.headers.get('X-SW-Stale')
+//
+// Song downloads skip the /v1 route handler (see next.config.ts), so when the API is
+// down the Next rewrite answers a plain-text 500, not the handler's 502. The API's
+// own errors are JSON, so a non-JSON 500 on a download is the proxy failing.
+function proxyFailed(r: Response, url: string): boolean {
+  if (r.status === 502) return true
+  return r.status === 500 && DOWNLOAD_FILE_PATH.test(url) && !(r.headers.get('content-type') ?? '').includes('json')
+}
+function answeredByServer(r: Response, url = ''): boolean {
+  return !proxyFailed(r, url) && !r.headers.get('X-SW-Stale')
+}
+// A song's file: /v1/download/<id>, not the POST that starts a download.
+const DOWNLOAD_FILE_PATH = /\/v1\/download\/[^/?]+/
+
+// A connection that dies without being closed (airplane mode switched on, a phone between
+// towers) leaves requests hanging until the browser's own timeout, some fifteen seconds,
+// while the browser may still report a connection. So a request that has not been answered
+// after a moment makes the app ask the server something small, with a short patience of
+// its own; if that goes unanswered too, the server is taken as unreachable now.
+// Not for song files, which are legitimately long.
+const SLOW_REQUEST_MS = 1500
+const SILENCE_PROBE_MS = 1500
+
+// One probe at a time, shared: slow requests that pile up behind a dead connection ask the
+// server once between them, not once each.
+let silenceProbe: Promise<boolean> | null = null
+function probeServer(): Promise<boolean> {
+  silenceProbe ??= fetch(`${API_V1}/health`, { cache: 'no-store', signal: AbortSignal.timeout(readTestOverride('__silenceProbeMs', SILENCE_PROBE_MS)) })
+    .then(r => answeredByServer(r))
+    .catch(() => false)
+    .finally(() => { silenceProbe = null })
+  return silenceProbe
+}
+
+function watchForSilence(url: string): () => void {
+  if (typeof window === 'undefined' || DOWNLOAD_FILE_PATH.test(url) || url.includes('/v1/health')) return () => {}
+  let settled = false
+  const timer = setTimeout(async () => {
+    if (isOffline()) return
+    const answered = await probeServer()
+    // The request itself was answered while the probe ran: the server is there.
+    if (answered || settled) return
+    markServerUnreachable()
+  }, readTestOverride('__slowRequestMs', SLOW_REQUEST_MS))
+  return () => { settled = true; clearTimeout(timer) }
 }
 
 // One request, and what it says about the server: no answer or a 502 means it cannot
@@ -240,19 +283,22 @@ function answeredByServer(r: Response): boolean {
 // FetchError with status 0 for the first.
 async function sendRequest(args: { url: string; method: string; signal?: AbortSignal }, options: RequestInit): Promise<Response> {
   let response: Response;
+  const stopWatch = watchForSilence(args.url)
   try {
     response = await fetch(args.url, options);
   } catch {
+    stopWatch()
     // The caller gave up waiting: a slow answer is not an unreachable server.
     if (args.signal?.aborted) throw new FetchError(`gave up waiting: ${args.method} ${args.url}`, 0);
     markServerUnreachable();
     throw new FetchError(`server unavailable: ${args.method} ${args.url}`, 0);
   }
-  if (response.status === 502) {
+  stopWatch()
+  if (proxyFailed(response, args.url)) {
     markServerUnreachable();
     throw new FetchError(`server unavailable: ${args.method} ${args.url}`, 0);
   }
-  if (typeof window !== 'undefined' && answeredByServer(response)) window.dispatchEvent(new CustomEvent(EVENTS.serverReachable))
+  if (typeof window !== 'undefined' && answeredByServer(response, args.url)) window.dispatchEvent(new CustomEvent(EVENTS.serverReachable))
   return response;
 }
 
@@ -396,8 +442,6 @@ async function forgetSignedInData(): Promise<void> {
   try { localStorage.removeItem('playerState') } catch { /* storage unavailable */ }
   try { await clearLibraryCache() } catch { /* nothing to clear */ }
   forgetLastWritten()
-  try { localStorage.removeItem(ARTWORK_VERSIONS_KEY) } catch { /* storage unavailable */ }
-  resetArtworkVersions()
   try {
     if (typeof caches !== 'undefined') {
       for (const name of await caches.keys()) {
@@ -424,6 +468,7 @@ export interface PlayableSong {
   last_position?: number
   last_played_at?: string | null
   artwork_cached?: boolean
+  artwork_updated_at?: number | null
   source?: { label: string; href: string; id: string } | null
 }
 
@@ -432,6 +477,7 @@ export interface LibrarySong {
   url: string
   properties: Properties | null
   artwork_cached: boolean
+  artwork_updated_at?: number | null
   parent_song_id: string | null
   root_song_id: string | null
   owner_id: string | null
@@ -513,6 +559,7 @@ export interface SongWithCount {
   count: number
   source?: string | null
   artwork_cached?: boolean
+  artwork_updated_at?: number | null
 }
 
 export interface RecentlyPlayedSong {
@@ -520,6 +567,7 @@ export interface RecentlyPlayedSong {
   properties: Properties | null
   last_played_at: string
   artwork_cached?: boolean
+  artwork_updated_at?: number | null
 }
 
 export interface RecentlySavedSong {
@@ -527,13 +575,14 @@ export interface RecentlySavedSong {
   properties: Properties | null
   added_at: string
   artwork_cached?: boolean
+  artwork_updated_at?: number | null
 }
 
 export interface ExploreData {
   most_played: SongWithCount[]
   most_downloaded: SongWithCount[]
   most_libraryed: SongWithCount[]
-  recently_added: { uuid: string; url: string; properties: Properties | null; added_at: string; source?: string | null; artwork_cached?: boolean }[]
+  recently_added: { uuid: string; url: string; properties: Properties | null; added_at: string; source?: string | null; artwork_cached?: boolean; artwork_updated_at?: number | null }[]
   your_most_played: SongWithCount[]
   your_most_downloaded: SongWithCount[]
   your_recently_saved: RecentlySavedSong[]
@@ -568,6 +617,7 @@ export interface DownloadedSong {
   songId?: string;
   properties: Properties;
   artworkCached?: boolean;
+  artworkUpdatedAt?: number | null;
   parentSongId?: string | null;
   rootSongId?: string | null;
   source?: string | null;
@@ -580,6 +630,8 @@ type SongLike = {
   properties?: Properties | null
   artwork_cached?: boolean
   artworkCached?: boolean
+  artwork_updated_at?: number | null
+  artworkUpdatedAt?: number | null
   source?: string | null
   owner_id?: string | null
   parent_song_id?: string | null
@@ -595,6 +647,7 @@ export function toSongCard(raw: SongLike): DownloadedSong {
     songId: raw.uuid ?? raw.songId,
     properties: raw.properties!,
     artworkCached: raw.artwork_cached ?? raw.artworkCached,
+    artworkUpdatedAt: raw.artwork_updated_at ?? raw.artworkUpdatedAt,
     source: raw.source,
     owner_id: raw.owner_id,
     parentSongId: raw.parent_song_id ?? raw.parentSongId,
@@ -607,6 +660,7 @@ export function toPlayableSong(raw: SongLike, source?: { label: string; href: st
     uuid: (raw.uuid ?? raw.songId)!,
     properties: raw.properties!,
     artwork_cached: raw.artwork_cached ?? raw.artworkCached,
+    artwork_updated_at: raw.artwork_updated_at ?? raw.artworkUpdatedAt,
     last_position: raw.last_position,
     last_played_at: raw.last_played_at,
     source: source ?? null,
@@ -618,12 +672,18 @@ export function artworkUrl(url: string, size: number): string {
   return url.replace(/\d+x\d+bb/, `${px}x${px}bb`)
 }
 
-export function songArtworkUrl(songId: string | undefined, artworkCached: boolean | undefined, artworkUrl100: string | undefined, size: number): string | null {
+/** The song's own art, at a URL that carries its `artwork_updated_at` (0 for the original), so replaced art is a new URL everywhere. */
+export function songArtworkUrl(songId: string | undefined, artworkCached: boolean | undefined, artworkUrl100: string | undefined, size: number, version?: number | null): string | null {
   if (songId && artworkCached) {
     const sizeParam = size <= 300 ? 'thumb' : 'full'
-    return `${API_V1_PATH}/songs/${songId}/artwork/${sizeParam}${artworkVersionQuery(songId)}`
+    return `${API_V1_PATH}/songs/${songId}/artwork/${sizeParam}/${version ?? 0}`
   }
   return artworkUrl100 ? artworkUrl(artworkUrl100, size) : null
+}
+
+/** The art of a library/queue song at a size: its own versioned art, else the iTunes url. */
+export function songArt(song: { uuid?: string; artwork_cached?: boolean; artwork_updated_at?: number | null; properties?: { artworkUrl100?: string } } | null | undefined, size: number): string | null {
+  return songArtworkUrl(song?.uuid, song?.artwork_cached, song?.properties?.artworkUrl100, size, song?.artwork_updated_at)
 }
 
 export interface Properties {
@@ -654,12 +714,16 @@ interface DownloadedSongIds {
   cached: boolean;
   properties?: Properties | null;
   artwork_cached?: boolean;
+  artwork_updated_at?: number | null;
 }
+
+// Every download asks for m4a, the higher quality of the two. The API still takes mp3.
+export const DOWNLOAD_FORMAT: AudioFormat = 'm4a'
 
 export async function downloadSongViaUrl(
   url: string,
   embedThumbnail: boolean = false,
-  fileFormat: AudioFormat = 'mp3',
+  fileFormat: AudioFormat = DOWNLOAD_FORMAT,
 ): Promise<DownloadedSongIds | undefined> {
   return fetchData<DownloadedSongIds>({
     url: DOWNLOAD_URL,
@@ -723,6 +787,7 @@ interface IndexedProperties {
   owner_id: string | null;
   source: string | null;
   artwork_cached: boolean;
+  artwork_updated_at?: number | null;
 }
 
 export async function fetchPropertiesFromIndex(
@@ -734,7 +799,7 @@ export async function fetchPropertiesFromIndex(
     method: "GET",
   });
   if (result === undefined) return undefined;
-  return result.map(song => ({ songId: song.uuid, properties: song.properties, owner_id: song.owner_id, source: song.source, artworkCached: song.artwork_cached }));
+  return result.map(song => ({ songId: song.uuid, properties: song.properties, owner_id: song.owner_id, source: song.source, artworkCached: song.artwork_cached, artworkUpdatedAt: song.artwork_updated_at }));
 }
 
 interface TaggingResponse {
@@ -1009,6 +1074,7 @@ export interface ShareInfo {
   expires_at: string
   song_id: string
   properties: Properties | null
+  artwork_updated_at?: number | null
 }
 
 export async function createShareToken(songId: string): Promise<ShareToken> {
@@ -1162,6 +1228,7 @@ export interface PlaylistSong {
   url: string
   properties: Properties | null
   artwork_cached: boolean
+  artwork_updated_at?: number | null
   owner_id: string | null
 }
 
@@ -1270,6 +1337,7 @@ export interface EligibleSong {
   eligible: boolean
   missing_fields: string[]
   artwork_cached: boolean
+  artwork_updated_at?: number | null
 }
 
 export async function fetchEligibleSongs(): Promise<EligibleSong[]> {

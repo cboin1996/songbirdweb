@@ -7,11 +7,10 @@ import RegionsPlugin from 'wavesurfer.js/plugins/regions'
 import {
   DOWNLOAD_URL, createEditJob, deleteEditDraft, Cut, EditParams, FadeEdit, fetchEditDraft,
   pollEditJob, Properties, saveEditDraft, songArtworkUrl, artworkUrl,
-  addToLibrary, removeFromLibrary, restoreSong, removeServerOfflineSong, uploadSongArtwork, API_V1,
+  addToLibrary, removeFromLibrary, restoreSong, fetchSongById, removeServerOfflineSong, uploadSongArtwork, API_V1,
   fetchSongEligibility, SongEligibility, isLosslessEligible,
 } from '../lib/data'
-import { uncacheSong, cacheSong, dropStoredArtwork } from '../lib/offline'
-import { bumpArtworkVersion } from '../lib/artwork'
+import { uncacheSong, cacheSong } from '../lib/offline'
 import { FaPlay, FaPause, FaTimes, FaUndo, FaRedo, FaTrash, FaCut, FaChevronDown } from 'react-icons/fa'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
@@ -19,6 +18,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { queryKeys } from '../lib/query-keys'
 import { usePlayer } from './player'
 import { useToast } from './toast'
+import { EVENTS } from '../lib/events'
 import QueryError from './query-error'
 import { routes, editSongRoute } from '../lib/routes'
 import { makeLocalId } from '../lib/uuid'
@@ -109,6 +109,9 @@ interface Props {
   songId: string
   properties: Properties
   artworkCached?: boolean
+  artworkUpdatedAt?: number | null
+  // The song's owner; null for a shared song, whose existing art only an admin may replace.
+  ownerId?: string | null
   parentSongId?: string | null
   rootSongId?: string | null
   isAdmin: boolean
@@ -116,7 +119,7 @@ interface Props {
 }
 
 export default function EditorModal({
-  songId, properties: initialProperties, artworkCached, parentSongId, rootSongId, isAdmin, onRetryAudio,
+  songId, properties: initialProperties, artworkCached, artworkUpdatedAt, ownerId, parentSongId, rootSongId, isAdmin, onRetryAudio,
 }: Props) {
   const router = useRouter()
   const queryClient = useQueryClient()
@@ -271,6 +274,8 @@ export default function EditorModal({
   const initialPropsRef = useRef<Properties>(initialProperties)
   const [publishAsOriginal, setPublishAsOriginal] = useState(false)
   const [artworkPreviewError, setArtworkPreviewError] = useState(false)
+  // The song's own art once replaced here: its new version, so the URL is new everywhere.
+  const [replacedArt, setReplacedArt] = useState<{ version: number | null } | null>(null)
   const [artworkUploadStatus, setArtworkUploadStatus] = useState<'idle' | 'uploading' | 'done' | 'error'>('idle')
   const [extraPropsOpen, setExtraPropsOpen] = useState(false)
   const artworkInputRef = useRef<HTMLInputElement>(null)
@@ -2308,7 +2313,9 @@ export default function EditorModal({
 
   const trimEnd = params.trim_end ?? duration
   const resultDuration = trimEnd - params.trim_start
-  const artSrc = songArtworkUrl(songId, artworkCached, initialProperties.artworkUrl100, 200)
+  // The API refuses a replace of a shared song's art by a non-admin; don't offer it.
+  const artworkLocked = !isAdmin && ownerId == null && !!artworkCached
+  const artSrc = songArtworkUrl(songId, artworkCached || !!replacedArt, initialProperties.artworkUrl100, 200, replacedArt ? replacedArt.version : artworkUpdatedAt)
   const artworkPreviewSrc = props.artworkUrl100 && !artworkPreviewError
     ? artworkUrl(props.artworkUrl100, 200)
     : null
@@ -2333,7 +2340,7 @@ export default function EditorModal({
         {/* header */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 dark:border-gray-800 shrink-0">
           {artSrc && (
-            <ArtImage src={artSrc} alt="" width={36} height={36} className="rounded shrink-0 object-cover" unoptimized={!!artworkCached} fallback={null} />
+            <ArtImage src={artSrc} alt="" width={36} height={36} className="rounded shrink-0 object-cover" unoptimized={!!artworkCached || !!replacedArt} fallback={null} />
           )}
           <div className="flex-1 min-w-0">
             <p className="font-medium truncate text-base">{props.trackName}</p>
@@ -2837,6 +2844,7 @@ export default function EditorModal({
               {artworkPreviewSrc && (
                 <Image src={artworkPreviewSrc} alt="" width={64} height={64} className="rounded-lg mb-1 object-cover" onError={() => setArtworkPreviewError(true)} />
               )}
+              {!(artworkLocked) && (
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -2859,9 +2867,12 @@ export default function EditorModal({
                     setArtworkUploadStatus('uploading')
                     try {
                       await uploadSongArtwork(songId, file)
-                      // New URLs for this song's local art, and the stored copies of the old ones dropped.
-                      bumpArtworkVersion(songId)
-                      void dropStoredArtwork(songId)
+                      // The API stamped the song with a new art version: read it, so this view and
+                      // every library list build the new URL.
+                      const fresh = await fetchSongById(songId)
+                      setReplacedArt({ version: fresh?.artwork_updated_at ?? null })
+                      window.dispatchEvent(new CustomEvent(EVENTS.artworkChanged, { detail: { songId, version: fresh?.artwork_updated_at ?? null } }))
+                      void queryClient.invalidateQueries({ queryKey: queryKeys.librarySongs })
                       setArtworkUploadStatus('done')
                       setProps(p => ({ ...p, artworkUrl100: `${API_V1}/songs/${songId}/artwork` }))
                       setArtworkPreviewError(false)
@@ -2872,6 +2883,7 @@ export default function EditorModal({
                   }}
                 />
               </div>
+              )}
             </label>
 
             <div className="grid grid-cols-2 gap-3">

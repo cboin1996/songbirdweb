@@ -4,8 +4,8 @@
 
 Source-of-truth references in code:
 
-- `next.config.ts` — exports `NEXT_PUBLIC_APP_VERSION`, sets up rewrites, image domains, and the 100 MB middleware body limit.
-- `middleware.ts` — uses `API_BASE_URL` (falling back to `NEXT_PUBLIC_API_HOST`) for `auth/refresh` calls during SSR.
+- `next.config.ts` — exports `NEXT_PUBLIC_APP_VERSION`, sets up rewrites, image domains, and the 100 MB proxy body limit.
+- `proxy.ts` — uses `API_BASE_URL` (falling back to `NEXT_PUBLIC_API_HOST`) for `auth/refresh` calls during SSR.
 - `app/lib/data.ts` — uses `API_BASE_URL` server-side and `NEXT_PUBLIC_API_BASE_URL` client-side to build `BASE_URL`.
 - `app/v1/[...path]/route.ts` — uses `API_BASE_URL` for the dev proxy.
 
@@ -14,8 +14,8 @@ Source-of-truth references in code:
 | Variable | Build-time? | Runtime? | Default | Where used | Purpose |
 |---|---|---|---|---|---|
 | `NEXT_PUBLIC_API_BASE_URL` | yes (inlined into client bundle) | yes (read by client code) | `''` (same-origin via `/v1` proxy) | `app/lib/data.ts` | Client-side API base URL. Empty string makes the browser hit same-origin `/v1/...` and rely on the proxy / nginx. Set to e.g. `https://api.example.com` to bypass the proxy. |
-| `API_BASE_URL` | no | yes (server only) | `http://localhost:8000` | `app/lib/data.ts`, `app/v1/[...path]/route.ts`, `middleware.ts`, `next.config.ts` rewrites | Server-side API base URL — used by RSC fetches, the `/v1` proxy (which forwards range and conditional headers), the middleware's session refresh, and the artwork rewrite. In Docker (keebox), set to `http://songbirdapi:8000` so the web container talks to the API container over the Docker network. |
-| `NEXT_PUBLIC_API_HOST` | yes | yes | `localhost` | `middleware.ts` | Fallback when `API_BASE_URL` is unset: constructs `http://${NEXT_PUBLIC_API_HOST}:8000` for the SSR `/v1/auth/refresh` call from middleware. Note: this is the **only** place the host shape is hardcoded; if you ever change the API port, change this and `API_BASE_URL` together. |
+| `API_BASE_URL` | no | yes (server only) | `http://localhost:8000` | `app/lib/data.ts`, `app/v1/[...path]/route.ts`, `proxy.ts`, `next.config.ts` rewrites | Server-side API base URL — used by RSC fetches, the `/v1` proxy (which forwards range and conditional headers), the proxy's session refresh, and the artwork rewrite. In Docker (keebox), set to `http://songbirdapi:8000` so the web container talks to the API container over the Docker network. |
+| `NEXT_PUBLIC_API_HOST` | yes | yes | `localhost` | `proxy.ts` | Fallback when `API_BASE_URL` is unset: constructs `http://${NEXT_PUBLIC_API_HOST}:8000` for the SSR `/v1/auth/refresh` call from the proxy. Note: this is the **only** place the host shape is hardcoded; if you ever change the API port, change this and `API_BASE_URL` together. |
 | `NEXT_PUBLIC_APP_VERSION` | yes | yes | `process.env.npm_package_version` (set by `next build`) | UI footer / about page | Auto-injected from `package.json` via `next.config.ts → env`. Don't set this manually. |
 | `TEST_USERNAME` | no | no (test only) | — | `e2e/*.spec.ts` (Playwright) | Login username for e2e tests. Stored in `.env.local`, not committed. |
 | `TEST_PASSWORD` | no | no (test only) | — | Playwright | Password for the e2e user. |
@@ -67,7 +67,7 @@ environment:
 
 `NEXT_PUBLIC_API_BASE_URL` is intentionally empty so the client hits same-origin `/v1/...`. Nginx terminates SSL and routes `/v1/*` to `127.0.0.1:9669` (the API container) and `/*` to `127.0.0.1:6996` (the web container).
 
-`NEXT_PUBLIC_API_HOST` is not set in prod because middleware's `auth/refresh` call uses `localhost:8000` as a default — **and it shouldn't, because the API container's hostname is `songbirdapi`.** This is a known minor wart; the middleware refresh path runs entirely on the server-side Next runtime so `localhost:8000` won't reach the API in Docker. If middleware refresh ever starts failing in prod, set `NEXT_PUBLIC_API_HOST=songbirdapi` in the web container env. (For keebox today this hasn't surfaced because the access token TTL of 15 min means most users never trip the SSR refresh path before another client-side fetch refreshes for them.)
+`NEXT_PUBLIC_API_HOST` is not set in prod because the proxy's `auth/refresh` call uses `localhost:8000` as a default — **and it shouldn't, because the API container's hostname is `songbirdapi`.** This is a known minor wart; the proxy refresh path runs entirely on the server-side Next runtime so `localhost:8000` won't reach the API in Docker. If the proxy refresh ever starts failing in prod, set `NEXT_PUBLIC_API_HOST=songbirdapi` in the web container env. (For keebox today this hasn't surfaced because the access token TTL of 15 min means most users never trip the SSR refresh path before another client-side fetch refreshes for them.)
 
 ## Adding a new env var
 

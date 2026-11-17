@@ -78,6 +78,8 @@ The Dockerfile uses the Next.js standalone output and runs as a non-root user on
 
 **Offline / OPFS**: Songs can be cached to the browser's Origin Private File System via the File System Access API. `app/lib/offline.ts` streams audio from `GET /download/{id}` and writes it to `audio/<id>.mp3` in OPFS. On playback, the player checks OPFS first and creates a blob URL if a cached file exists, avoiding a network request entirely. The `/settings` page shows storage usage and lets users clear the cache. The service worker (built from `public/sw.template.js`) stores the app shell and the last good answers of a few API reads, so the app opens and the player restores when launched without a connection.
 
+**Offline needs a secure origin**: the service worker, the Cache API (offline art, offline pages) and OPFS (saved songs) exist only on `https://` or `http://localhost`. Over plain `http` on a LAN address (for example `http://192.168.1.10:3000` on a phone) the app works online, but nothing can be saved or shown offline, and Settings → check cache health says the art was not checked. Serve it over https for offline use.
+
 **Audio editing**: The editor modal uses WaveSurfer.js to render a waveform and exposes trim, volume, and fade controls. Submitting creates an async job via `POST /edit/songs/{id}`; the UI polls `GET /edit/jobs/{job_id}` until the job completes. Draft parameters are auto-saved to the API so they survive page reloads.
 
 **Explore**: The `/explore` page fetches aggregated stats (`GET /songs/explore`) and lets users browse most-played, most-downloaded, most-saved, and recently-added songs across configurable time windows (today / this week / all time).
@@ -86,9 +88,13 @@ The Dockerfile uses the Next.js standalone output and runs as a non-root user on
 
 **Admin**: `/admin` is accessible only to users with `role=admin`. It lists all users and allows changing roles, toggling active status, and deleting accounts.
 
+## Release order
+
+When a change spans repos, release in dependency order: `songbirdcore` → `songbirdapi` → `songbirdweb`. The web app calls API routes (such as the versioned artwork route) that older APIs lack, so the API goes live first.
+
 ## Further docs
 
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — stack, route map, the `/v1` dev proxy, middleware, service worker, offline strategy.
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — stack, route map, the `/v1` dev proxy, the proxy, service worker, offline strategy.
 - [`docs/STATE.md`](docs/STATE.md) — `PlayerProvider` API, library / editor / import state shapes, SW lifecycle.
 - [`docs/ENV.md`](docs/ENV.md) — exhaustive env var reference (build-time vs runtime).
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — branch + commit policy, how to add a page or component, pre-PR checklist.

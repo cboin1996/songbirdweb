@@ -66,6 +66,8 @@ export default function EditPage({ params }: { params: Promise<{ id: string }> }
             songId={id}
             properties={renderSong.properties!}
             artworkCached={renderSong.artwork_cached}
+            artworkUpdatedAt={renderSong.artwork_updated_at}
+            ownerId={renderSong.owner_id}
             parentSongId={renderSong.parent_song_id}
             rootSongId={renderSong.root_song_id}
             isAdmin={isAdmin}

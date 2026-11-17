@@ -122,6 +122,108 @@ test.describe('download page', () => {
         expect(errors, `Console errors: ${errors.join('\n')}`).toHaveLength(0)
     })
 
+    test('a download answered "already in the library" is not tagged again', async ({ page }) => {
+        const songId = '00000000-0000-4000-8000-0000000000aa'
+        const props = {
+            trackName: 'Already Here', artistName: 'Someone', collectionName: 'An Album', artworkUrl100: '',
+            primaryGenreName: 'Pop', trackNumber: 1, trackCount: 1, collectionId: 1, discNumber: 1, discCount: 1,
+            releaseDate: '2020-01-01T00:00:00Z', releaseDateKey: '2020-01-01',
+        }
+        const tagRequests: string[] = []
+        await page.route('**/v1/properties/itunes*', route => route.fulfill({ json: [props] }))
+        await page.route('**/v1/properties', route => {
+            tagRequests.push(route.request().method())
+            return route.fulfill({ json: { song_id: songId } })
+        })
+        await page.route('**/v1/download', route => route.request().method() === 'POST'
+            ? route.fulfill({ json: { song_ids: [songId], cached: true, properties: props, artwork_cached: false } })
+            : route.continue())
+
+        const dl = new DownloadPage(page)
+        await dl.gotoSongSearch('already here')
+        await expect(dl.songCards.first()).toBeVisible({ timeout: 15000 })
+        await dl.songCards.first().click()
+        await dl.urlInput().fill('https://example.com/already-here.mp3')
+        await page.getByRole('button', { name: /^download$/i }).click()
+
+        await expect(page.getByRole('button', { name: 'add to library', exact: true })).toBeVisible({ timeout: 15000 })
+        expect(tagRequests).toEqual([])
+    })
+
+    test('song search and album downloads ask for m4a', async ({ page }) => {
+        const props = {
+            trackName: 'Format Check', artistName: 'Someone', collectionName: 'An Album', artworkUrl100: '',
+            primaryGenreName: 'Pop', trackNumber: 1, trackCount: 1, collectionId: 1, discNumber: 1, discCount: 1,
+            releaseDate: '2020-01-01T00:00:00Z', releaseDateKey: '2020-01-01',
+        }
+        const bodies: any[] = []
+        await page.route('**/v1/properties/itunes*', route => route.fulfill({ json: [props] }))
+        await page.route('**/v1/download', route => {
+            if (route.request().method() !== 'POST') return route.continue()
+            bodies.push(route.request().postDataJSON())
+            return route.fulfill({ json: { song_ids: ['00000000-0000-4000-8000-0000000000bb'], cached: true, properties: props, artwork_cached: false } })
+        })
+
+        const dl = new DownloadPage(page)
+        await dl.gotoSongSearch('format check')
+        await expect(dl.songCards.first()).toBeVisible({ timeout: 15000 })
+        await dl.songCards.first().click()
+        await dl.urlInput().fill('https://example.com/format-check.mp3')
+        await page.getByRole('button', { name: /^download$/i }).click()
+        await expect.poll(() => bodies.length, { timeout: 15000 }).toBe(1)
+        expect(bodies[0].file_format).toBe('m4a')
+    })
+
+    test('an album track download asks for m4a', async ({ page }) => {
+        const props = {
+            trackName: 'Album Track', artistName: 'Someone', collectionName: 'An Album', artworkUrl100: '',
+            primaryGenreName: 'Pop', trackNumber: 1, trackCount: 1, collectionId: 1, discNumber: 1, discCount: 1,
+            releaseDate: '2020-01-01T00:00:00Z', releaseDateKey: '2020-01-01',
+        }
+        const bodies: any[] = []
+        await page.route('**/v1/properties/itunes*', route => {
+            const mode = new URL(route.request().url()).searchParams.get('mode')
+            return route.fulfill({ json: mode === 'album'
+                ? [{ artistName: 'Someone', collectionName: 'An Album', trackCount: 1, collectionId: 1 }]
+                : [props] })
+        })
+        await page.route('**/v1/download', route => {
+            if (route.request().method() !== 'POST') return route.continue()
+            bodies.push(route.request().postDataJSON())
+            return route.fulfill({ json: { song_ids: ['00000000-0000-4000-8000-0000000000cc'], cached: true, properties: props, artwork_cached: false } })
+        })
+
+        const dl = new DownloadPage(page)
+        await dl.gotoAlbumSearch('an album')
+        await page.getByRole('button').filter({ hasText: /an album/i }).first().click()
+        await expect(page).toHaveURL(/\/download\/song\?.*lookup=true/, { timeout: 10000 })
+        await expect(dl.songCards.first()).toBeVisible({ timeout: 15000 })
+        await dl.songCards.first().click()
+        await dl.urlInput().fill('https://example.com/album-track.mp3')
+        await page.getByRole('button', { name: /^download$/i }).click()
+        await expect.poll(() => bodies.length, { timeout: 15000 }).toBe(1)
+        expect(bodies[0].file_format).toBe('m4a')
+    })
+
+    test('search results whose art cannot be fetched show the stand-in, not an empty box', async ({ page }) => {
+        const props = {
+            trackName: 'No Art Offline', artistName: 'Someone', collectionName: 'An Album',
+            artworkUrl100: 'https://is1-ssl.mzstatic.com/image/thumb/Music/x/100x100bb.jpg',
+            primaryGenreName: 'Pop', trackNumber: 1, trackCount: 1, collectionId: 1, discNumber: 1, discCount: 1,
+            releaseDate: '2020-01-01T00:00:00Z', releaseDateKey: '2020-01-01',
+        }
+        await page.route('**/v1/properties/itunes*', route => route.fulfill({ json: [props] }))
+        // What a phone with no signal and nothing stored sees: the optimizer cannot be reached.
+        await page.route('**/_next/image*', route => route.abort('internetdisconnected'))
+
+        const dl = new DownloadPage(page)
+        await dl.gotoSongSearch('no art offline')
+        const card = dl.songCards.first()
+        await expect(card).toBeVisible({ timeout: 15000 })
+        await expect(card.getByText('🎵')).toBeVisible({ timeout: 10000 })
+        await expect(card.locator('img')).toHaveCount(0)
+    })
+
     // --- real flow tests (hit yt-dlp + iTunes; local only) ---
 
     test('/download/song flow downloads first iTunes result', async ({ page }) => {
@@ -245,7 +347,7 @@ test.describe('download page', () => {
 
     // --- format-specific download + tag tests (local only) ---
 
-    for (const format of ['mp3', 'm4a'] as const) {
+    for (const format of ['m4a'] as const) {
         test(`download + tag as ${format}`, async ({ page }) => {
             test.skip(!!process.env.CI, 'requires yt-dlp + network — local only')
             test.slow()
@@ -255,8 +357,6 @@ test.describe('download page', () => {
             let songUuid: string | null = null
 
             try {
-                await api.put('/v1/settings', { data: { audio_format: format } })
-
                 await dl.gotoSongSearch('jolene')
 
                 const itunesCard = dl.songCards
@@ -297,7 +397,6 @@ test.describe('download page', () => {
                     await api.delete(`/v1/library/${songUuid}`)
                     await api.delete(`/v1/download/${songUuid}`)
                 }
-                await api.put('/v1/settings', { data: { audio_format: 'mp3' } })
                 await api.dispose()
             }
         })

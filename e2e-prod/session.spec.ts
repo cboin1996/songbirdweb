@@ -29,6 +29,18 @@ test.describe('session on the production build', () => {
         expect((await context.cookies()).some(c => c.name === 'access_token')).toBe(true)
     })
 
+    // Downloads bypass the /v1 route handler through a rewrite (next.config.ts) because the
+    // handler path strips content-length; a regression there breaks seeking and progress.
+    test('a download keeps its content-length and answers a range with 206 and content-range', async ({ page }) => {
+        const id = await firstSongId(page)
+
+        const whole = await page.request.get(`/v1/download/${id}`, { headers: { Range: 'bytes=0-9' } })
+        expect(whole.status()).toBe(206)
+        expect(whole.headers()['content-length']).toBe('10')
+        expect(whole.headers()['content-range']).toMatch(/^bytes 0-9\/\d+$/)
+        expect(whole.headers()['accept-ranges']).toBe('bytes')
+    })
+
     test('a page load with an expired access cookie stays signed in, asking the browser to refresh at most once', async ({ page, context }) => {
         const refreshes: string[] = []
         page.on('request', r => { if (new URL(r.url()).pathname === '/v1/auth/refresh') refreshes.push(r.url()) })

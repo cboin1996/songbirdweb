@@ -28,6 +28,10 @@ export const ERROR_USERNAME = process.env.E2E_ERROR_USERNAME!
 export const ERROR_PASSWORD = process.env.E2E_ERROR_PASSWORD!
 export const OFFLINE_USERNAME = process.env.E2E_OFFLINE_USERNAME!
 export const OFFLINE_PASSWORD = process.env.E2E_OFFLINE_PASSWORD!
+// Offline specs outside offline-songs use their own user so two workers never save as one account.
+export const OFFLINE_ART_USERNAME = `${OFFLINE_USERNAME}-art`
+export const OFFLINE_LIBRARY_USERNAME = `${OFFLINE_USERNAME}-lib`
+export const PREFETCH_USERNAME = `${OFFLINE_USERNAME}-prefetch`
 // .env.local sets NEXT_PUBLIC_API_BASE_URL='' (empty) so the browser uses
 // relative URLs in dev. Tests call the API directly from outside the browser
 // and need an absolute URL — use `||` so empty string also falls through.

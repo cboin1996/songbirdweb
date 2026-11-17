@@ -430,6 +430,8 @@ test.describe('library page', () => {
         })
         const lib = new LibraryPage(page)
         await lib.goto()
+        await lib.waitForSongs()
+        test.skip((await lib.songCards.count()) < 3, 'needs at least 3 library songs with properties')
         await expect.poll(() => ids.length, { timeout: 10000 }).toBe(3)
         await expect(cardOf(page, ids[2])).toBeVisible({ timeout: 10000 })
         // A later library answer re-renders every row, which would hide a stale handler.

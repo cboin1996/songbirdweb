@@ -454,6 +454,7 @@ test.describe('player queue', () => {
             })
             page.on('response', r => {
                 if (r.request().method() === 'POST' && r.url().endsWith('/v1/player/queue')) events.push('insert:response')
+                if (r.request().method() === 'PUT' && r.url().endsWith('/v1/player/queue/reorder')) events.push('reorder:response')
             })
             await page.route('**/v1/player/queue', async route => {
                 if (route.request().method() !== 'POST') return route.continue()
@@ -470,6 +471,10 @@ test.describe('player queue', () => {
 
             await expect.poll(() => events.includes('reorder:request') && events.includes('insert:response'), { timeout: 15000 }).toBe(true)
             expect(events.indexOf('insert:response')).toBeLessThan(events.indexOf('reorder:request'))
+
+            // The screen's copy is saved a couple of seconds after a change, so before the
+            // reorder has been answered the server and the screen can agree on the old order.
+            await expect.poll(() => events.includes('reorder:response'), { timeout: 15000 }).toBe(true)
 
             // And what the server ends up holding is what the screen shows: a reorder
             // that had run first would have moved the wrong song.

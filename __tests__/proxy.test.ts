@@ -1,10 +1,10 @@
 /** @jest-environment node */
-// middleware.ts refreshes server-side on a page navigation when the access
+// proxy.ts refreshes server-side on a page navigation when the access
 // token has expired. The API now rotates the refresh token, so
 // the rotated cookie has to reach the browser; dropping it makes the browser's
 // next refresh look like token reuse and the API revokes the session.
 import { NextRequest } from 'next/server'
-import { middleware, config } from '../middleware'
+import { proxy as middleware, config } from '../proxy'
 
 const fetchMock = jest.fn()
 
@@ -147,10 +147,70 @@ describe('where the middleware refreshes', () => {
     it('uses the API base the app is configured with', async () => {
         jest.resetModules()
         process.env.API_BASE_URL = 'http://api.internal:9000'
-        const { middleware: fresh } = await import('../middleware')
+        const { proxy: fresh } = await import('../proxy')
         apiResponds(200, [ACCESS_LINE, REFRESH_LINE])
         await fresh(pageRequest())
         expect(fetchMock.mock.calls[0][0]).toBe('http://api.internal:9000/v1/auth/refresh')
         delete process.env.API_BASE_URL
+    })
+})
+
+// Song downloads are proxied by a Next rewrite (next.config.ts), and Next drops the
+// middleware's response headers on a proxied rewrite, so a refreshed session's cookies
+// would never reach the browser: the API rotated the refresh token and the browser kept
+// the old one (reuse, then sign-out). A refresh on a download therefore answers with a
+// redirect to the same URL, which does carry the cookies; the repeat request has a valid
+// access cookie and goes straight to the rewrite.
+describe('a song download with an expired access cookie', () => {
+    const URL_ = 'http://localhost:3000/v1/download/abc'
+    function downloadRequest(extraCookie = ''): NextRequest {
+        return new NextRequest(URL_, {
+            headers: { range: 'bytes=0-', cookie: `access_token=${EXPIRED_ACCESS}; refresh_token=${OLD_REFRESH}${extraCookie}` },
+        })
+    }
+
+    it('is refreshed, then sent back to the same URL with the rotated cookies', async () => {
+        apiResponds(200, [ACCESS_LINE, REFRESH_LINE])
+
+        const response = await middleware(downloadRequest())
+
+        expect(response.status).toBe(307)
+        expect(response.headers.get('location')).toBe(URL_)
+        expect(response.headers.getSetCookie()).toEqual(expect.arrayContaining([ACCESS_LINE, REFRESH_LINE]))
+    })
+
+    it('marks the retry cookie Secure over https, and not over plain http', async () => {
+        apiResponds(200, [ACCESS_LINE, REFRESH_LINE])
+        const plain = await middleware(downloadRequest())
+        expect(plain.headers.getSetCookie().find(l => l.startsWith('sb-dl-refreshed='))).not.toMatch(/Secure/)
+
+        apiResponds(200, [ACCESS_LINE, REFRESH_LINE])
+        const secure = await middleware(new NextRequest('https://songbird.test/v1/download/abc', {
+            headers: { range: 'bytes=0-', cookie: `access_token=${EXPIRED_ACCESS}; refresh_token=${OLD_REFRESH}` },
+        }))
+        expect(secure.headers.getSetCookie().find(l => l.startsWith('sb-dl-refreshed='))).toMatch(/; Secure/)
+    })
+
+    it('is not sent back a second time when the browser still has no valid access cookie', async () => {
+        apiResponds(200, [ACCESS_LINE, REFRESH_LINE])
+        const first = await middleware(downloadRequest())
+        const marker = first.headers.getSetCookie().find(l => l.startsWith('sb-dl-refreshed='))
+        expect(marker).toBeDefined()
+
+        apiResponds(200, [ACCESS_LINE, REFRESH_LINE])
+        const second = await middleware(downloadRequest(`; ${marker!.split(';')[0]}`))
+
+        expect(second.status).toBe(200)
+        expect(second.headers.get('location')).toBeNull()
+        expect(forwardedCookies(second)).toContain(`access_token=${NEW_ACCESS}`)
+    })
+
+    it('still redirects to the sign-in page when the API rejects the session', async () => {
+        apiResponds(401)
+
+        const response = await middleware(downloadRequest())
+
+        expect(response.status).toBe(307)
+        expect(new URL(response.headers.get('location')!).pathname).toBe('/')
     })
 })

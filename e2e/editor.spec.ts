@@ -32,6 +32,22 @@ test.describe('editor modal', () => {
         expect(abortErrors, `AbortErrors found: ${abortErrors.join('\n')}`).toHaveLength(0)
     })
 
+    test('a non-admin is not offered to replace the art of a shared song', async ({ page }) => {
+        const api = await apiLoginAs(EDITOR_USERNAME, EDITOR_PASSWORD)
+        const res = await api.get(`${API_V1}/songs/library`)
+        const songs = await res.json() as { uuid: string; owner_id: string | null; artwork_cached: boolean; properties: unknown }[]
+        await api.dispose()
+        const shared = songs.find(s => s.owner_id === null && s.artwork_cached && s.properties)
+        test.skip(!shared, 'no shared song with art in the editor user library')
+
+        await page.goto(editSongRoute(shared!.uuid))
+        const editor = new EditorPage(page)
+        await expect(editor.propertiesTab).toBeVisible({ timeout: 15000 })
+        await editor.propertiesTab.click()
+        await expect(page.getByText('Artwork', { exact: true })).toBeVisible()
+        await expect(page.getByRole('button', { name: /upload image/i })).toHaveCount(0)
+    })
+
     test('waveform loads and preview-with-edits button becomes active', async ({ page }) => {
         const editor = new EditorPage(page)
         await editor.openFromLibrary()
@@ -331,6 +347,12 @@ test.describe('editor modal', () => {
 
 
     test('close guard: amber banner appears on unsaved change then auto-closes', async ({ page }) => {
+        // The banner shows only while the draft is being saved, which on a quick save is
+        // a few milliseconds: shorter than a check's polling interval. Hold the save so
+        // the banner stays up long enough to be seen, every run.
+        await page.route('**/edit/songs/*/draft', route =>
+            new Promise(resolve => setTimeout(() => { route.continue(); resolve(undefined) }, 1500))
+        )
         const editor = new EditorPage(page)
         await editor.openFromLibrary()
         await editor.waitForWaveform()
