@@ -1,5 +1,5 @@
 import { test, expect } from '../e2e/fixtures/test'
-import { login } from '../e2e/helpers'
+import { login, apiLogin, pickFirstLibrarySong, API_V1 } from '../e2e/helpers'
 import { LibraryPage, PlayerBar } from '../e2e/pages'
 
 const LIBRARY = '/library'
@@ -46,17 +46,23 @@ test.describe('mobile responsive behaviors', () => {
   })
 
   test('edits list opens on screen from the right-hand icon', async ({ page }) => {
-    const now = new Date().toISOString()
-    await page.route('**/v1/edit/drafts', route => route.fulfill({
-      json: [{ song_id: 'draft-1', properties: { trackName: 'A draft with a rather long track name that would run off' }, artwork_cached: false, updated_at: now }],
-    }))
-    await page.reload()
-    await new LibraryPage(page).waitForSongs()
-    await page.getByTestId('edits-in-progress').click()
-    const list = (await page.getByTestId('edits-list').boundingBox())!
-    const vw = page.viewportSize()!.width
-    expect(list.x).toBeGreaterThanOrEqual(0)
-    expect(list.x + list.width).toBeLessThanOrEqual(vw)
+    // A real draft, not a mocked list: the browser's service worker can bypass page.route.
+    const api = await apiLogin()
+    const song = await pickFirstLibrarySong(api)
+    test.skip(!song, 'no library song to draft')
+    const draftUrl = `${API_V1}/edit/songs/${song!.uuid}/draft`
+    expect((await api.put(draftUrl, { data: {} })).ok()).toBe(true)
+    try {
+      await page.reload()
+      await new LibraryPage(page).waitForSongs()
+      await page.getByTestId('edits-in-progress').click()
+      const list = (await page.getByTestId('edits-list').boundingBox())!
+      const vw = page.viewportSize()!.width
+      expect(list.x).toBeGreaterThanOrEqual(0)
+      expect(list.x + list.width).toBeLessThanOrEqual(vw)
+    } finally {
+      await api.delete(draftUrl)
+    }
   })
 
   test('library toolbar is NOT sticky on mobile', async ({ page }) => {

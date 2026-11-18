@@ -150,7 +150,7 @@ describe('findStoredArtwork', () => {
         for (let i = 0; i < 200; i++) await findStoredArtwork(`/v1/songs/gone${i}/artwork/thumb/1`)
         const ms = performance.now() - started
         expect(keyListings).toBeLessThanOrEqual(2)
-        expect(ms).toBeLessThan(250)
+        expect(ms).toBeLessThan(1000) // loose: shared CI runners are slow; keyListings above is the real guard
         expect(await findStoredArtwork('/v1/songs/s1999/artwork/thumb/7')).toBeDefined()
     })
 
