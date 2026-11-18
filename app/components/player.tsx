@@ -26,7 +26,7 @@ import { createPlayerStore, type PlayerStore, type PlayerSnapshot, type RepeatMo
 import { createListenClock } from "../lib/listen-clock"
 import { useQueryClient } from "@tanstack/react-query"
 import { queryKeys } from "../lib/query-keys"
-import { mediaSessionArtwork, storedMediaArtwork } from "../lib/artwork"
+import { mediaSessionArtwork, storedMediaArtwork, noArtArtwork, loadableArtwork, type MediaArtwork } from "../lib/artwork"
 import { isValidShuffleOrder } from "../lib/shuffle-order"
 import { EVENTS } from "../lib/events"
 import Slider from "./slider"
@@ -427,6 +427,9 @@ let mediaSyncSong = ''
 let mediaSyncKey = ''
 // Each offline lookup of stored art takes a number; only the latest may set the lock screen.
 let mediaSyncSeq = 0
+// Lock-screen art already seen to load this session: checked once per image, not per track change.
+const artSeenLoading = new Set<string>()
+const ART_CHECK_MS = 8000
 
 export function PlayerProvider({ children }: { children: React.ReactNode }) {
     useRenderCount('player')
@@ -1158,6 +1161,27 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         removeFromQueue(idx)
     }
 
+    // Whether the lock screen's own fetch of this art will work. The OS fetch skips the service
+    // worker, so same-origin art is asked of the server past the worker's stored copies; remote
+    // art is loaded as an image. Slow counts as failed: the OS would show the blank tile meanwhile.
+    async function artLoads(src: string): Promise<boolean> {
+        if (artSeenLoading.has(src)) return true
+        const check = src.startsWith(window.location.origin)
+            ? fetch(src, { headers: { 'x-songbird-art-check': '1' }, cache: 'no-cache' }).then(async r => r.ok && (await r.blob()).size > 0)
+            : new Promise<boolean>(resolve => {
+                const img = document.createElement('img') // `Image` here is next/image
+                img.onload = () => resolve(true)
+                img.onerror = () => resolve(false)
+                img.src = src
+            })
+        const ok = await Promise.race([
+            check.catch(() => false),
+            new Promise<boolean>(resolve => setTimeout(() => resolve(false), ART_CHECK_MS)),
+        ])
+        if (ok) artSeenLoading.add(src)
+        return ok
+    }
+
     function setMediaAction(action: MediaSessionAction, handler: MediaSessionActionHandler | null) {
         try { navigator.mediaSession.setActionHandler(action, handler) } catch {}
     }
@@ -1186,16 +1210,27 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             mediaBlobUrls = []
             if (offlineNow) {
                 // The OS cannot reach the service worker's cache, so offline it is given only
-                // copies this device stored, as blob: urls; none stored, no art entry at all.
+                // copies this device stored, as blob: urls.
                 navigator.mediaSession.metadata = describe([])
                 const asked = song.uuid
-                void storedMediaArtwork(artwork, url => findStoredArtwork(url), blob => URL.createObjectURL(blob)).then(list => {
+                const stored = (list: MediaArtwork[]) => storedMediaArtwork(list, url => findStoredArtwork(url), blob => URL.createObjectURL(blob))
+                // Art this device never stored: the music note (precached with the app), as online.
+                const note = noArtArtwork(origin)
+                // A song with no art already asked for the note; a miss is not asked again.
+                void stored(artwork).then(list => list.length || artwork[0]?.src === note.src ? list : stored([note])).then(list => {
                     if (mediaSyncSong !== asked || mediaSyncSeq !== seq) { list.forEach(a => URL.revokeObjectURL(a.src)); return }
                     mediaBlobUrls = list.map(a => a.src)
                     if (list.length) navigator.mediaSession.metadata = describe(list)
                 })
             } else {
                 navigator.mediaSession.metadata = describe(artwork)
+                // Art that fails to load (gone from the server, remote host down) gets the note,
+                // not the OS's blank tile.
+                const asked = song.uuid
+                void loadableArtwork(artwork, artLoads, noArtArtwork(origin)).then(list => {
+                    if (list === artwork || mediaSyncSong !== asked || mediaSyncSeq !== seq) return
+                    navigator.mediaSession.metadata = describe(list)
+                })
             }
         }
         setMediaAction('play', () => resume())

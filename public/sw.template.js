@@ -87,6 +87,9 @@ async function matchArtworkAnyVersion(request) {
 const API_CACHE = 'songbird-api-v2'
 const CACHED_API_PATHS = ['/v1/player/state', '/v1/songs/library', '/v1/library']
 const SHELL_PAGES = ['/offline', '/', '/library']
+// Stored with the pages: the lock screen's music note for a song with no stored art, offline.
+const SHELL_ASSETS = ['/icon-no-art.png']
+const ART_CHECK_HEADER = 'x-songbird-art-check'
 
 // Stores each shell page on its own. A page the server answers with a redirect
 // (signed out, /library goes to the sign-in page) or an error is skipped, not
@@ -100,7 +103,7 @@ async function precacheShell() {
     const offline = await fetch('/offline')
     if (!storable(offline)) throw new Error('/offline could not be stored')
     await cache.put('/offline', offline)
-    await Promise.all(SHELL_PAGES.filter(path => path !== '/offline').map(async path => {
+    await Promise.all([...SHELL_PAGES.filter(path => path !== '/offline'), ...SHELL_ASSETS].map(async path => {
         try {
             const r = await fetch(path)
             if (storable(r)) await cache.put(path, r)
@@ -131,6 +134,13 @@ self.addEventListener('activate', event => {
 
 self.addEventListener('fetch', event => {
     const url = new URL(event.request.url)
+
+    // The player checking whether the server still has a song's art, as the lock screen will
+    // ask for it: the OS's own fetch never reaches this worker, so a stored copy must not answer.
+    if (event.request.headers?.get?.(ART_CHECK_HEADER)) {
+        event.respondWith(fetch(event.request))
+        return
+    }
 
     // Artwork: check cache first, fall back to network, store on success
     // For /_next/image requests, also check the raw URL we pre-cached
@@ -179,8 +189,10 @@ self.addEventListener('fetch', event => {
         return
     }
 
-    // Static JS/CSS chunks: cache-first (content-addressed in prod, safe to cache forever)
-    if (url.pathname.startsWith('/_next/static/')) {
+    // Static JS/CSS chunks: cache-first (content-addressed in prod, safe to cache forever).
+    // The shell's own files too: an install that could not fetch the no-art note stores it on
+    // its first online request instead.
+    if (url.pathname.startsWith('/_next/static/') || (url.origin === self.location.origin && SHELL_ASSETS.includes(url.pathname))) {
         event.respondWith(
             caches.open(SHELL_CACHE).then(async cache => {
                 const cached = await cache.match(event.request)

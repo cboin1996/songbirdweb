@@ -67,10 +67,10 @@ function boot(fetchImpl: (url: string) => Promise<FakeResponse>) {
             try { await work; return 'installed' } catch (e) { return e as Error }
         },
         // Whether the worker took the request over, and what it answered.
-        async request(path: string, init: { method?: string; mode?: string } = {}) {
+        async request(path: string, init: { method?: string; mode?: string; headers?: Record<string, string> } = {}) {
             let answered: Promise<FakeResponse> | undefined
             handlers.fetch({
-                request: { url: `https://songbird.test${path}`, method: init.method ?? 'GET', mode: init.mode ?? 'cors' },
+                request: { url: `https://songbird.test${path}`, method: init.method ?? 'GET', mode: init.mode ?? 'cors', headers: { get: (h: string) => init.headers?.[h] ?? null } },
                 respondWith: (p: Promise<FakeResponse>) => { answered = p },
             })
             return answered ? { handled: true as const, response: await answered } : { handled: false as const }
@@ -82,18 +82,19 @@ const ok = () => new FakeResponse('<html>')
 const redirected = () => new FakeResponse('<html>sign in', { redirected: true })
 
 describe('install', () => {
-    it('stores each shell page that came back as a success', async () => {
+    it('stores each shell page that came back as a success, and the no-art music note', async () => {
         const sw = boot(async () => ok())
         expect(await sw.install()).toBe('installed')
         const shell = [...sw.stores.values()][0]
-        expect([...shell.keys()].sort()).toEqual(['/', '/library', '/offline'])
+        // The note is what the lock screen shows offline for a song with no stored art.
+        expect([...shell.keys()].sort()).toEqual(['/', '/icon-no-art.png', '/library', '/offline'])
     })
 
     it('does not store a page that came by redirect, and still installs', async () => {
         const sw = boot(async path => path === '/library' ? redirected() : ok())
         expect(await sw.install()).toBe('installed')
         const shell = [...sw.stores.values()][0]
-        expect([...shell.keys()].sort()).toEqual(['/', '/offline'])
+        expect([...shell.keys()].sort()).toEqual(['/', '/icon-no-art.png', '/offline'])
     })
 
     it('still installs when a page other than /offline cannot be fetched', async () => {
@@ -108,6 +109,35 @@ describe('install', () => {
     ])('fails when /offline %s, so the previous version stays', async (_name, answerOffline) => {
         const sw = boot(async path => path === '/offline' ? answerOffline() : ok())
         expect(await sw.install()).toBeInstanceOf(Error)
+    })
+})
+
+describe('shell assets', () => {
+    it('stores the no-art note on its first online request when install could not fetch it', async () => {
+        let reachable = false
+        const sw = boot(async path => String(path).endsWith('/icon-no-art.png') && !reachable ? Promise.reject(new Error('net')) : ok())
+        expect(await sw.install()).toBe('installed')
+        const shell = [...sw.stores.values()][0]
+        expect([...shell.keys()].some(k => k.endsWith('/icon-no-art.png'))).toBe(false)
+        reachable = true
+        const first = await sw.request('/icon-no-art.png')
+        expect(first.handled).toBe(true)
+        expect([...shell.keys()].some(k => k.endsWith('/icon-no-art.png'))).toBe(true)
+        // Offline later, the stored copy answers.
+        reachable = false
+        const again = await sw.request('/icon-no-art.png')
+        expect(again.handled && again.response.ok).toBe(true)
+    })
+})
+
+describe('lock-screen art check', () => {
+    it('goes to the server past a stored copy: the OS fetch never sees the stored one', async () => {
+        const sw = boot(async () => new FakeResponse('', { status: 404 }))
+        await (await sw.open('songbird-artwork-saved-v1')).put('https://songbird.test/v1/songs/a/artwork/full/1', new FakeResponse('stored'))
+        const plain = await sw.request('/v1/songs/a/artwork/full/1')
+        expect(plain.handled && plain.response.ok).toBe(true)
+        const checked = await sw.request('/v1/songs/a/artwork/full/1', { headers: { 'x-songbird-art-check': '1' } })
+        expect(checked.handled && checked.response.status).toBe(404)
     })
 })
 
