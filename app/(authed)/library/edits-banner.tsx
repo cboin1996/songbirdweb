@@ -6,7 +6,8 @@ import { DraftSummary, deleteEditDraft, fetchDrafts } from '../../lib/data'
 import { queryKeys } from '../../lib/query-keys'
 import { editSongRoute } from '../../lib/routes'
 import { EVENTS } from '../../lib/events'
-import { FaChevronDown, FaTimes } from 'react-icons/fa'
+import { FaPen, FaTimes } from 'react-icons/fa'
+import CountBadge, { iconButtonClass } from './count-badge'
 
 const DRAFT_EXPIRY_DAYS = 30
 
@@ -65,16 +66,16 @@ export default function EditsBanner() {
   return (
     <div ref={ref} className="relative">
       <button
+        data-testid="edits-in-progress"
         onClick={() => setOpen(v => !v)}
-        className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors border ${
-          urgentCount > 0
-            ? 'text-orange-400 border-orange-500/40 hover:border-orange-400'
-            : 'text-amber-400 border-amber-500/40 hover:border-amber-400'
-        }`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={`${drafts.length} edit${drafts.length !== 1 ? 's' : ''} in progress`}
+        title={`${drafts.length} edit${drafts.length !== 1 ? 's' : ''} in progress${urgentCount > 0 ? `, ${urgentCount} expiring soon` : ''}`}
+        className={`${iconButtonClass} ${urgentCount > 0 ? 'text-orange-400 hover:text-orange-300' : 'text-amber-400 hover:text-amber-300'}`}
       >
-        {drafts.length} in progress
-        {urgentCount > 0 && <span className="w-1.5 h-1.5 rounded-full bg-orange-400" />}
-        <FaChevronDown size={9} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
+        <FaPen size={12} aria-hidden />
+        <CountBadge n={drafts.length} className={urgentCount > 0 ? 'bg-orange-500' : 'bg-amber-500'} />
       </button>
 
       {open && (

@@ -22,14 +22,20 @@ test.describe('mobile responsive behaviors', () => {
     await expect(lib.selectedCount()).toBeVisible({ timeout: 3000 })
   })
 
-  test('library filter sits just left of search and its menu fits the screen', async ({ page }) => {
+  test('library: play all and the icons on top, search with the filter on its own row, menu fits the screen', async ({ page }) => {
     const filter = page.getByTestId('library-filter')
     const search = page.getByTestId('library-search')
     const f = (await filter.boundingBox())!
     const s = (await search.boundingBox())!
     expect(Math.abs((f.y + f.height / 2) - (s.y + s.height / 2))).toBeLessThan(4)
-    expect(f.x + f.width).toBeLessThanOrEqual(s.x)
-    expect(s.x - (f.x + f.width)).toBeLessThan(12)
+    expect(s.x + s.width).toBeLessThanOrEqual(f.x)
+    expect(f.x - (s.x + s.width)).toBeLessThan(12)
+    const play = (await page.getByRole('button', { name: /play all/ }).boundingBox())!
+    const save = (await page.getByTestId('save-all-offline').boundingBox())!
+    expect(Math.abs((play.y + play.height / 2) - (save.y + save.height / 2))).toBeLessThan(4)
+    expect(s.y).toBeGreaterThanOrEqual(play.y + play.height)
+    const vw0 = page.viewportSize()!.width
+    expect(f.x + f.width).toBeGreaterThan(vw0 * 0.75)
 
     await filter.click()
     const menu = (await page.getByRole('menu').boundingBox())!

@@ -17,11 +17,12 @@ import Song from "../../components/song"
 import { usePlayerActions, usePlayerSelector } from "../../components/player"
 import { routes } from "../../lib/routes"
 import { EVENTS } from "../../lib/events"
-import { FaPlay, FaPause, FaCloudDownloadAlt, FaCloudUploadAlt, FaMusic, FaBookmark, FaDownload, FaListUl } from "react-icons/fa"
+import { FaPlay, FaPause, FaSyncAlt, FaCloudDownloadAlt, FaCloudUploadAlt, FaMusic, FaBookmark, FaDownload, FaListUl } from "react-icons/fa"
 import { useToast } from "../../components/toast"
 import PlaylistsView from "./playlists-view"
 import EditsBanner from "./edits-banner"
 import LibraryFilterMenu from "./library-filter-menu"
+import CountBadge, { iconButtonClass } from "./count-badge"
 import QueryError from "../../components/query-error"
 import SearchInput from "../../components/search-input"
 import LetterRail from "./letter-rail"
@@ -744,15 +745,6 @@ export default function LibraryList() {
         <div ref={listContainerRef} className={`relative pr-7${selectMode ? ' select-none' : ''}`}>
             {/* Sticky header: toolbar + banners */}
             <div ref={stickyHeaderRef} className="md:sticky md:top-11 md:z-40 md:-mx-6 md:px-6 md:bg-[var(--background)]/90 md:backdrop-blur-md frosted-bar md:border-b border-gray-100 dark:border-gray-800 md:pt-2">
-            {online && syncPromptIds.length > 0 && (
-                <div className="mb-2 mt-2 px-3 py-2 rounded-lg bg-sky-50 dark:bg-sky-950/30 border border-sky-200 dark:border-sky-800 text-sky-700 dark:text-sky-400 text-xs flex items-center justify-between gap-3">
-                    <span>{syncPromptIds.length} song{syncPromptIds.length !== 1 ? 's' : ''} saved offline on another device</span>
-                    <div className="flex gap-2 shrink-0">
-                        <button onClick={() => setOfflineSyncModalOpen(true)} className="font-medium underline underline-offset-2 hover:no-underline">View</button>
-                        <button onClick={() => setSyncPromptIds([])} className="opacity-60 hover:opacity-100">Dismiss</button>
-                    </div>
-                </div>
-            )}
             {failedIds.size > 0 && (
                 <div className="mb-2 mt-2 px-3 py-2 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-xs flex items-center justify-between gap-3">
                     <span>{failedIds.size} song{failedIds.size !== 1 ? 's' : ''} failed to download offline</span>
@@ -771,20 +763,11 @@ export default function LibraryList() {
                     <FaPlay size={9} />
                     play all{deferredQuery ? ` (${displaySongs.length})` : ''}
                 </button>
-                <EditsBanner />
-                <button
-                    data-testid="save-all-offline"
-                    onClick={saveAllOffline}
-                    disabled={savingAll || !online}
-                    title={!online ? 'go online to save songs for offline listening' : 'save all songs for offline listening'}
-                    className="flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-gray-400 hover:text-sky-500 border border-gray-200 dark:border-gray-800 hover:border-sky-500"
-                >
-                    <FaCloudDownloadAlt size={12} />
-                    {savingAll ? `saving ${saveAllProgress.done}/${saveAllProgress.total}…` : !online ? 'offline' : 'save all offline'}
-                </button>
-                {/* Filter sits left of search, together, on every width. The menu spans this pair,
-                    so it never runs past the screen edge. */}
-                <div className="relative flex items-center gap-1">
+                {/* Desktop: search fills the line between play all and the icons. Mobile: play all and
+                    the icons share the top row, search takes its own row below. The filter rides on its
+                    right. The filter menu spans this pair, so it never runs past the screen edge. */}
+                <div className="relative flex items-center gap-1 flex-1 min-w-[9rem] order-2 basis-full md:order-none md:basis-auto">
+                    <SearchInput value={searchQuery} onChange={setSearchQuery} placeholder="search library…" testId="library-search" className="flex-1 min-w-0" />
                     {/* Playlists list their own songs; the filters apply to the song views. */}
                     {viewMode !== 'playlists' && (
                         <LibraryFilterMenu
@@ -794,19 +777,48 @@ export default function LibraryList() {
                             total={visibleSongs.length}
                         />
                     )}
-                    <SearchInput value={searchQuery} onChange={setSearchQuery} placeholder="search library…" testId="library-search" className="w-40 md:w-52" />
                 </div>
-                {eligibleCount > 0 && (
+                {/* Icons with counts, so the toolbar fits one line at every width. */}
+                <div className="flex items-center gap-1 order-1 ml-auto md:order-none md:ml-0">
+                    <EditsBanner />
+                    {eligibleCount > 0 && (
+                        <button
+                            data-testid="publish-eligible"
+                            onClick={openPublishModal}
+                            disabled={!online}
+                            aria-label={`${eligibleCount} ready to publish`}
+                            title={`${eligibleCount} ready to publish`}
+                            className={`${iconButtonClass} text-emerald-400 hover:text-emerald-300`}
+                        >
+                            <FaCloudUploadAlt size={15} aria-hidden />
+                            <CountBadge n={eligibleCount} className="bg-emerald-500" />
+                        </button>
+                    )}
+                    {online && syncPromptIds.length > 0 && (
+                        <button
+                            data-testid="offline-sync"
+                            onClick={() => setOfflineSyncModalOpen(true)}
+                            aria-label={`${syncPromptIds.length} saved offline on another device`}
+                            title={`${syncPromptIds.length} saved offline on another device`}
+                            className={`${iconButtonClass} text-sky-500 hover:text-sky-400`}
+                        >
+                            <FaSyncAlt size={12} aria-hidden />
+                            <CountBadge n={syncPromptIds.length} />
+                        </button>
+                    )}
                     <button
-                        onClick={openPublishModal}
-                        disabled={!online}
-                        className="flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors disabled:opacity-50 text-emerald-400 hover:text-emerald-300 border border-emerald-500/40 hover:border-emerald-400"
+                        data-testid="save-all-offline"
+                        onClick={saveAllOffline}
+                        disabled={savingAll || !online}
+                        aria-label={savingAll ? `saving ${saveAllProgress.done} of ${saveAllProgress.total}` : 'save all offline'}
+                        title={!online ? 'go online to save songs for offline listening' : savingAll ? `saving ${saveAllProgress.done}/${saveAllProgress.total}…` : 'save all songs for offline listening'}
+                        className={`${iconButtonClass} text-gray-400 hover:text-sky-500 ${savingAll ? 'w-auto px-2 gap-1 text-sky-500' : ''}`}
                     >
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                        publish eligible ({eligibleCount})
+                        <FaCloudDownloadAlt size={15} aria-hidden />
+                        {savingAll && <span className="text-xs tabular-nums">{saveAllProgress.done}/{saveAllProgress.total}</span>}
                     </button>
-                )}
-                <div className="flex gap-1 ml-auto md:ml-auto justify-center md:justify-end w-full md:w-auto">
+                </div>
+                <div className="flex gap-1 order-3 md:order-none ml-auto md:ml-auto justify-center md:justify-end w-full md:w-auto">
                     {(['songs', 'artists', 'albums', 'genres', 'playlists'] as ViewMode[]).map(v => (
                         <button
                             key={v}
@@ -1148,6 +1160,7 @@ export default function LibraryList() {
                     open={offlineSyncModalOpen}
                     onClose={() => setOfflineSyncModalOpen(false)}
                     title="Songs saved offline on another device"
+                    titleActions={<button onClick={() => { setSyncPromptIds([]); setOfflineSyncModalOpen(false) }} className="text-xs text-gray-400 hover:text-gray-200">dismiss</button>}
                     songs={syncPromptIds.flatMap(id => {
                         const s = songs.find(s => s.uuid === id)
                         return s ? [{ uuid: s.uuid, properties: s.properties, artwork_cached: s.artwork_cached, artwork_updated_at: s.artwork_updated_at } as PickerSong] : []

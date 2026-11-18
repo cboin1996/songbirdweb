@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { FaCheck, FaFilter } from 'react-icons/fa'
+import CountBadge, { iconButtonClass } from './count-badge'
 
 type Props = {
     savedOnly: boolean
@@ -48,17 +49,13 @@ export default function LibraryFilterMenu({ savedOnly, onSavedOnlyChange, savedC
                 aria-label={active ? `filter (${active} on)` : 'filter'}
                 title={active ? `filter (${active} on)` : 'filter'}
                 onClick={() => setOpen(v => !v)}
-                className={`relative flex items-center justify-center w-8 h-8 rounded-full transition-colors ${active ? 'text-sky-500' : 'text-gray-400 hover:text-sky-500'}`}
+                className={`${iconButtonClass} ${active ? 'text-sky-500' : 'text-gray-400 hover:text-sky-500'}`}
             >
                 <FaFilter size={13} aria-hidden />
-                {active > 0 && (
-                    <span data-testid="library-filter-count" aria-hidden className="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full bg-sky-500 text-white text-[10px] leading-4 text-center tabular-nums">
-                        {active}
-                    </span>
-                )}
+                <CountBadge n={active} testId="library-filter-count" />
             </button>
             {open && (
-                <div role="menu" className="absolute top-full left-0 right-0 mt-1 z-50 bg-surface border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl overflow-hidden py-1">
+                <div role="menu" className="absolute top-full left-0 right-0 md:left-auto md:w-64 mt-1 z-50 bg-surface border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl overflow-hidden py-1">
                     <button
                         role="menuitemcheckbox"
                         aria-checked={savedOnly}
