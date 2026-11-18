@@ -113,7 +113,7 @@ test.describe('offline artwork is never a white square', () => {
     await context.setOffline(false)
   })
 
-  test('offline with no art stored, the lock screen gets no art entry', async ({ page, context }) => {
+  test('offline with no art stored, the lock screen gets the stored music note, not a blank tile', async ({ page, context }) => {
     test.setTimeout(120000)
     const player = await playOneSavedPaused(page)
     await forgetAllArt(page)
@@ -121,8 +121,12 @@ test.describe('offline artwork is never a white square', () => {
     await page.reload()
     await player.waitForBar()
     await player.waitForTrackName(15000)
-    await page.waitForTimeout(1500)
-    expect(await lockScreenArt(page)).toEqual([])
+    // The note is stored with the app's pages, so it is there with every song's art forgotten.
+    const art = () => page.evaluate(() => (navigator.mediaSession.metadata?.artwork ?? []).map(a => ({ src: a.src, type: a.type })))
+    await expect.poll(art, { timeout: 15000 }).toHaveLength(1)
+    const [note] = await art()
+    expect(note.type).toBe('image/png')
+    expect(note.src).toMatch(/^blob:/)
     await context.setOffline(false)
   })
 
