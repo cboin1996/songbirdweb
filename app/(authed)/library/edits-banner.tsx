@@ -33,12 +33,6 @@ export default function EditsBanner() {
   const router = useRouter()
 
   useEffect(() => {
-    function onDraftChanged() { queryClient.invalidateQueries({ queryKey: queryKeys.drafts }) }
-    window.addEventListener(EVENTS.draftChanged, onDraftChanged)
-    return () => window.removeEventListener(EVENTS.draftChanged, onDraftChanged)
-  }, [queryClient])
-
-  useEffect(() => {
     if (!open) return
     function handleClick(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)

@@ -1932,6 +1932,7 @@ export default function EditorModal({
     uncacheSong(activeSongId).catch(() => {})
     removeServerOfflineSong(activeSongId).catch(() => {})
     await Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.library }),
       queryClient.invalidateQueries({ queryKey: queryKeys.librarySongs }),
       queryClient.invalidateQueries({ queryKey: queryKeys.drafts }),
     ])
@@ -1948,6 +1949,7 @@ export default function EditorModal({
     uncacheSong(activeSongId).catch(() => {})
     removeServerOfflineSong(activeSongId).catch(() => {})
     await Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.library }),
       queryClient.invalidateQueries({ queryKey: queryKeys.librarySongs }),
       queryClient.invalidateQueries({ queryKey: queryKeys.drafts }),
     ])

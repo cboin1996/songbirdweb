@@ -198,6 +198,34 @@ test.describe('editor modal', () => {
         expect(abortErrors, `AbortErrors after close: ${abortErrors.join('\n')}`).toHaveLength(0)
     })
 
+    test('a draft saved by closing the editor shows on the library without a reload', async ({ page }) => {
+        const api = await apiLoginAs(EDITOR_USERNAME, EDITOR_PASSWORD)
+        const draftIds = async (): Promise<string[]> =>
+            (await (await api.get(`${API_V1}/edit/drafts`)).json()).map((d: { song_id: string }) => d.song_id)
+        // Other tests share this user and run beside this one: only the draft this test makes is
+        // removed afterwards, and the icon is compared with what the library showed before.
+        const before = new Set(await draftIds())
+        try {
+            const editor = new EditorPage(page)
+            // The library loads first, and caches its list of drafts.
+            await editor.openFromLibrary()
+            const icon = page.getByTestId('edits-in-progress')
+            const shownBefore = (await icon.count()) ? Number((await icon.getAttribute('aria-label'))?.match(/^(\d+)/)?.[1] ?? 0) : 0
+            await editor.propertiesTab.click()
+            const trackInput = editor.trackNameInput()
+            await expect(trackInput).not.toHaveValue('')
+            await trackInput.fill(`${await trackInput.inputValue()}-e2e-draft`)
+            await editor.closeBtn.click()
+            await expect(page).toHaveURL(/\/library/)
+            await expect(icon).toBeVisible({ timeout: 5000 })
+            await expect.poll(async () => Number((await icon.getAttribute('aria-label'))?.match(/^(\d+)/)?.[1] ?? 0), { timeout: 5000 })
+                .toBeGreaterThan(shownBefore)
+        } finally {
+            for (const id of await draftIds()) if (!before.has(id)) await api.delete(`${API_V1}/edit/songs/${id}/draft`)
+            await api.dispose()
+        }
+    })
+
     test('properties tab: editing track name auto-saves to draft', async ({ page }) => {
         const editor = new EditorPage(page)
         await editor.openFromLibrary()
