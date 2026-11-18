@@ -62,7 +62,7 @@ export default function LibraryFilterMenu({ savedOnly, onSavedOnlyChange, savedC
                         className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-gray-50 dark:hover:bg-gray-800"
                     >
                         <span className="w-3 shrink-0 text-sky-500">{savedOnly && <FaCheck size={10} aria-hidden />}</span>
-                        <span className="flex-1 min-w-0 truncate">saved only</span>
+                        <span className="flex-1 min-w-0 truncate">saved offline</span>
                         <span className="shrink-0 text-xs text-gray-400 tabular-nums">{savedCount} of {total}</span>
                     </button>
                 </div>

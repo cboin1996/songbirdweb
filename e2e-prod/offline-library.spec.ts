@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 import { login, libraryIds, saveSongOffline, OFFLINE_LIBRARY_USERNAME, OFFLINE_PASSWORD } from '../e2e/helpers'
 import { LibraryPage, CommonPage } from '../e2e/pages'
 
-// The library's "saved only" filter, in the filter menu: on by default offline, off online.
+// The library's "saved offline" filter, in the filter menu: on by default offline, off online.
 // Its own user: saving writes the account's server-side offline list, so a spec saving as
 // another worker's user would collide with it.
 test.describe('Library offline view', () => {
@@ -12,7 +12,7 @@ test.describe('Library offline view', () => {
     await login(page, OFFLINE_LIBRARY_USERNAME, OFFLINE_PASSWORD)
   })
 
-  test('offline shows saved songs with a count, turning saved only off reveals the rest dimmed, tapping one says so', async ({ page, context }) => {
+  test('offline shows saved songs with a count, turning saved offline off reveals the rest dimmed, tapping one says so', async ({ page, context }) => {
     test.setTimeout(120000)
     const lib = new LibraryPage(page)
     const common = new CommonPage(page)
@@ -54,7 +54,7 @@ test.describe('Library offline view', () => {
     await context.setOffline(false)
   })
 
-  test('online, saved only in the filter menu narrows the library to saved songs and shows the count', async ({ page }) => {
+  test('online, saved offline in the filter menu narrows the library to saved songs and shows the count', async ({ page }) => {
     test.setTimeout(90000)
     const lib = new LibraryPage(page)
 

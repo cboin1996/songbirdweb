@@ -11,20 +11,20 @@ describe('LibraryFilterMenu', () => {
         expect(screen.getByTestId('library-filter-count').textContent).toBe('1')
     })
 
-    it('lists saved only with its count, checked when on', () => {
+    it('lists saved offline with its count, checked when on', () => {
         render(<LibraryFilterMenu savedOnly onSavedOnlyChange={() => {}} savedCount={2} total={5} />)
         expect(screen.queryByRole('menuitemcheckbox')).toBeNull()
         fireEvent.click(screen.getByTestId('library-filter'))
-        const item = screen.getByRole('menuitemcheckbox', { name: /saved only/ })
+        const item = screen.getByRole('menuitemcheckbox', { name: /saved offline/ })
         expect(item.getAttribute('aria-checked')).toBe('true')
         expect(item.textContent).toContain('2 of 5')
     })
 
-    it('asks for the opposite state when saved only is pressed', () => {
+    it('asks for the opposite state when saved offline is pressed', () => {
         const onChange = jest.fn()
         render(<LibraryFilterMenu savedOnly={false} onSavedOnlyChange={onChange} savedCount={0} total={5} />)
         fireEvent.click(screen.getByTestId('library-filter'))
-        fireEvent.click(screen.getByRole('menuitemcheckbox', { name: /saved only/ }))
+        fireEvent.click(screen.getByRole('menuitemcheckbox', { name: /saved offline/ }))
         expect(onChange).toHaveBeenCalledWith(true)
     })
 

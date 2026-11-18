@@ -224,7 +224,7 @@ export default function LibraryList() {
     )
     // The saved set narrows the list only offline; online, a save or a drop must not
     // rebuild every derived list (and with them every row).
-    // One "saved only" filter: on by default offline, off by default online (the filter menu).
+    // One "saved offline" filter: on by default offline, off by default online (the filter menu).
     const [showAllOffline, setShowAllOffline] = useState(false)
     const [savedOnly, setSavedOnly] = useState(false)
     const narrowToSaved = online ? savedOnly : !showAllOffline
@@ -253,7 +253,7 @@ export default function LibraryList() {
             if (isOffline()) {
                 try {
                     const cached = await fetchLibrarySongs()
-                    // The whole copy stays: the saved narrowing happens in the view, so turning "saved only" off shows the rest.
+                    // The whole copy stays: the saved narrowing happens in the view, so turning "saved offline" off shows the rest.
                     if (cached.some(s => ids.has(s.uuid))) queryClient.setQueryData(queryKeys.librarySongs, cached)
                 } catch {}
             }
