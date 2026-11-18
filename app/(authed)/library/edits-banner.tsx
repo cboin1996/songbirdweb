@@ -29,6 +29,7 @@ export default function EditsBanner() {
   })
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
   const router = useRouter()
 
   useEffect(() => {
@@ -42,8 +43,19 @@ export default function EditsBanner() {
     function handleClick(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
     }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key !== 'Escape') return
+      // Escape closes only this list, not select mode behind it.
+      e.stopPropagation()
+      setOpen(false)
+      buttonRef.current?.focus()
+    }
     document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
+    document.addEventListener('keydown', handleKey)
+    return () => {
+      document.removeEventListener('mousedown', handleClick)
+      document.removeEventListener('keydown', handleKey)
+    }
   }, [open])
 
   if (drafts.length === 0) return null
@@ -64,11 +76,11 @@ export default function EditsBanner() {
   }
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className="md:relative">
       <button
+        ref={buttonRef}
         data-testid="edits-in-progress"
         onClick={() => setOpen(v => !v)}
-        aria-haspopup="menu"
         aria-expanded={open}
         aria-label={`${drafts.length} edit${drafts.length !== 1 ? 's' : ''} in progress`}
         title={`${drafts.length} edit${drafts.length !== 1 ? 's' : ''} in progress${urgentCount > 0 ? `, ${urgentCount} expiring soon` : ''}`}
@@ -79,7 +91,8 @@ export default function EditsBanner() {
       </button>
 
       {open && (
-        <div className="absolute top-full left-0 mt-1 z-50 min-w-64 bg-surface border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl overflow-hidden">
+        // Mobile: anchored to the icon group (pinned right), so the list stays on screen whatever icons sit beside it.
+        <div data-testid="edits-list" className="absolute top-full right-0 md:right-auto md:left-0 mt-1 z-50 w-72 max-w-[calc(100vw-2rem)] bg-surface border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl overflow-hidden">
           {drafts.map(d => {
             const days = daysLeft(d.updated_at)
             const exp = expiryDate(d.updated_at)

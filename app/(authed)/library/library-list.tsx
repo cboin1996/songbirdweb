@@ -304,8 +304,8 @@ export default function LibraryList() {
             await publishSongs(ids)
             setPublishModalOpen(false)
             await Promise.all([
+                // Also refetches eligible: its key sits under librarySongs.
                 queryClient.invalidateQueries({ queryKey: queryKeys.librarySongs }),
-                queryClient.invalidateQueries({ queryKey: queryKeys.eligibleSongs }),
                 queryClient.invalidateQueries({ queryKey: queryKeys.library }),
                 queryClient.invalidateQueries({ queryKey: queryKeys.drafts }),
             ])
@@ -779,7 +779,7 @@ export default function LibraryList() {
                     )}
                 </div>
                 {/* Icons with counts, so the toolbar fits one line at every width. */}
-                <div className="flex items-center gap-1 order-1 ml-auto md:order-none md:ml-0">
+                <div className="relative md:static flex items-center gap-1 order-1 ml-auto md:order-none md:ml-0">
                     <EditsBanner />
                     {eligibleCount > 0 && (
                         <button

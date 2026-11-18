@@ -27,6 +27,8 @@ export default function LibraryFilterMenu({ savedOnly, onSavedOnlyChange, savedC
         }
         function handleKey(e: KeyboardEvent) {
             if (e.key === 'Escape') {
+                // Escape closes only the menu, not select mode behind it.
+                e.stopPropagation()
                 setOpen(false)
                 buttonRef.current?.focus()
             }

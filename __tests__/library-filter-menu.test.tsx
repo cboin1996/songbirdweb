@@ -43,4 +43,14 @@ describe('LibraryFilterMenu', () => {
         expect(screen.queryByRole('menu')).toBeNull()
         expect(document.activeElement).toBe(screen.getByTestId('library-filter'))
     })
+
+    it('keeps Escape from reaching select mode behind the menu', () => {
+        const behind = jest.fn()
+        window.addEventListener('keydown', behind)
+        render(<LibraryFilterMenu savedOnly={false} onSavedOnlyChange={() => {}} savedCount={0} total={5} />)
+        fireEvent.click(screen.getByTestId('library-filter'))
+        fireEvent.keyDown(document, { key: 'Escape' })
+        window.removeEventListener('keydown', behind)
+        expect(behind).not.toHaveBeenCalled()
+    })
 })
