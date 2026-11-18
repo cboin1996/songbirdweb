@@ -1,4 +1,5 @@
 'use client'
+import ExploreLoading from "./explore-skeleton"
 import { useIsDesktop } from "../../lib/use-is-desktop"
 import { useEffect, useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
@@ -206,7 +207,7 @@ export default function ExploreClient() {
     const windowLabel = WINDOWS.find(w => w.value === timeWindow)?.label
     const sortLabel = SORTS.find(s => s.value === sortBy)?.label
 
-    if (exploreLoading) return null
+    if (exploreLoading) return <div data-testid="explore-skeleton"><ExploreLoading /></div>
     if (exploreError) return <QueryError error={exploreError} retry={refetchExplore} context="explore" />
 
     return (

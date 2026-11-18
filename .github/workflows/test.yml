@@ -46,8 +46,16 @@ jobs:
         env:
           NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
 
-  e2e:
+  # The e2e suites run `next start`; this boots the image that ships (`node server.js`).
+  standalone:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image and boot it
+        run: make smoke-standalone
+
+  e2e:
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -100,7 +108,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .next/cache
-          key: nextjs-${{ hashFiles('package-lock.json') }}-${{ hashFiles('app/**', 'middleware.ts', 'next.config.ts') }}
+          key: nextjs-${{ hashFiles('package-lock.json') }}-${{ hashFiles('app/**', 'proxy.ts', 'next.config.ts') }}
           restore-keys: |
             nextjs-${{ hashFiles('package-lock.json') }}-
 
@@ -111,7 +119,7 @@ jobs:
         if: matrix.needs_dev_server
         run: make e2e-next-up E2E_WEB_PORT=3000 E2E_API_PORT=8000
 
-      # Build-time inputs (see Makefile e2e-build): the app source, public/, middleware.ts,
+      # Build-time inputs (see Makefile e2e-build): the app source, public/, proxy.ts,
       # next.config.ts, package-lock.json and the .env* files, plus NEXT_PUBLIC_API_BASE_URL
       # and API_BASE_URL, which are baked in when the build runs.
       - name: Run E2E tests (${{ matrix.project }})
@@ -152,12 +160,19 @@ jobs:
           E2E_OFFLINE_PASSWORD: e2e-OfflinePass-1
         run: make ${{ matrix.make_target }} E2E_ARGS="${{ matrix.shard && format('--shard={0}', matrix.shard) || '' }}"
 
+      - name: Bench numbers (job summary, drift against the baseline)
+        if: always() && matrix.project == 'bench'
+        run: node scripts/bench-summary.js >> "$GITHUB_STEP_SUMMARY"
+
       - name: Lighthouse CI (library page)
         if: matrix.project == 'bench'
         env:
           E2E_BENCH_USERNAME: e2e-bench
           E2E_BENCH_PASSWORD: e2e-BenchPass-1
-        run: make lighthouse-run E2E_API_PORT=8000 E2E_WEB_PORT=3000
+        # Lighthouse looks for an installed Chrome; use the one Playwright just installed.
+        run: |
+          export CHROME_PATH="$(node -e "console.log(require('@playwright/test').chromium.executablePath())")"
+          make lighthouse-run E2E_API_PORT=8000 E2E_WEB_PORT=3000
 
       - name: Upload Lighthouse results
         if: always() && matrix.project == 'bench'

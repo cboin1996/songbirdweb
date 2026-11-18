@@ -1,6 +1,6 @@
 'use client'
 import { useState } from "react";
-import Link from "next/link";
+import { PendingLink } from "./pending-route";
 import { usePathname } from "next/navigation";
 import { FaBars, FaTimes } from "react-icons/fa";
 import { routes } from "../lib/routes";
@@ -40,9 +40,9 @@ export default function NavLinks() {
             )
         }
         return (
-            <Link key={l.href} href={l.href} className={linkClass(l.href)} onClick={onClick}>
+            <PendingLink key={l.href} href={l.href} className={linkClass(l.href)} onClick={onClick}>
                 {l.label}
-            </Link>
+            </PendingLink>
         )
     }
 
@@ -52,12 +52,12 @@ export default function NavLinks() {
                 {links.map(l => renderLink(l))}
             </div>
             <div className="sm:hidden">
-                <button onClick={() => setOpen(p => !p)} className="hover:text-sky-600 p-2 -m-1 touch-manipulation">
+                <button data-testid="nav-menu-toggle" onClick={() => setOpen(p => !p)} className="hover:text-sky-600 p-2 -m-1 touch-manipulation">
                     {open ? <FaTimes size={16} /> : <FaBars size={16} />}
                 </button>
                 {open && (
-                    <div className="absolute top-full left-0 right-0 bg-white dark:bg-gray-950 border-b border-gray-200 dark:border-gray-800 flex flex-col p-4 gap-4 z-40">
-                        {links.map(l => renderLink(l, OFFLINE_SUPPORTED.has(l.href) ? () => setOpen(false) : undefined))}
+                    <div data-testid="nav-menu" className="absolute top-full left-0 right-0 bg-white dark:bg-gray-950 border-b border-gray-200 dark:border-gray-800 flex flex-col p-4 gap-4 z-40">
+                        {links.map(l => renderLink(l, () => setOpen(false)))}
                     </div>
                 )}
             </div>

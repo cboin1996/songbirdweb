@@ -7,6 +7,9 @@ export type TestOverride =
   | '__playerProgressResetSec'  // seconds of real playback that clear the failure budget
   | '__playerWriteLimitMs'      // how long a player write may wait for the server before it is given up
   | '__probeIntervalMs'         // how often an unreachable server is asked whether it is back
+  | '__slowRequestMs'            // how long a request may go unanswered before the server is asked something small
+  | '__silenceProbeMs'            // how long that small question is waited for
+  | '__prefetchDelayMs'          // how long a song plays before the next one is fetched ahead
 
 export function readTestOverride(name: TestOverride, fallback: number): number {
   if (typeof window === 'undefined') return fallback

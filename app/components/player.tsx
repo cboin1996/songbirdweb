@@ -10,22 +10,25 @@ import { FaPause, FaPlay, FaStepBackward, FaStepForward, FaRandom, FaRedo, FaLis
 import { filterSongs } from "../lib/use-filtered-songs"
 import SearchInput from "./search-input"
 import Spinner from "./spinner"
-import { DOWNLOAD_URL, LibrarySong, RefreshResult, PlayableSong, PlayerState, artworkUrl, songArtworkUrl, ensureFreshToken, isSigningOut, redirectToLogin, tryRefresh, fetchLibrarySongs, getCachedLibrarySongs, fetchPlayerState, fetchPlayerStateAtLaunch, fetchSongById, recordPlay, savePlayerState, playerWritesPending, readLocalPlayerState, updatePosition, queueInsert, queueRemove, queueReorder as apiQueueReorder } from "../lib/data"
+import { DOWNLOAD_URL, LibrarySong, RefreshResult, PlayableSong, PlayerState, artworkUrl, songArt, ensureFreshToken, isSigningOut, redirectToLogin, tryRefresh, fetchLibrarySongs, getCachedLibrarySongs, fetchPlayerState, fetchPlayerStateAtLaunch, fetchSongById, recordPlay, savePlayerState, playerWritesPending, readLocalPlayerState, updatePosition, queueInsert, queueRemove, queueReorder as apiQueueReorder } from "../lib/data"
 import { ArtImage } from './art-image'
 import { isOffline } from "../lib/offline-signal"
 import { useOnline } from "../lib/use-online"
-import { getSongFile, cacheArtworkUrls } from "../lib/offline"
+import { getSongFile, cacheArtworkUrls, warmLargeArtwork, findStoredArtwork } from "../lib/offline"
 import { useOfflineSave } from "../lib/offline-save-context"
 import { createBlobSlot } from "../lib/blob-slot"
+import { createPrefetchSlot, peekNextUuid } from "../lib/prefetch"
 import { readTestOverride } from "../lib/test-overrides"
+import { decideAdvance } from "../lib/advance"
 import { useRenderCount } from "../lib/perf"
 import { createProgressStore, type ProgressStore } from "../lib/progress-store"
 import { createPlayerStore, type PlayerStore, type PlayerSnapshot, type RepeatMode, type PlayContext } from "../lib/player-store"
 import { createListenClock } from "../lib/listen-clock"
 import { useQueryClient } from "@tanstack/react-query"
 import { queryKeys } from "../lib/query-keys"
-import { mediaSessionArtwork } from "../lib/artwork"
+import { mediaSessionArtwork, storedMediaArtwork } from "../lib/artwork"
 import { isValidShuffleOrder } from "../lib/shuffle-order"
+import { EVENTS } from "../lib/events"
 import Slider from "./slider"
 import { routes } from "../lib/routes"
 
@@ -226,9 +229,11 @@ function ProgressBar({ store, playing, onSeek }: {
 
 const QUEUE_STYLES = {
     panel: {
-        px: '',
+        // Inset so the drag handle and the remove button do not touch the row's edge.
+        px: 'px-2',
         drag: 'text-gray-300 dark:text-gray-600',
-        activeRow: 'bg-sky-50 dark:bg-sky-950/30',
+        // The current song is told by its blue title and playing indicator, not a filled row.
+        activeRow: '',
         hoverRow: 'hover:bg-gray-50 dark:hover:bg-gray-800/50',
         activeTrack: 'text-sky-500',
         normalTrack: '',
@@ -278,6 +283,8 @@ interface QueueRowListProps {
     queueSearch: string
     setQueueSearch: (s: string) => void
     showSearch: boolean
+    // The panel shows the offline count in its own top bar.
+    summaryInHeader?: boolean
     searchTestId?: string
     emptyTestId?: string
     reorderQueue: (from: number, to: number) => void
@@ -293,7 +300,7 @@ function QueueRowList({
     containerRef, items, start, end, totalHeight, offsetTop,
     currentUuid, isPlaying, dragFromRef, draggedQi, setDraggedQi,
     queueDropTarget, setQueueDropTarget, manualNextIds, offline,
-    queueSearch, setQueueSearch, showSearch, searchTestId, emptyTestId,
+    queueSearch, setQueueSearch, showSearch, summaryInHeader, searchTestId, emptyTestId,
     reorderQueue, removeFromQueue, onPlayAt, onPause, onResume, onSourceNav,
     variant,
 }: QueueRowListProps) {
@@ -320,9 +327,9 @@ function QueueRowList({
 
     return (
         <>
-            {offline && (
-                <p data-testid="queue-offline-summary" className="shrink-0 pb-2 text-xs text-gray-400">
-                    Offline — {offline.available} of {offline.total} available
+            {offline && !summaryInHeader && (
+                <p data-testid="queue-offline-summary" className="shrink-0 pb-2 text-xs text-sky-500">
+                    offline — {offline.available} of {offline.total} available
                 </p>
             )}
             {showSearch && (
@@ -352,7 +359,7 @@ function QueueRowList({
                             const isDropTarget = queueDropTarget === dpos && !isBeingDragged
                             const isDropAfter = queueDropTarget === dpos + 1 && dpos === items.length - 1 && !isBeingDragged
                             const unsaved = offline !== null && !offline.savedIds.has(song.uuid)
-                            const art = songArtworkUrl(song.uuid, song.artwork_cached, sp?.artworkUrl100, 200)
+                            const art = songArt(song, 200)
                             return (
                                 <div
                                     key={`${song.uuid}-${qi}`}
@@ -413,6 +420,14 @@ function QueueRowList({
     )
 }
 
+// blob: urls handed to the lock screen while offline, and the song they are for.
+let mediaBlobUrls: string[] = []
+let mediaSyncSong = ''
+// What the lock screen shows now: the song, its art version and whether the device was offline. The same again leaves it alone.
+let mediaSyncKey = ''
+// Each offline lookup of stored art takes a number; only the latest may set the lock screen.
+let mediaSyncSeq = 0
+
 export function PlayerProvider({ children }: { children: React.ReactNode }) {
     useRenderCount('player')
     const queryClient = useQueryClient()
@@ -420,6 +435,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const playerBarRef = useRef<HTMLDivElement>(null)
     const [current, setCurrent] = useState<PlayableSong | null>(null)
     const currentRef = useRef<PlayableSong | null>(null)
+    const prefetchFlightRef = useRef<{ uuid: string; ctrl: AbortController; timer: ReturnType<typeof setTimeout> } | null>(null)
     const [isPlaying, setIsPlaying] = useState(false)
     const [isBuffering, setIsBuffering] = useState(false)
     // Position, duration and buffered live in a store the bars subscribe to, not
@@ -449,6 +465,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const hasUserPlayedRef = useRef(false)
     const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const blobSlotRef = useRef(createBlobSlot())
+    // The next queue entry's audio, held in memory only; see lib/prefetch.
+    const prefetchRef = useRef(createPrefetchSlot())
     // The song whose source was last assigned to the element, which can differ
     // from `current` while a load is in flight.
     const srcUuidRef = useRef<string | null>(null)
@@ -557,6 +575,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         // A song the finished launch scan did not list has no copy on the device: skip the
         // lookup (it opens the file system) and stream it.
         const scan = savedScanRef.current
+        // The song was fetched ahead while the last one played: it plays from memory.
+        const ahead = scan.ids.has(songUuid) ? null : prefetchRef.current.take(songUuid)
+        if (ahead) return URL.createObjectURL(ahead)
         if (scan.status === 'scanned' && !scan.ids.has(songUuid)) return `${DOWNLOAD_URL}/${songUuid}`
         let cached: File | null = null
         let lookupSucceeded = false
@@ -677,7 +698,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             for (const id of uuids) {
                 const lib = libMap.get(id)
                 if (lib?.properties) {
-                    results.push({ uuid: lib.uuid, properties: lib.properties!, last_position: lib.last_position, last_played_at: lib.last_played_at, artwork_cached: lib.artwork_cached, source: sourceMap[id] ?? fallbackCtx })
+                    results.push({ uuid: lib.uuid, properties: lib.properties!, last_position: lib.last_position, last_played_at: lib.last_played_at, artwork_cached: lib.artwork_cached, artwork_updated_at: lib.artwork_updated_at, source: sourceMap[id] ?? fallbackCtx })
                 } else {
                     try {
                         const fetched = await fetchSongById(id)
@@ -698,7 +719,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 .filter(s => s.last_played_at && s.properties)
                 .sort((a, b) => new Date(b.last_played_at!).getTime() - new Date(a.last_played_at!).getTime())[0]
             if (!last?.properties) return
-            const song: PlayableSong = { uuid: last.uuid, properties: last.properties!, last_position: last.last_position, last_played_at: last.last_played_at, artwork_cached: last.artwork_cached, source: fallbackCtx }
+            const song: PlayableSong = { uuid: last.uuid, properties: last.properties!, last_position: last.last_position, last_played_at: last.last_played_at, artwork_cached: last.artwork_cached, artwork_updated_at: last.artwork_updated_at, source: fallbackCtx }
             const keepSource = sourceAlreadyLoaded(song.uuid)
             let src: string | null = null
             if (!keepSource && audio) {
@@ -1145,13 +1166,38 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         if (!('mediaSession' in navigator) || !song.properties) return
         const p = song.properties
         const origin = typeof window !== 'undefined' ? window.location.origin : ''
-        const artwork = mediaSessionArtwork(song, s => songArtworkUrl(song.uuid, song.artwork_cached, p.artworkUrl100, s), origin)
-        navigator.mediaSession.metadata = new MediaMetadata({
+        const artwork = mediaSessionArtwork(song, s => songArt(song, s), origin)
+        const describe = (list: typeof artwork) => new MediaMetadata({
             title: p.trackName,
             artist: p.artistName,
             album: p.collectionName,
-            artwork,
+            artwork: list,
         })
+        const offlineNow = isOffline()
+        const key = `${song.uuid}:${song.artwork_updated_at ?? 0}:${p.trackName}:${p.artistName}:${offlineNow ? 'off' : 'on'}`
+        // Pause, play and the handlers changing run this again: the same song keeps its art, so the lock screen does not blink.
+        if (key !== mediaSyncKey || !navigator.mediaSession.metadata) {
+            mediaSyncSong = song.uuid
+            // Set before the lookup, so a pause or play while it runs does not start another;
+            // a song with no stored art is not looked up again until something changes.
+            mediaSyncKey = key
+            const seq = ++mediaSyncSeq
+            for (const url of mediaBlobUrls) URL.revokeObjectURL(url)
+            mediaBlobUrls = []
+            if (offlineNow) {
+                // The OS cannot reach the service worker's cache, so offline it is given only
+                // copies this device stored, as blob: urls; none stored, no art entry at all.
+                navigator.mediaSession.metadata = describe([])
+                const asked = song.uuid
+                void storedMediaArtwork(artwork, url => findStoredArtwork(url), blob => URL.createObjectURL(blob)).then(list => {
+                    if (mediaSyncSong !== asked || mediaSyncSeq !== seq) { list.forEach(a => URL.revokeObjectURL(a.src)); return }
+                    mediaBlobUrls = list.map(a => a.src)
+                    if (list.length) navigator.mediaSession.metadata = describe(list)
+                })
+            } else {
+                navigator.mediaSession.metadata = describe(artwork)
+            }
+        }
         setMediaAction('play', () => resume())
         setMediaAction('pause', () => pause())
         setMediaAction('previoustrack', skipPrev)
@@ -1233,44 +1279,36 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     // `consumedManual` is the manual-next entry this step used up, so a walk that
     // steps over it for want of a local copy can put it back.
     function stepAdvance(): { idx: number; consumedManual: PlayableSong | null } | null {
-        const q = queueRef.current
-        const idx = queueIndexRef.current
-        if (shuffleRef.current) {
-            if (manualNextRef.current.length > 0) {
+        const step = decideAdvance({
+            queueLength: queueRef.current.length,
+            index: queueIndexRef.current,
+            shuffle: shuffleRef.current,
+            shuffleOrder: shuffleOrderRef.current,
+            shufflePos: shufflePosRef.current,
+            repeat: repeatRef.current,
+            manualNextCount: manualNextRef.current.length,
+            random: Math.random,
+        })
+        if (!step) return null
+        switch (step.kind) {
+            case 'manual': {
                 const consumedManual = manualNextRef.current.shift() ?? null
                 setManualNextIds(new Set(manualNextRef.current.map(s => s.uuid)))
-                const nextIdx = idx + 1
-                if (nextIdx >= q.length) return null
-                // advance shuffle position to wherever this manually-queued song lands
-                const pos = shuffleOrderRef.current.indexOf(nextIdx)
-                if (pos >= 0) shufflePosRef.current = pos
-                return { idx: nextIdx, consumedManual }
+                if (step.shufflePos !== null) shufflePosRef.current = step.shufflePos
+                return { idx: step.idx, consumedManual }
             }
-            const nextPos = shufflePosRef.current + 1
-            if (nextPos >= shuffleOrderRef.current.length) {
-                if (repeatRef.current !== 'all') return null
-                // A new lap. Pinning the song that just ended would replay
-                // it back to back, so pick a different one and pin the fresh
-                // order to that. Pick-then-pin rather than re-roll-until-
-                // different: the reload path rebuilds a missing order as
-                // "pinned song, then a seeded shuffle of the rest", so only
-                // an order built that way survives a reload.
-                const others = q.map((_, i) => i).filter(i => i !== idx)
-                const startIdx = others.length > 0
-                    ? others[Math.floor(Math.random() * others.length)]
-                    : idx
-                generateShuffleOrder(startIdx)
-                return { idx: startIdx, consumedManual: null }
-            }
-            shufflePosRef.current = nextPos
-            return { idx: shuffleOrderRef.current[nextPos], consumedManual: null }
+            case 'shuffle':
+                shufflePosRef.current = step.shufflePos
+                return { idx: step.idx, consumedManual: null }
+            case 'newLap':
+                // Pick-then-pin rather than re-roll-until-different: the reload path rebuilds
+                // a missing order as "pinned song, then a seeded shuffle of the rest", so
+                // only an order built that way survives a reload.
+                generateShuffleOrder(step.idx)
+                return { idx: step.idx, consumedManual: null }
+            case 'linear':
+                return { idx: step.idx, consumedManual: null }
         }
-        const nextIdx = idx + 1
-        if (nextIdx >= q.length) {
-            if (repeatRef.current !== 'all') return null
-            return { idx: 0, consumedManual: null }
-        }
-        return { idx: nextIdx, consumedManual: null }
     }
 
     // Moves to the next track without touching the failure budget, and says
@@ -1587,6 +1625,71 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     useEffect(() => { currentRef.current = current }, [current])
 
+    // While a song plays, the next one is fetched once into the prefetch slot, unless it is
+    // saved on the device. The slot is emptied when the queue stops pointing at that song.
+    // Pausing, or the queue changing in a way that leaves the next song as it was, does not
+    // restart a fetch under way: it is stopped only when the next song changes, the song
+    // stops being current, or the connection goes.
+    useEffect(() => {
+        const slot = prefetchRef.current
+        const flight = prefetchFlightRef.current
+        const stopFlight = () => {
+            if (!prefetchFlightRef.current) return
+            clearTimeout(prefetchFlightRef.current.timer)
+            prefetchFlightRef.current.ctrl.abort()
+            prefetchFlightRef.current = null
+        }
+        if (!current || !online) { stopFlight(); return }
+        const next = peekNextUuid({
+            uuids: queue.map(q => q.uuid),
+            index: queueIndexRef.current,
+            shuffle,
+            shuffleOrder,
+            shufflePos: shufflePosRef.current,
+            repeat,
+            manualNextCount: manualNextRef.current.length,
+        })
+        slot.release(next)
+        if (flight && flight.uuid !== next) stopFlight()
+        // Paused: nothing new starts, what is under way carries on.
+        if (!isPlaying) return
+        if (!next || next === current.uuid || slot.holds(next)) return
+        if (savedScanRef.current.ids.has(next)) return
+        if (prefetchFlightRef.current?.uuid === next) return
+        const ctrl = new AbortController()
+        // Let the current song's own stream get going first.
+        const timer = setTimeout(async () => {
+            try {
+                await ensureFreshToken()
+                const res = await fetch(`${DOWNLOAD_URL}/${next}`, { credentials: 'include', signal: ctrl.signal })
+                if (!res.ok || res.status === 206) return
+                const blob = await res.blob()
+                if (!ctrl.signal.aborted && blob.size > 0) slot.hold(next, blob)
+            } catch {} finally {
+                if (prefetchFlightRef.current?.ctrl === ctrl) prefetchFlightRef.current = null
+            }
+        }, readTestOverride('__prefetchDelayMs', 3000))
+        prefetchFlightRef.current = { uuid: next, ctrl, timer }
+    }, [current, isPlaying, online, queue, shuffle, shuffleOrder, repeat])
+    useEffect(() => () => {
+        const flight = prefetchFlightRef.current
+        if (flight) { clearTimeout(flight.timer); flight.ctrl.abort(); prefetchFlightRef.current = null }
+        prefetchRef.current.release()
+    }, [])
+
+    // The large art of the playing song and the next one is stored while online, so the
+    // expanded player and the lock screen have it after the network goes.
+    useEffect(() => {
+        if (!current || !online) return
+        void warmLargeArtwork(current)
+        const next = peekNextUuid({
+            uuids: queue.map(q => q.uuid), index: queueIndexRef.current, shuffle, shuffleOrder,
+            shufflePos: shufflePosRef.current, repeat, manualNextCount: manualNextRef.current.length,
+        })
+        const nextSong = next ? queue.find(q => q.uuid === next) : undefined
+        if (nextSong) void warmLargeArtwork(nextSong)
+    }, [current, online, queue, shuffle, shuffleOrder, repeat])
+
     // current-dependent: onEnded needs current to save position
     useEffect(() => {
         const audio = audioRef.current
@@ -1734,6 +1837,26 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     useEffect(() => {
         if (current) syncMediaSession(current)
     }, [current, skipNext, skipPrev, pause, resume])
+
+    // Replacing a song's art (editor) gives it a new version; the song held here, in the
+    // queue or playing, takes it, so the bar, the expanded player and the lock screen switch.
+    useEffect(() => {
+        function onArtworkChanged(e: Event) {
+            const { songId, version } = (e as CustomEvent<{ songId: string; version: number | null }>).detail
+            const patch = (s: PlayableSong): PlayableSong =>
+                s.uuid === songId ? { ...s, artwork_cached: true, artwork_updated_at: version ?? s.artwork_updated_at } : s
+            if (queueRef.current.some(s => s.uuid === songId)) {
+                queueRef.current = queueRef.current.map(patch)
+                setQueue([...queueRef.current])
+            }
+            if (currentRef.current?.uuid === songId) {
+                currentRef.current = patch(currentRef.current)
+                setCurrent(currentRef.current)
+            }
+        }
+        window.addEventListener(EVENTS.artworkChanged, onArtworkChanged)
+        return () => window.removeEventListener(EVENTS.artworkChanged, onArtworkChanged)
+    }, [])
 
     useEffect(() => {
         function onKeyDown(e: KeyboardEvent) {
@@ -1971,7 +2094,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                             ) : (
                                 <div className="flex-1 flex items-center justify-center">
                                     {(() => {
-                                        const a = songArtworkUrl(current.uuid, current.artwork_cached, p.artworkUrl100, 600)
+                                        const a = songArt(current, 600)
                                         const stand = <div className="w-full max-w-[72vmin] md:max-w-[min(600px,70vh)] aspect-square rounded-lg bg-gray-100 dark:bg-gray-800 flex items-center justify-center"><FaMusic size={64} className="text-gray-400" /></div>
                                         return a
                                             ? <ArtImage src={a} alt="" width={600} height={600} className="rounded-lg w-full max-w-[72vmin] md:max-w-[min(600px,70vh)] aspect-square object-cover shadow-2xl" unoptimized={!!current.artwork_cached} fallback={stand} />
@@ -2064,13 +2187,24 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                 paddingRight: 'env(safe-area-inset-right, 0px)',
                             }}
                             className="fixed z-[60] left-0 right-0 bg-surface border-t border-gray-100 dark:border-gray-800 flex flex-col max-h-[45vh] shadow-2xl
-                                       md:left-auto md:right-4 md:w-[360px] md:max-h-[min(520px,70vh)] md:rounded-2xl md:border md:border-gray-200 md:dark:border-gray-700"
+                                       md:left-auto md:right-4 md:w-[360px] md:max-h-[min(520px,70vh)] md:rounded-lg md:shadow-lg md:border md:border-gray-200 md:dark:border-gray-700"
                         >
                             {/* header */}
-                            <div className="flex flex-col border-b border-gray-100 dark:border-gray-800 shrink-0">
-                                <div className="flex items-center justify-between px-4 py-3">
+                            <div data-testid="queue-header" className="flex flex-col border-b border-gray-100 dark:border-gray-800 shrink-0">
+                                <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
                                     <span className="font-semibold text-sm">Queue</span>
-                                    <div className="flex items-center gap-3">
+                                    {queueOffline && (
+                                        <span data-testid="queue-offline-summary" className="order-last basis-full -mt-1 text-xs text-sky-500">
+                                            offline — {queueOffline.available} of {queueOffline.total} available
+                                        </span>
+                                    )}
+                                    {queue.length > 5 && (
+                                        // Its own row under the title and counter: beside them the offline text squeezes it.
+                                        <div className="order-last basis-full px-1">
+                                            <SearchInput value={queueSearch} onChange={setQueueSearch} placeholder="search queue…" testId="queue-search" />
+                                        </div>
+                                    )}
+                                    <div className="flex items-center gap-3 ml-auto">
                                         {(() => {
                                             const pos = shuffle
                                                 ? shuffleOrder.findIndex(qi => queue[qi]?.uuid === current.uuid)
@@ -2102,7 +2236,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                     manualNextIds={manualNextIds}
                                     offline={queueOffline}
                                     queueSearch={queueSearch} setQueueSearch={setQueueSearch}
-                                    showSearch={queue.length > 5}
+                                    showSearch={false}
+                                    summaryInHeader
                                     searchTestId="queue-search"
                                     emptyTestId="queue-search-empty"
                                     reorderQueue={reorderQueue}
@@ -2127,7 +2262,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                     onClick={() => setShowExpanded(true)}
                                 >
                                     <div data-testid="player-expand-art" className="shrink-0">
-                                        {(() => { const a = songArtworkUrl(current?.uuid, current?.artwork_cached, p.artworkUrl100, 200)
+                                        {(() => { const a = songArt(current, 200)
                                             const stand = <div className="w-11 h-11 md:w-9 md:h-9 rounded bg-gray-100 dark:bg-gray-800 flex items-center justify-center pointer-events-none"><FaMusic size={14} className="text-gray-400" /></div>
                                             return a
                                                 ? <ArtImage src={a} alt="" width={44} height={44} className="rounded w-11 h-11 md:w-9 md:h-9 pointer-events-none" unoptimized={!!current?.artwork_cached} fallback={stand} />
@@ -2183,7 +2318,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                                         <button data-testid="player-prev" onClick={skipPrev} disabled={!hasQueue} className={`shrink-0 p-2 -m-1 touch-manipulation disabled:opacity-30 ${idleClass}`}>
                                             <FaStepBackward size={16} />
                                         </button>
-                                        <button onClick={isPlaying ? pause : resume} className={`shrink-0 p-2 -m-1 touch-manipulation ${idleClass}`}>
+                                        <button data-testid="player-play-pause-mobile" title={isPlaying ? 'pause' : 'play'} onClick={isPlaying ? pause : resume} className={`shrink-0 p-2 -m-1 touch-manipulation ${idleClass}`}>
                                             {isBuffering && isPlaying ? <Spinner size={20} /> : isPlaying ? <FaPause size={20} /> : <FaPlay size={20} />}
                                         </button>
                                         <button data-testid="player-next" onClick={skipNext} disabled={!hasQueue} className={`shrink-0 p-2 -m-1 touch-manipulation disabled:opacity-30 ${idleClass}`}>

@@ -21,11 +21,11 @@ The player-state and library requests at launch have no time limit of their own,
 ### The verified IndexedDB scan reads every blob
 Where OPFS is unavailable, the saved-songs scan that verifies copies (`getCachedSongIds()` with its default, used by the settings page and after a save) reads every stored blob. Cost is unmeasured and Chromium's blobs are lazy. The launch scan does not do this.
 
-### A session the API rejects but the middleware accepts
-The middleware passes any unexpired access token through, and bounces `/` to `/download` when it sees one. If the API rejects a token that has not expired (secret rotated, user deleted, refresh token revoked early), the player's "session expired" redirect to `/?next=…` is bounced straight back to the app. The ordinary case — the 15-minute token has expired — shows the login form as intended. Fix: have the redirect clear the cookies, or have middleware verify against the API.
+### A session the API rejects but the proxy accepts
+The proxy passes any unexpired access token through, and bounces `/` to `/download` when it sees one. If the API rejects a token that has not expired (secret rotated, user deleted, refresh token revoked early), the player's "session expired" redirect to `/?next=…` is bounced straight back to the app. The ordinary case — the 15-minute token has expired — shows the login form as intended. Fix: have the redirect clear the cookies, or have the proxy verify against the API.
 
 ### Proactive refresh runs once per page load
-A page cannot know how old its token is (the middleware passes any unexpired token, and the service worker can serve a page with a dead one), so the first `ensureFreshToken()` after a load always refreshes; later ones wait ten minutes, and a failure waits thirty seconds. A user who reloads often makes one extra `POST /v1/auth/refresh` per load. Accepted.
+A page cannot know how old its token is (the proxy passes any unexpired token, and the service worker can serve a page with a dead one), so the first `ensureFreshToken()` after a load always refreshes; later ones wait ten minutes, and a failure waits thirty seconds. A user who reloads often makes one extra `POST /v1/auth/refresh` per load. Accepted.
 
 ### "Play now" has no offline filter
 `playNow()` does not check for a local copy offline. Every current caller is on a route that is online-only, or that lists only saved songs while offline, so an unsaved song cannot reach it. A new caller that lists unsaved songs offline would meet the error cascade rather than a skip.

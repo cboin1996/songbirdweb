@@ -25,6 +25,7 @@ class FakeResponse {
 
 function boot(fetchImpl: (url: string) => Promise<FakeResponse>) {
     const stores = new Map<string, Map<string, FakeResponse>>()
+    const keyListings = { count: 0 }
     const keyOf = (k: unknown) => typeof k === 'string' ? k : (k as { url: string }).url
     const caches = {
         open: async (name: string) => {
@@ -33,7 +34,7 @@ function boot(fetchImpl: (url: string) => Promise<FakeResponse>) {
             return {
                 put: async (k: unknown, r: FakeResponse) => { store.set(keyOf(k), r) },
                 match: async (k: unknown) => store.get(keyOf(k)),
-                keys: async () => [...store.keys()].map(url => ({ url })),
+                keys: async () => { keyListings.count += 1; return [...store.keys()].map(url => ({ url })) },
                 delete: async (k: unknown) => store.delete(keyOf(k)),
             }
         },
@@ -53,6 +54,7 @@ function boot(fetchImpl: (url: string) => Promise<FakeResponse>) {
 
     return {
         stores,
+        keyListings,
         open: (name: string) => caches.open(name),
         async activate() {
             let work: Promise<unknown> = Promise.resolve()
@@ -152,6 +154,145 @@ describe('artwork', () => {
         up = false
         const r = await sw.request(`/_next/image?url=${encodeURIComponent('https://is1.mzstatic.com/a/200x200bb.jpg')}&w=200&q=75`)
         expect(r.handled && r.response.body).toBe('saved')
+    })
+
+    describe('whole pictures only', () => {
+        const U = (path: string) => `https://songbird.test${path}`
+        const put = async (sw: ReturnType<typeof boot>, name: string, path: string, r: FakeResponse) => {
+            const cache = await (sw as unknown as { open(n: string): Promise<{ put(k: string, r: FakeResponse): Promise<void> }> }).open(name)
+            await cache.put(U(path), r)
+        }
+
+        it('does not store a partial answer', async () => {
+            const sw = boot(async () => new FakeResponse('part', { status: 206 }))
+            await sw.request('/v1/songs/a/artwork/thumb/1')
+            await new Promise(r => setTimeout(r, 0))
+            expect(sw.stores.get(BROWSE)?.size ?? 0).toBe(0)
+        })
+
+        it('does not store an empty answer', async () => {
+            const sw = boot(async () => new FakeResponse('', { headers: [['content-length', '0']] }))
+            await sw.request('/v1/songs/a/artwork/thumb/1')
+            await new Promise(r => setTimeout(r, 0))
+            expect(sw.stores.get(BROWSE)?.size ?? 0).toBe(0)
+        })
+
+        it('does not answer from an empty stored copy: the network answers instead', async () => {
+            const sw = boot(async () => new FakeResponse('real'))
+            await put(sw, SAVED, '/v1/songs/a/artwork/thumb/1', new FakeResponse('', { headers: [['content-length', '0']] }))
+            const r = await sw.request('/v1/songs/a/artwork/thumb/1')
+            expect(r.handled && r.response.body).toBe('real')
+        })
+
+        it('offline, an empty stored copy is an error, not a blank picture', async () => {
+            const sw = boot(async () => { throw new TypeError('network') })
+            await put(sw, SAVED, '/v1/songs/a/artwork/thumb/1', new FakeResponse('', { headers: [['content-length', '0']] }))
+            const r = await sw.request('/v1/songs/a/artwork/thumb/1')
+            expect(r.handled && r.response.status).toBe(0)
+        })
+
+        it('an empty live answer with nothing stored is an error, not a blank picture', async () => {
+            const sw = boot(async () => new FakeResponse('', { headers: [['content-length', '0']] }))
+            const r = await sw.request('/v1/songs/a/artwork/thumb/9')
+            expect(r.handled && r.response.status).toBe(0)
+        })
+
+        it('an empty live answer falls back to a stored version', async () => {
+            const sw = boot(async () => new FakeResponse('', { headers: [['content-length', '0']] }))
+            await put(sw, SAVED, '/v1/songs/a/artwork/thumb/0', new FakeResponse('old'))
+            const r = await sw.request('/v1/songs/a/artwork/thumb/9')
+            expect(r.handled && r.response.body).toBe('old')
+        })
+    })
+
+    describe('versioned song artwork', () => {
+        const U = (path: string) => `https://songbird.test${path}`
+        async function seed(sw: ReturnType<typeof boot>, name: string, entries: Record<string, string>) {
+            const cache = await (sw as unknown as { open(n: string): Promise<{ put(k: string, r: FakeResponse): Promise<void> }> }).open(name)
+            for (const [path, body] of Object.entries(entries)) await cache.put(U(path), new FakeResponse(body))
+        }
+
+        it('answers the exact url when it is stored', async () => {
+            const sw = boot(async () => { throw new TypeError('network') })
+            await seed(sw, SAVED, { '/v1/songs/a/artwork/thumb/5': 'v5', '/v1/songs/a/artwork/thumb/4': 'v4' })
+            const r = await sw.request('/v1/songs/a/artwork/thumb/5')
+            expect(r.handled && r.response.body).toBe('v5')
+        })
+
+        it('offline, a url with no stored copy gets any stored version of the same song and size', async () => {
+            const sw = boot(async () => { throw new TypeError('network') })
+            await seed(sw, SAVED, { '/v1/songs/a/artwork/thumb/4': 'v4', '/v1/songs/a/artwork/full/4': 'full4', '/v1/songs/b/artwork/thumb/9': 'other' })
+            const r = await sw.request('/v1/songs/a/artwork/thumb/7')
+            expect(r.handled && r.response.body).toBe('v4')
+        })
+
+        it('offline, art saved before versions existed (no version in the url) still answers a versioned url', async () => {
+            const sw = boot(async () => { throw new TypeError('network') })
+            await seed(sw, SAVED, { '/v1/songs/a/artwork/thumb': 'old' })
+            const r = await sw.request('/v1/songs/a/artwork/thumb/0')
+            expect(r.handled && r.response.body).toBe('old')
+        })
+
+        it('does not answer another size or another song', async () => {
+            const sw = boot(async () => { throw new TypeError('network') })
+            await seed(sw, SAVED, { '/v1/songs/a/artwork/full/4': 'full', '/v1/songs/ab/artwork/thumb/4': 'ab' })
+            const r = await sw.request('/v1/songs/a/artwork/thumb/7')
+            expect(r.handled && r.response.status).toBe(0)
+        })
+
+        it('online, a new version is fetched, not answered with the old one', async () => {
+            const sw = boot(async () => new FakeResponse('new'))
+            await seed(sw, SAVED, { '/v1/songs/a/artwork/thumb/4': 'v4' })
+            const r = await sw.request('/v1/songs/a/artwork/thumb/7')
+            expect(r.handled && r.response.body).toBe('new')
+        })
+
+        it('with the server down (502), the stored version answers instead of the error', async () => {
+            const sw = boot(async () => new FakeResponse('bad gateway', { status: 502 }))
+            await seed(sw, SAVED, { '/v1/songs/a/artwork/thumb/4': 'v4' })
+            const r = await sw.request('/v1/songs/a/artwork/thumb/7')
+            expect(r.handled && r.response.body).toBe('v4')
+        })
+
+        it('offline misses list each cache\'s keys once, not once per request', async () => {
+            const sw = boot(async () => { throw new TypeError('network') })
+            await seed(sw, SAVED, { '/v1/songs/a/artwork/thumb/4': 'v4' })
+            await seed(sw, BROWSE, { '/v1/songs/b/artwork/thumb/4': 'b4' })
+            for (let i = 0; i < 20; i++) await sw.request(`/v1/songs/none${i}/artwork/thumb/1`)
+            const first = await sw.request('/v1/songs/a/artwork/thumb/9')
+            expect(first.handled && first.response.body).toBe('v4')
+            expect(sw.keyListings.count).toBeLessThanOrEqual(2)
+        })
+
+        it('an index built before a copy was stored finds it after the reindex pause', async () => {
+            jest.useFakeTimers({ doNotFake: ['setTimeout', 'setImmediate', 'nextTick', 'queueMicrotask'] })
+            try {
+                const sw = boot(async () => { throw new TypeError('network') })
+                await sw.request('/v1/songs/a/artwork/thumb/1') // builds the (empty) index
+                await seed(sw, SAVED, { '/v1/songs/a/artwork/thumb/4': 'v4' })
+                const early = await sw.request('/v1/songs/a/artwork/thumb/9')
+                expect(early.handled && early.response.status).toBe(0)
+                jest.setSystemTime(Date.now() + 6000)
+                const later = await sw.request('/v1/songs/a/artwork/thumb/9')
+                expect(later.handled && later.response.body).toBe('v4')
+            } finally { jest.useRealTimers() }
+        })
+
+        it('prefers a saved copy over a browsed one', async () => {
+            const sw = boot(async () => { throw new TypeError('network') })
+            await seed(sw, BROWSE, { '/v1/songs/a/artwork/thumb/3': 'browsed' })
+            await seed(sw, SAVED, { '/v1/songs/a/artwork/thumb/4': 'saved' })
+            const r = await sw.request('/v1/songs/a/artwork/thumb/7')
+            expect(r.handled && r.response.body).toBe('saved')
+        })
+
+        it('storing a fetched version removes nothing: eviction is the page\'s job', async () => {
+            const sw = boot(async () => new FakeResponse('new'))
+            await seed(sw, BROWSE, { '/v1/songs/a/artwork/thumb/4': 'v4' })
+            await sw.request('/v1/songs/a/artwork/thumb/7')
+            await new Promise(r => setTimeout(r, 0))
+            expect(sw.stores.get(BROWSE)!.size).toBe(2)
+        })
     })
 
     it('keeps the saved cache when the worker activates', async () => {

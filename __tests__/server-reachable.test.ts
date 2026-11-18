@@ -62,7 +62,9 @@ afterEach(() => {
 
 describe('a player write that takes too long', () => {
     it('is given up on without calling the server unreachable', async () => {
-        fetchMock.mockImplementation(hangUntilAborted)
+        // The write hangs, but the server answers a small question: slow, not gone.
+        fetchMock.mockImplementation((url: string, opts?: RequestInit) =>
+            url.includes('/health') ? Promise.resolve(answer(200)) : hangUntilAborted(url, opts))
         const { data, signal } = await load()
 
         const saved = data.savePlayerState(() => state)
@@ -71,6 +73,21 @@ describe('a player write that takes too long', () => {
 
         expect(await settled).toMatch(/timed out/)
         expect(signal.isOffline()).toBe(false)
+    })
+})
+
+describe('a request that hangs while the server is not answering at all', () => {
+    it('calls the server unreachable after the small question goes unanswered too', async () => {
+        fetchMock.mockImplementation(hangUntilAborted)
+        const { data, signal } = await load()
+
+        const saved = data.savePlayerState(() => state)
+        saved.catch(() => {})
+        await jest.advanceTimersByTimeAsync(1400)
+        expect(signal.isOffline()).toBe(false)
+        await jest.advanceTimersByTimeAsync(1700)   // 1.5s of waiting, then 1.5s for the probe
+        expect(signal.isOffline()).toBe(true)
+        await jest.advanceTimersByTimeAsync(15000)
     })
 })
 
@@ -104,6 +121,38 @@ describe('what ends "the server is unreachable"', () => {
         fetchMock.mockResolvedValueOnce(answer(200, { 'X-SW-Stale': '1' }))
         await data.fetchPlayerState()
         expect(signal.isOffline()).toBe(true)
+    })
+})
+
+describe('a song download the web server could not pass on', () => {
+    // Downloads skip the /v1 route handler and go through a Next rewrite. When the API is
+    // down, the rewrite answers a plain-text 500 (the route handler answered 502). The
+    // API's own errors are JSON.
+    it('a plain-text 500 on a download means the server is unreachable', async () => {
+        const { data, signal } = await load()
+        fetchMock.mockResolvedValueOnce(answer(500, { 'content-type': 'text/plain; charset=utf-8' }))
+        await expect(data.fetchSong('abc')).rejects.toThrow()
+        expect(signal.isOffline()).toBe(true)
+    })
+
+    it('a JSON 500 on a download came from the API, so the server is reachable', async () => {
+        fetchMock.mockRejectedValueOnce(new TypeError('failed to fetch'))
+        const { data, signal } = await load()
+        await expect(data.fetchSong('abc')).rejects.toThrow()
+        expect(signal.isOffline()).toBe(true)
+
+        fetchMock.mockResolvedValueOnce(answer(500, { 'content-type': 'application/json' }))
+        await expect(data.fetchSong('abc')).rejects.toThrow()
+        expect(signal.isOffline()).toBe(false)
+    })
+
+    it('a plain-text 500 elsewhere is still the API answering', async () => {
+        fetchMock.mockRejectedValueOnce(new TypeError('failed to fetch'))
+        const { data, signal } = await load()
+        await expect(data.fetchPlayerState()).rejects.toThrow()
+        fetchMock.mockResolvedValueOnce(answer(500, { 'content-type': 'text/plain' }))
+        await expect(data.fetchPlayerState()).rejects.toThrow()
+        expect(signal.isOffline()).toBe(false)
     })
 })
 

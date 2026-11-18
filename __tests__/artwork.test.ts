@@ -1,13 +1,8 @@
-import {
-  artworkVersion, artworkVersionQuery, bumpArtworkVersion, mediaSessionArtwork,
-  normalizeArtworkSize, optimizerWidth, resetArtworkVersions,
-} from '../app/lib/artwork'
+import { storedMediaArtwork, mediaSessionArtwork, normalizeArtworkSize, optimizerWidth } from '../app/lib/artwork'
 import { readdirSync, readFileSync, statSync } from 'fs'
 import { join } from 'path'
 import nextConfig from '../next.config'
 import { artworkUrl, songArtworkUrl } from '../app/lib/data'
-
-beforeEach(() => { localStorage.clear(); resetArtworkVersions() })
 
 describe('normalizeArtworkSize', () => {
   it.each([[48, 200], [96, 200], [200, 200], [300, 200], [301, 600], [400, 600], [600, 600]])(
@@ -22,23 +17,17 @@ describe('remote artwork urls', () => {
   })
 })
 
-describe('artwork versions', () => {
-  it('start at zero and add nothing to the url', () => {
-    expect(artworkVersion('abc')).toBe(0)
-    expect(songArtworkUrl('abc', true, undefined, 200)).toBe('/v1/songs/abc/artwork/thumb')
+describe('local artwork urls carry the song version in the path', () => {
+  it('uses 0 for the original art', () => {
+    expect(songArtworkUrl('abc', true, undefined, 200)).toBe('/v1/songs/abc/artwork/thumb/0')
+    expect(songArtworkUrl('abc', true, undefined, 200, null)).toBe('/v1/songs/abc/artwork/thumb/0')
   })
-  it('bump adds ?v= to every local size of that song only', () => {
-    expect(bumpArtworkVersion('abc')).toBe(1)
-    expect(bumpArtworkVersion('abc')).toBe(2)
-    expect(songArtworkUrl('abc', true, undefined, 200)).toBe('/v1/songs/abc/artwork/thumb?v=2')
-    expect(songArtworkUrl('abc', true, undefined, 600)).toBe('/v1/songs/abc/artwork/full?v=2')
-    expect(songArtworkUrl('other', true, undefined, 200)).toBe('/v1/songs/other/artwork/thumb')
-    expect(artworkVersionQuery('abc')).toBe('?v=2')
+  it('uses the song artwork_updated_at for every local size, and no query string', () => {
+    expect(songArtworkUrl('abc', true, undefined, 200, 1763340000123)).toBe('/v1/songs/abc/artwork/thumb/1763340000123')
+    expect(songArtworkUrl('abc', true, undefined, 600, 1763340000123)).toBe('/v1/songs/abc/artwork/full/1763340000123')
   })
-  it('survives a reload (read back from storage)', () => {
-    bumpArtworkVersion('abc')
-    resetArtworkVersions()
-    expect(artworkVersion('abc')).toBe(1)
+  it('leaves remote art alone', () => {
+    expect(songArtworkUrl('abc', false, 'https://x/100x100bb.jpg', 200, 5)).toBe('https://x/200x200bb.jpg')
   })
 })
 
@@ -49,8 +38,8 @@ describe('mediaSessionArtwork', () => {
   it('lists the stored thumbnail and full image for a song with a local copy', () => {
     const song = { uuid: 'abc', artwork_cached: true }
     expect(mediaSessionArtwork(song, urlFor(song), 'http://app')).toEqual([
-      { src: 'http://app/v1/songs/abc/artwork/thumb', sizes: '200x200', type: 'image/jpeg' },
-      { src: 'http://app/v1/songs/abc/artwork/full', sizes: '600x600', type: 'image/jpeg' },
+      { src: 'http://app/v1/songs/abc/artwork/thumb/0', sizes: '200x200', type: 'image/jpeg' },
+      { src: 'http://app/v1/songs/abc/artwork/full/0', sizes: '600x600', type: 'image/jpeg' },
     ])
   })
   it('lists only the large remote image otherwise', () => {
@@ -90,16 +79,38 @@ describe('image optimizer widths', () => {
   })
 })
 
-describe('stored versions are validated', () => {
-  it('keeps only whole positive numbers', () => {
-    localStorage.setItem('songbird-artwork-versions', JSON.stringify({ a: 5, b: '5', c: 0, d: -1, e: 1.5, f: null, g: 2 }))
-    resetArtworkVersions()
-    expect([artworkVersion('a'), artworkVersion('b'), artworkVersion('c'), artworkVersion('d'), artworkVersion('e'), artworkVersion('f'), artworkVersion('g')])
-      .toEqual([5, 0, 0, 0, 0, 0, 2])
+describe('storedMediaArtwork (lock screen with no network)', () => {
+  const entry = (src: string, px: number) => ({ src, sizes: `${px}x${px}`, type: 'image/jpeg' })
+  const picture = (size: number, status = 200) => ({ ok: status < 300, status, clone() { return this }, blob: async () => ({ size }) }) as unknown as Response
+  const makeUrl = (blob: Blob) => `blob:copy-${(blob as unknown as { size: number }).size}`
+
+  it('offers only the sizes that are stored, each as a blob url of the stored copy', async () => {
+    const list = [entry('http://x/v1/songs/a/artwork/thumb/1', 200), entry('http://x/v1/songs/a/artwork/full/1', 600)]
+    const stored: Record<string, Response> = { 'http://x/v1/songs/a/artwork/full/1': picture(7) }
+    const out = await storedMediaArtwork(list, async u => stored[u], makeUrl)
+    expect(out).toEqual([{ src: 'blob:copy-7', sizes: '600x600', type: 'image/jpeg' }])
   })
-  it('ignores a stored value that is not an object', () => {
-    localStorage.setItem('songbird-artwork-versions', '[1,2]')
-    resetArtworkVersions()
-    expect(artworkVersion('0')).toBe(0)
+
+  it('finds a saved copy of remote art by its remote url', async () => {
+    const remote = 'https://is1.mzstatic.com/a/600x600bb.jpg'
+    const list = [entry(`/_next/image?url=${encodeURIComponent(remote)}&w=600&q=75`, 600)]
+    const out = await storedMediaArtwork(list, async u => (u === remote ? picture(5) : undefined), makeUrl)
+    expect(out.map(a => a.src)).toEqual(['blob:copy-5'])
+  })
+
+  it('gives no entry at all when nothing is stored', async () => {
+    const out = await storedMediaArtwork([entry('http://x/v1/songs/a/artwork/full/1', 600)], async () => undefined, makeUrl)
+    expect(out).toEqual([])
+  })
+
+  it('skips an empty or partial stored copy', async () => {
+    const list = [entry('http://x/a', 200), entry('http://x/b', 600)]
+    const stored: Record<string, Response> = { 'http://x/a': picture(0), 'http://x/b': picture(9, 206) }
+    expect(await storedMediaArtwork(list, async u => stored[u], makeUrl)).toEqual([])
+  })
+
+  it('treats a lookup that throws as not stored', async () => {
+    const out = await storedMediaArtwork([entry('http://x/a', 200)], async () => { throw new Error('boom') }, makeUrl)
+    expect(out).toEqual([])
   })
 })

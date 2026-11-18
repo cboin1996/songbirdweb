@@ -47,6 +47,11 @@ typecheck:
 build:
 	npm run build
 
+.PHONY: smoke-standalone
+# Builds the image that ships and boots `node server.js`, which no e2e suite runs.
+smoke-standalone:
+	scripts/standalone-smoke.sh
+
 # Raw runners: run the suite against whatever API and web are already up. CI calls
 # these after it starts its own stack; locally use test-e2e* (fresh Docker stack).
 # Destructive specs (editor, bulk-select, import) run on isolated users.
@@ -86,7 +91,7 @@ test: lint typecheck unit
 #   make e2e-api-down          # stop and remove containers
 # ----------------------------------------------------------------------------
 
-E2E_API_IMAGE=cboin/songbirdapi:latest
+E2E_API_IMAGE?=cboin/songbirdapi:latest
 E2E_NETWORK=songbirdweb-e2e
 E2E_PG_CONTAINER=songbirdweb-e2e-postgres
 E2E_API_CONTAINER=songbirdweb-e2e-api
@@ -94,8 +99,35 @@ E2E_API_PORT=8001
 E2E_WEB_PORT=3001
 E2E_NEXT_PIDFILE=/tmp/songbirdweb-e2e-next.pid
 
-.PHONY: e2e-api-up
-e2e-api-up:
+.PHONY: e2e-api-up e2e-api-image e2e-api-check
+# The image CI uses, pulled so a local run tests against the same API. E2E_API_NOPULL=1 skips
+# the pull, for an image built from the branch (make test-e2e-local-dev builds one): a pull of
+# the same tag would replace it with the released one. A failed pull is said, not hidden.
+# The image's age uses python3 so it works with BSD date too.
+e2e-api-image:
+	@if [ -n "$(E2E_API_NOPULL)" ]; then \
+		docker image inspect $(E2E_API_IMAGE) >/dev/null 2>&1 || { echo "e2e api image $(E2E_API_IMAGE): not found locally"; exit 1; }; \
+		echo "e2e api image $(E2E_API_IMAGE): local, not pulled"; \
+	elif err=$$(docker pull -q $(E2E_API_IMAGE) 2>&1 >/dev/null); then \
+		echo "e2e api image $(E2E_API_IMAGE): pulled"; \
+	else \
+		echo "pull failed: $$err" | head -2; \
+		created=$$(docker image inspect -f '{{.Created}}' $(E2E_API_IMAGE) 2>/dev/null); \
+		if [ -z "$$created" ]; then echo "e2e api image $(E2E_API_IMAGE): not pulled and not found locally"; exit 1; fi; \
+		age=$$(python3 -c 'import sys,datetime as d; t=d.datetime.fromisoformat(sys.argv[1][:19]); print((d.datetime.utcnow()-t).days)' "$$created" 2>/dev/null || echo 0); \
+		echo "e2e api image $(E2E_API_IMAGE): using the local one, created $$created"; \
+		if [ $$age -gt 7 ]; then echo "WARNING: that image is $$age days old; the API may have moved on"; fi; \
+	fi
+
+# The web calls API routes that only a newer image has (versioned art). A route that is
+# there answers "Song not found"; one that is not answers "Not Found". Fail early, with the
+# way out, rather than with specs that fail on missing art.
+e2e-api-check:
+	@body=$$(curl -s http://localhost:$(E2E_API_PORT)/v1/songs/none/artwork/thumb/0); \
+	case "$$body" in *"Song not found"*) echo "✓ e2e api has the versioned art routes";; \
+	*) echo "e2e api $(E2E_API_IMAGE) lacks the versioned art routes ($$body). Use make test-e2e-local-dev (builds the API from $(E2E_API_LOCAL_SRC)) or E2E_API_NOPULL=1 E2E_API_IMAGE=<branch image>."; exit 1;; esac
+
+e2e-api-up: e2e-api-image
 	@docker network create $(E2E_NETWORK) 2>/dev/null || true
 	@if ! docker ps --format '{{.Names}}' | grep -q "^$(E2E_PG_CONTAINER)$$"; then \
 		docker run -d --name $(E2E_PG_CONTAINER) --network $(E2E_NETWORK) \
@@ -139,14 +171,16 @@ e2e-api-up:
 			-v $$(pwd)/data:/songbirdapi/data \
 			-p $(E2E_API_PORT):8000 \
 			$(E2E_API_IMAGE); \
-		for i in $$(seq 1 30); do \
-			curl -sf http://localhost:$(E2E_API_PORT)/v1/version >/dev/null && echo "✓ e2e api ready" && exit 0; \
+		ready=; for i in $$(seq 1 30); do \
+			curl -sf http://localhost:$(E2E_API_PORT)/v1/version >/dev/null && ready=1 && break; \
 			sleep 1; \
 		done; \
-		docker logs $(E2E_API_CONTAINER); exit 1; \
+		if [ -z "$$ready" ]; then docker logs $(E2E_API_CONTAINER); exit 1; fi; \
+		echo "✓ e2e api ready"; \
 	else \
 		echo "e2e api already running"; \
 	fi
+	@$(MAKE) --no-print-directory e2e-api-check
 
 .PHONY: e2e-api-down
 e2e-api-down:
@@ -158,7 +192,7 @@ e2e-api-down:
 # the running server first: it would otherwise keep serving chunks that are gone.
 E2E_BUILD_STAMP=.next/.e2e-build-stamp
 E2E_BUILD_KEY=http://localhost:$(E2E_API_PORT)
-E2E_BUILD_INPUTS=app public middleware.ts next.config.ts package.json package-lock.json tsconfig.json postcss.config.mjs $(wildcard .env*)
+E2E_BUILD_INPUTS=app public proxy.ts next.config.ts package.json package-lock.json tsconfig.json postcss.config.mjs $(wildcard .env*)
 
 .PHONY: e2e-build
 e2e-build:
@@ -268,7 +302,7 @@ e2e-api-build:
 
 .PHONY: test-e2e-local-dev
 test-e2e-local-dev: e2e-api-build
-	$(MAKE) test-e2e-local E2E_API_IMAGE=cboin/songbirdapi:e2e-local
+	$(MAKE) test-e2e-local E2E_API_IMAGE=cboin/songbirdapi:e2e-local E2E_API_NOPULL=1
 
 local-run-songbirdweb:
 	npm run dev

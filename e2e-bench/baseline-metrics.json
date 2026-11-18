@@ -1,0 +1,130 @@
+{
+  "runStartedAt": 1794903538858,
+  "coldLoad": {
+    "libraryRequests": 1,
+    "apiRequests": 77,
+    "byKind": {
+      "position": 0,
+      "state": 1,
+      "play": 0,
+      "audio": 0,
+      "other": 76
+    }
+  },
+  "playback": {
+    "windowSeconds": 20,
+    "counts": {
+      "player": 0,
+      "list": 0,
+      "row": 0,
+      "progress": 20
+    },
+    "requests": {
+      "position": 2,
+      "state": 0,
+      "play": 0,
+      "audio": 0,
+      "other": 0
+    },
+    "requestTotal": 2,
+    "requestBytes": 347,
+    "layouts": 1171,
+    "styleRecalcs": 1151,
+    "heapUsedBytes": 41552192,
+    "heapGrowthBytes": 3165524
+  },
+  "trackChange": {
+    "player": 3,
+    "list": 1,
+    "row": 2,
+    "progress": 6
+  },
+  "trackChangeAudioRanges": [
+    "bytes=0-"
+  ],
+  "trackChangeAudioRequests": 1,
+  "playPause": {
+    "pause": {
+      "player": 1,
+      "list": 1,
+      "row": 0,
+      "progress": 1
+    },
+    "resume": {
+      "player": 1,
+      "list": 1,
+      "row": 0,
+      "progress": 2
+    }
+  },
+  "toast": {
+    "player": 0,
+    "list": 0,
+    "row": 0,
+    "progress": 1
+  },
+  "seek": {
+    "all": [
+      {
+        "status": 206,
+        "range": "bytes=0-",
+        "contentRange": "bytes 0-6869997/6869998",
+        "contentLength": "6869998",
+        "acceptRanges": "bytes"
+      },
+      {
+        "status": 206,
+        "range": "bytes=6225920-",
+        "contentRange": "bytes 6225920-6869997/6869998",
+        "contentLength": "644078",
+        "acceptRanges": "bytes"
+      }
+    ],
+    "played": {
+      "currentTime": 238.323498,
+      "duration": 258.263958
+    }
+  },
+  "searchKeystrokes": [
+    {
+      "player": 0,
+      "list": 2,
+      "row": 0,
+      "progress": 1
+    },
+    {
+      "player": 0,
+      "list": 2,
+      "row": 0,
+      "progress": 1
+    },
+    {
+      "player": 0,
+      "list": 2,
+      "row": 0,
+      "progress": 1
+    },
+    {
+      "player": 0,
+      "list": 2,
+      "row": 0,
+      "progress": 2
+    }
+  ],
+  "letterRailScrub": {
+    "player": 0,
+    "list": 1,
+    "row": 1000,
+    "progress": 2
+  },
+  "queueOpen": {
+    "windowSeconds": 10,
+    "counts": {
+      "player": 0,
+      "list": 0,
+      "row": 0,
+      "progress": 10,
+      "queueList": 0
+    }
+  }
+}

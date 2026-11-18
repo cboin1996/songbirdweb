@@ -13,6 +13,7 @@ const ROUTES = [
     { path: routes.import,   anchor: /\.mp3|drag/i },
     { path: routes.settings, anchor: /password|settings/i },
     { path: routes.info,     anchor: /about/i },
+    { path: routes.admin,    anchor: /overview/i },
 ] as const
 
 test.describe('navigation: every authenticated page loads', () => {

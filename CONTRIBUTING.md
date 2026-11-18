@@ -138,7 +138,7 @@ env vars, and conventions; the benchmark and budgets are described in the README
 | `app/components/` | Shared client components |
 | `app/lib/` | Pure client helpers (data fetching, OPFS, hooks) |
 | `app/v1/[...path]/route.ts` | Dev-only API proxy |
-| `middleware.ts` | Auth + token refresh |
+| `proxy.ts` | Auth + token refresh |
 | `public/sw.template.js` | Service worker source; `npm run build` generates `public/sw.js` from it |
 | `e2e/` | Playwright specs + helpers |
 | `__tests__/` | Jest unit tests |

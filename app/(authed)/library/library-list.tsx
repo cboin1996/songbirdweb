@@ -7,9 +7,10 @@ import { LibrarySong, Playlist, EligibleSong, artworkUrl, songArtworkUrl, fetchL
 import { ArtImage } from '../../components/art-image'
 import { queryKeys } from "../../lib/query-keys"
 import SongPickerModal, { PickerSong } from "../../components/song-picker-modal"
-import { saveSongsOffline, reportSaveResult, uncacheSong, cacheArtworkUrls } from "../../lib/offline"
+import { saveSongsOffline, reportSaveResult, uncacheSong, cacheArtworkUrls, refreshSavedArtwork } from "../../lib/offline"
 import { useOfflineSave } from "../../lib/offline-save-context"
 import { useOnline } from "../../lib/use-online"
+import LibraryLoading from "./library-skeleton"
 import { isOffline } from "../../lib/offline-signal"
 import { useRenderCount } from "../../lib/perf"
 import Song from "../../components/song"
@@ -35,7 +36,7 @@ type ViewMode = 'songs' | 'artists' | 'albums' | 'genres' | 'playlists'
 const AlbumCard = memo(function AlbumCard({ album, isCompact, isActive, isPlaying, onOpen, onPlay }: { album: LibraryAlbum; isCompact: boolean; isActive: boolean; isPlaying: boolean; onOpen: (album: LibraryAlbum) => void; onPlay: (album: LibraryAlbum) => void }) {
   useRenderCount('album')
     const firstSong = album.songs[0]
-    const smallArt = songArtworkUrl(firstSong?.uuid, firstSong?.artwork_cached, album.artworkUrl100, 200)
+    const smallArt = songArtworkUrl(firstSong?.uuid, firstSong?.artwork_cached, album.artworkUrl100, 200, firstSong?.artwork_updated_at)
     // Grid tiles are never wider than 200 css px (see the sizes below), so the thumbnail serves them too.
     const largeArt = smallArt
     const useLocalArt = !!firstSong?.artwork_cached
@@ -169,7 +170,7 @@ export default function LibraryList() {
     const sectionRefs = useRef<Record<string, HTMLElement | null>>({})
     const stickyHeaderRef = useRef<HTMLDivElement | null>(null)
     const isDesktop = useIsDesktop()
-    const { savingAll, progress: saveAllProgress, failedIds, clearFailedIds, cachedIds, setCachedIds, cacheSongsById, refreshCachedIds, readSavedAfterLaunch } = useOfflineSave()
+    const { savingAll, progress: saveAllProgress, failedIds, clearFailedIds, cachedIds, cachedIdsStatus, setCachedIds, cacheSongsById, refreshCachedIds, readSavedAfterLaunch } = useOfflineSave()
     const [offlineReady, setOfflineReady] = useState(false)
     const [syncPromptIds, setSyncPromptIds] = useState<string[]>([])
     const eligibleIds = useMemo(() => new Set(eligibleSongs.filter(s => s.eligible).map(s => s.uuid)), [eligibleSongs])
@@ -202,19 +203,37 @@ export default function LibraryList() {
         return () => window.removeEventListener(EVENTS.offlineCleared, handler)
     }, [queryClient])
 
+    // A saved song's art follows the version the library reports: art saved before versions
+    // existed, or before a replace, is stored again at the current url and the old copy dropped.
+    // Online only; offline the service worker answers with whichever version is stored.
+    const savedArtSignature = useRef('')
+    useEffect(() => {
+        if (!online || cachedIdsStatus !== 'scanned' || savingAll) return
+        const signature = songs.filter(s => cachedIds.has(s.uuid)).map(s => `${s.uuid}:${s.artwork_updated_at ?? 0}`).join(',')
+        if (signature === savedArtSignature.current) return
+        savedArtSignature.current = signature
+        void refreshSavedArtwork(songs, cachedIds)
+    }, [online, cachedIdsStatus, savingAll, songs, cachedIds])
+
     const supersededIds = useMemo(
         () => new Set(songs.map(s => s.parent_song_id).filter(Boolean) as string[]),
         [songs]
     )
     // The saved set narrows the list only offline; online, a save or a drop must not
     // rebuild every derived list (and with them every row).
-    const offlineOnlyIds = online ? null : cachedIds
+    // Offline the list shows saved songs unless "Show all" is on; online a "Saved" chip does the same.
+    const [showAllOffline, setShowAllOffline] = useState(false)
+    const [savedOnly, setSavedOnly] = useState(false)
+    const narrowToSaved = online ? savedOnly : !showAllOffline
+    const offlineOnlyIds = narrowToSaved ? cachedIds : null
+    const visibleSongs = useMemo(
+        () => songs.filter(s => !supersededIds.has(s.uuid)),
+        [songs, supersededIds]
+    )
+    const savedCount = useMemo(() => visibleSongs.filter(s => cachedIds.has(s.uuid)).length, [visibleSongs, cachedIds])
     const baseSongs = useMemo(
-        () => {
-            const base = offlineOnlyIds ? songs.filter(s => offlineOnlyIds.has(s.uuid)) : songs
-            return base.filter(s => !supersededIds.has(s.uuid))
-        },
-        [songs, offlineOnlyIds, supersededIds]
+        () => offlineOnlyIds ? visibleSongs.filter(s => offlineOnlyIds.has(s.uuid)) : visibleSongs,
+        [visibleSongs, offlineOnlyIds]
     )
     // The input stays responsive; the long list catches up when React has time.
     const deferredQuery = useDeferredValue(searchQuery)
@@ -231,8 +250,8 @@ export default function LibraryList() {
             if (isOffline()) {
                 try {
                     const cached = await fetchLibrarySongs()
-                    const playable = cached.filter(s => ids.has(s.uuid))
-                    if (playable.length > 0) queryClient.setQueryData(queryKeys.librarySongs, playable)
+                    // The whole copy stays: the saved narrowing happens in the view, so "Show all" has the rest.
+                    if (cached.some(s => ids.has(s.uuid))) queryClient.setQueryData(queryKeys.librarySongs, cached)
                 } catch {}
             }
             setOfflineReady(true)
@@ -410,13 +429,13 @@ export default function LibraryList() {
             const allAlbumSongs = [...albumGrouped.values()].flat().flatMap(a => a.songs)
             const first = allAlbumSongs[0]
             if (!first?.properties) return
-            const queue = allAlbumSongs.filter(s => s.properties).map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached, source: ctx }))
-            play({ uuid: first.uuid, properties: first.properties, last_position: first.last_position, last_played_at: first.last_played_at, artwork_cached: first.artwork_cached, source: ctx }, queue, ctx)
+            const queue = allAlbumSongs.filter(s => s.properties).map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached, artwork_updated_at: s.artwork_updated_at, source: ctx }))
+            play({ uuid: first.uuid, properties: first.properties, last_position: first.last_position, last_played_at: first.last_played_at, artwork_cached: first.artwork_cached, artwork_updated_at: first.artwork_updated_at, source: ctx }, queue, ctx)
         } else {
             const first = allSortedSongs[0]
             if (!first?.properties) return
-            const queue = allSortedSongs.filter(s => s.properties).map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached, source: { ...ctx, href: withSong(baseCtx.href, s.uuid) } }))
-            play({ uuid: first.uuid, properties: first.properties, last_position: first.last_position, last_played_at: first.last_played_at, artwork_cached: first.artwork_cached, source: { ...ctx, href: withSong(baseCtx.href, first.uuid) } }, queue, ctx)
+            const queue = allSortedSongs.filter(s => s.properties).map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached, artwork_updated_at: s.artwork_updated_at, source: { ...ctx, href: withSong(baseCtx.href, s.uuid) } }))
+            play({ uuid: first.uuid, properties: first.properties, last_position: first.last_position, last_played_at: first.last_played_at, artwork_cached: first.artwork_cached, artwork_updated_at: first.artwork_updated_at, source: { ...ctx, href: withSong(baseCtx.href, first.uuid) } }, queue, ctx)
         }
     }
 
@@ -429,8 +448,8 @@ export default function LibraryList() {
         const first = album.songs[0]
         if (!first?.properties) return
         const ctx = { label: album.collectionName, href: `${routes.library}?view=albums&album=${album.collectionId}`, id: ctxId }
-        const queue = album.songs.filter(s => s.properties).map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached, source: ctx }))
-        play({ uuid: first.uuid, properties: first.properties, last_position: first.last_position, last_played_at: first.last_played_at, artwork_cached: first.artwork_cached, source: ctx }, queue, ctx)
+        const queue = album.songs.filter(s => s.properties).map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached, artwork_updated_at: s.artwork_updated_at, source: ctx }))
+        play({ uuid: first.uuid, properties: first.properties, last_position: first.last_position, last_played_at: first.last_played_at, artwork_cached: first.artwork_cached, artwork_updated_at: first.artwork_updated_at, source: ctx }, queue, ctx)
     }
 
     async function handleAlbumAddToPlaylist(playlistId: string) {
@@ -674,20 +693,22 @@ export default function LibraryList() {
     function playRow(songId: string, e?: React.MouseEvent) {
         const song = songs.find(s => s.uuid === songId)
         if (!song?.properties) return
+        if (!online && !cachedIds.has(songId)) { showToast('not saved offline'); return }
         if (selectMode) {
             handleSelect(songId, e?.shiftKey)
             return
         }
         const baseCtx = VIEW_CONTEXT[viewMode]
         const ctx = { ...baseCtx, id: viewMode === 'songs' ? 'library' : viewMode }
-        playNow({ uuid: song.uuid, properties: song.properties, last_position: song.last_position, last_played_at: song.last_played_at, artwork_cached: song.artwork_cached, source: { ...ctx, href: withSong(baseCtx.href, song.uuid) } })
+        playNow({ uuid: song.uuid, properties: song.properties, last_position: song.last_position, last_played_at: song.last_played_at, artwork_cached: song.artwork_cached, artwork_updated_at: song.artwork_updated_at, source: { ...ctx, href: withSong(baseCtx.href, song.uuid) } })
     }
     function playGenreRow(songId: string, genre: string) {
         const song = songs.find(s => s.uuid === songId)
         if (!song?.properties) return
+        if (!online && !cachedIds.has(songId)) { showToast('not saved offline'); return }
         const baseHref = `${routes.library}?view=genres`
         const ctx = { label: genre, href: baseHref, id: `genre:${genre}` }
-        playNow({ uuid: song.uuid, properties: song.properties, last_position: song.last_position, last_played_at: song.last_played_at, artwork_cached: song.artwork_cached, source: { ...ctx, href: withSong(baseHref, song.uuid) } })
+        playNow({ uuid: song.uuid, properties: song.properties, last_position: song.last_position, last_played_at: song.last_played_at, artwork_cached: song.artwork_cached, artwork_updated_at: song.artwork_updated_at, source: { ...ctx, href: withSong(baseHref, song.uuid) } })
     }
     function longPress(songId: string, pos: { clientX: number; clientY: number }) {
         if (selectMode) return
@@ -699,7 +720,7 @@ export default function LibraryList() {
     rowHandlers.current = { playRow, playGenreRow, longPress, handleSelect, playAlbum }
     const playAlbumStable = useCallback((album: LibraryAlbum) => rowHandlers.current.playAlbum(album), [])
 
-    if (songsLoading && baseSongs.length === 0) return null
+    if (songsLoading && baseSongs.length === 0) return <div data-testid="library-skeleton"><LibraryLoading /></div>
     if (baseSongs.length === 0 && songsError) {
         return (
             <div className="py-4">
@@ -786,6 +807,30 @@ export default function LibraryList() {
                     <FaCloudDownloadAlt size={12} />
                     {savingAll ? `saving ${saveAllProgress.done}/${saveAllProgress.total}…` : !online ? 'offline' : 'save all offline'}
                 </button>
+                {online ? (
+                    <button
+                        data-testid="saved-chip"
+                        aria-pressed={savedOnly}
+                        onClick={() => setSavedOnly(v => !v)}
+                        className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-sm transition-colors border ${savedOnly ? 'bg-sky-500 text-white border-sky-500' : 'text-sky-500 border-gray-200 dark:border-gray-800 hover:border-sky-500'}`}
+                    >
+                        saved
+                    </button>
+                ) : (
+                    <>
+                        <span data-testid="offline-count" className="text-xs text-sky-500">
+                            {showAllOffline ? `offline — showing all ${visibleSongs.length}, ${savedCount} saved` : `offline — showing ${savedCount} of ${visibleSongs.length} saved`}
+                        </span>
+                        <button
+                            data-testid="show-all-toggle"
+                            aria-pressed={showAllOffline}
+                            onClick={() => setShowAllOffline(v => !v)}
+                            className="px-3 py-1 rounded-full text-sm text-sky-500 hover:text-sky-600 border border-gray-200 dark:border-gray-800"
+                        >
+                            {showAllOffline ? 'show saved' : 'show all'}
+                        </button>
+                    </>
+                )}
                 <SearchInput value={searchQuery} onChange={setSearchQuery} placeholder="search library…" testId="library-search" className="w-40 md:w-52" />
                 {eligibleCount > 0 && (
                     <button
@@ -867,8 +912,8 @@ export default function LibraryList() {
                                     const songs = group.filter(s => s.properties)
                                     const first = songs[0]
                                     if (!first?.properties) return
-                                    const queue = songs.map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached, source: ctx }))
-                                    play({ uuid: first.uuid, properties: first.properties, last_position: first.last_position, last_played_at: first.last_played_at, artwork_cached: first.artwork_cached, source: ctx }, queue, ctx)
+                                    const queue = songs.map(s => ({ uuid: s.uuid, properties: s.properties!, last_position: s.last_position, last_played_at: s.last_played_at, artwork_cached: s.artwork_cached, artwork_updated_at: s.artwork_updated_at, source: ctx }))
+                                    play({ uuid: first.uuid, properties: first.properties, last_position: first.last_position, last_played_at: first.last_played_at, artwork_cached: first.artwork_cached, artwork_updated_at: first.artwork_updated_at, source: ctx }, queue, ctx)
                                 }}
                                 className="ml-1 p-1 shrink-0"
                             >
@@ -885,7 +930,7 @@ export default function LibraryList() {
                             {group.map(song => song.properties && (
                                 <div key={song.uuid} data-song-id={song.uuid}>
                                 <Song
-                                    song={{ songId: song.uuid, properties: song.properties, artworkCached: song.artwork_cached, parentSongId: song.parent_song_id, rootSongId: song.root_song_id }}
+                                    song={{ songId: song.uuid, properties: song.properties, artworkCached: song.artwork_cached, artworkUpdatedAt: song.artwork_updated_at, parentSongId: song.parent_song_id, rootSongId: song.root_song_id }}
                                     selected={currentId === song.uuid}
                                     onClick={() => rowHandlers.current.playGenreRow(song.uuid, genre)}
                                     inLibrary={true}
@@ -894,6 +939,7 @@ export default function LibraryList() {
                                         setSyncPromptIds(prev => prev.filter(x => x !== song.uuid))
                                     }}
                                     cachedOffline={cachedIds.has(song.uuid)}
+                                    unsavedOffline={!online && !cachedIds.has(song.uuid)}
                                     onCacheChange={(id, cached) => {
                                         setCachedIds(prev => {
                                             const next = new Set(prev)
@@ -927,7 +973,7 @@ export default function LibraryList() {
                             {group.map(song => song.properties && (
                                 <div key={song.uuid} data-song-id={song.uuid}>
                                 <Song
-                                    song={{ songId: song.uuid, properties: song.properties, artworkCached: song.artwork_cached, parentSongId: song.parent_song_id, rootSongId: song.root_song_id }}
+                                    song={{ songId: song.uuid, properties: song.properties, artworkCached: song.artwork_cached, artworkUpdatedAt: song.artwork_updated_at, parentSongId: song.parent_song_id, rootSongId: song.root_song_id }}
                                     selected={currentId === song.uuid}
                                     onClick={(e?: React.MouseEvent) => rowHandlers.current.playRow(song.uuid, e)}
                                     inLibrary={true}
@@ -936,6 +982,7 @@ export default function LibraryList() {
                                         setSyncPromptIds(prev => prev.filter(x => x !== song.uuid))
                                     }}
                                     cachedOffline={cachedIds.has(song.uuid)}
+                                    unsavedOffline={!online && !cachedIds.has(song.uuid)}
                                     onCacheChange={(id, cached) => {
                                         setCachedIds(prev => {
                                             const next = new Set(prev)
@@ -1072,7 +1119,7 @@ export default function LibraryList() {
                             </div>
                         ) : undefined
                     }
-                    songs={albumModal?.songs.map(s => ({ uuid: s.uuid, properties: s.properties, artwork_cached: s.artwork_cached })) ?? []}
+                    songs={albumModal?.songs.map(s => ({ uuid: s.uuid, properties: s.properties, artwork_cached: s.artwork_cached, artwork_updated_at: s.artwork_updated_at })) ?? []}
                     emptyState="no songs"
                     testId="album-modal"
                 />
@@ -1084,7 +1131,7 @@ export default function LibraryList() {
                     open={publishModalOpen}
                     onClose={() => setPublishModalOpen(false)}
                     title="Publish songs"
-                    songs={eligibleSongs.map(s => ({ uuid: s.uuid, properties: s.properties, artwork_cached: s.artwork_cached }))}
+                    songs={eligibleSongs.map(s => ({ uuid: s.uuid, properties: s.properties, artwork_cached: s.artwork_cached, artwork_updated_at: s.artwork_updated_at }))}
                     selectable
                     initialSelected={new Set(eligibleSongs.filter(s => s.eligible).map(s => s.uuid))}
                     actionLabel="Publish"
@@ -1103,7 +1150,7 @@ export default function LibraryList() {
                     title="Songs saved offline on another device"
                     songs={syncPromptIds.flatMap(id => {
                         const s = songs.find(s => s.uuid === id)
-                        return s ? [{ uuid: s.uuid, properties: s.properties, artwork_cached: s.artwork_cached } as PickerSong] : []
+                        return s ? [{ uuid: s.uuid, properties: s.properties, artwork_cached: s.artwork_cached, artwork_updated_at: s.artwork_updated_at } as PickerSong] : []
                     })}
                     selectable
                     initialSelected={new Set(syncPromptIds)}

@@ -28,11 +28,11 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
     return (
         <main className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 p-4">
             <div className="flex flex-col items-center gap-6 max-w-sm w-full">
-                {/* The /v1/share/<token>/artwork/<size> endpoint serves
+                {/* The /v1/share/<token>/artwork/<size>/<version> endpoint serves
                     server-cached artwork OR redirects to iTunes if available;
                     works for fixture-imported songs that have no iTunes URL. */}
                 <Image
-                    src={`/v1/share/${token}/artwork/full`}
+                    src={`/v1/share/${token}/artwork/full/${info.artwork_updated_at ?? 0}`}
                     alt=""
                     width={240}
                     height={240}

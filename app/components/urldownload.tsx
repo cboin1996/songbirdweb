@@ -1,13 +1,12 @@
 'use client'
 import { useState, useEffect } from "react";
-import { downloadSongViaUrl, downloadSongToFile, addToLibrary, Properties } from "../lib/data";
+import { downloadSongViaUrl, downloadSongToFile, addToLibrary, Properties, songArtworkUrl } from "../lib/data";
 import Spinner from "./spinner";
 import Image from "next/image";
 import Link from "next/link";
 import { routes } from "../lib/routes";
 import { FaCheckCircle } from "react-icons/fa";
 import { usePlayer } from "./player";
-import { useSettings } from "../lib/use-settings";
 import QueryError from "./query-error";
 
 export default function DownloadViaUrl({ query }: { query: string }) {
@@ -18,27 +17,28 @@ export default function DownloadViaUrl({ query }: { query: string }) {
     const [songId, setSongId] = useState<string | null>(null)
     const [properties, setProperties] = useState<Properties | null>(null)
     const [artworkCached, setArtworkCached] = useState(false)
+    const [artworkVersion, setArtworkVersion] = useState<number | null>(null)
     const [doneAction, setDoneAction] = useState<'library' | 'file' | null>(null)
     const { onLibraryAdd } = usePlayer()
-    const { settings, settingsLoaded } = useSettings()
 
     useEffect(() => {
-        if (!query || !settingsLoaded) return
+        if (!query) return
         startDownload()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [query, settingsLoaded])
+    }, [query])
 
     async function startDownload() {
         setStatus('downloading')
         setErrorMsg('')
         try {
-            const result = await downloadSongViaUrl(query, true, settings.audio_format)
+            const result = await downloadSongViaUrl(query, true)
             if (!result || result.song_ids.length === 0) {
                 setStatus('error'); setErrorMsg('download failed'); setLastError(new Error('empty response')); return
             }
             setSongId(result.song_ids[0])
             setProperties(result.properties ?? null)
             setArtworkCached(result.artwork_cached ?? false)
+            setArtworkVersion(result.artwork_updated_at ?? null)
             setStatus('ready')
         } catch (e) {
             setStatus('error'); setErrorMsg('download failed'); setLastError(e instanceof Error ? e : new Error(String(e)))
@@ -50,7 +50,7 @@ export default function DownloadViaUrl({ query }: { query: string }) {
         setStatus('saving')
         try {
             await addToLibrary(songId)
-            if (properties) onLibraryAdd({ uuid: songId, properties, artwork_cached: artworkCached })
+            if (properties) onLibraryAdd({ uuid: songId, properties, artwork_cached: artworkCached, artwork_updated_at: artworkVersion })
             setDoneAction('library'); setStatus('done')
         } catch (e) {
             setStatus('error'); setErrorMsg('could not add to library'); setLastError(e instanceof Error ? e : new Error(String(e)))
@@ -92,7 +92,7 @@ export default function DownloadViaUrl({ query }: { query: string }) {
         return (
             <div className="flex items-center gap-3 py-3">
                 {artworkCached && songId
-                    ? <Image src={`/v1/songs/${songId}/artwork/thumb`} alt="" width={48} height={48} className="rounded shrink-0" unoptimized />
+                    ? <Image src={songArtworkUrl(songId, true, undefined, 200, artworkVersion) ?? ''} alt="" width={48} height={48} className="rounded shrink-0" unoptimized />
                     : <div className="w-12 h-12 rounded bg-gray-100 dark:bg-gray-800 shrink-0" />
                 }
                 <div className="min-w-0 flex-1">
@@ -122,7 +122,7 @@ export default function DownloadViaUrl({ query }: { query: string }) {
     return (
         <div className="flex items-center gap-3 py-3">
             {artworkCached && songId && (
-                <Image src={`/v1/songs/${songId}/artwork/thumb`} alt="" width={48} height={48} className="rounded shrink-0" unoptimized />
+                <Image src={songArtworkUrl(songId, true, undefined, 200, artworkVersion) ?? ''} alt="" width={48} height={48} className="rounded shrink-0" unoptimized />
             )}
             <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium truncate">{properties?.trackName ?? 'unknown track'}</p>

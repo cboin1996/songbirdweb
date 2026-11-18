@@ -6,6 +6,9 @@ import { routes } from '@/app/lib/routes'
 // NEXT_PUBLIC_API_HOST stays as a fallback for deployments that set only that.
 const API_BASE = process.env.API_BASE_URL ?? `http://${process.env.NEXT_PUBLIC_API_HOST ?? 'localhost'}:8000`
 
+// Set on the redirect that follows a refresh on a song download (see the refresh below).
+const DOWNLOAD_RETRY_COOKIE = 'sb-dl-refreshed'
+
 function isExpired(token: string): boolean {
   try {
     const raw = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')
@@ -44,7 +47,7 @@ function cookieNameAndValue(setCookie: string): [string, string] {
   return [pair.slice(0, eq), pair.slice(eq + 1)]
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const accessToken = request.cookies.get('access_token')
   const refreshToken = request.cookies.get('refresh_token')
   const isLoginPage = request.nextUrl.pathname === routes.home
@@ -52,10 +55,11 @@ export async function middleware(request: NextRequest) {
   const isOfflinePage = request.nextUrl.pathname === '/offline'
   const isAuthApi = request.nextUrl.pathname.startsWith('/v1/auth/')
   // /v1/share/<token>/{info,download} are anon-accessible by design;
-  // middleware must let them through for unauthed visitors clicking
+  // proxy must let them through for unauthed visitors clicking
   // a share link's download button. (POST /v1/share/songs/<id> for
   // creators is auth-gated by the API itself.)
   const isShareApi = request.nextUrl.pathname.startsWith('/v1/share/')
+  const isDownloadFile = request.nextUrl.pathname.startsWith('/v1/download/')
 
   const validToken = accessToken && !isExpired(accessToken.value)
 
@@ -73,6 +77,21 @@ export async function middleware(request: NextRequest) {
       return NextResponse.next()
     }
     if (setCookies) {
+      // Song downloads are proxied by a rewrite (next.config.ts), and Next drops the
+      // proxy's response headers on a proxied rewrite, so the rotated cookies would
+      // never reach the browser. Send the browser back to the same URL with them instead;
+      // the repeat request has a valid access cookie and goes straight to the rewrite.
+      // The marker cookie keeps a browser that refuses cookies from looping: with it
+      // present the request carries on as before (authenticated, cookies not delivered).
+      if (isDownloadFile && request.cookies.has(DOWNLOAD_RETRY_COOKIE)) {
+        console.warn('download: the browser did not keep the refreshed session cookies; carrying on without the redirect')
+      }
+      if (isDownloadFile && !request.cookies.has(DOWNLOAD_RETRY_COOKIE)) {
+        const redirect = NextResponse.redirect(request.url)
+        for (const line of setCookies) redirect.headers.append('set-cookie', line)
+        redirect.headers.append('set-cookie', `${DOWNLOAD_RETRY_COOKIE}=1; Max-Age=30; Path=/; SameSite=lax${request.nextUrl.protocol === 'https:' ? '; Secure' : ''}`)
+        return redirect
+      }
       const rotated = new Map(setCookies.map(cookieNameAndValue))
       const cookieStr = [
         ...request.cookies.getAll().filter(c => !rotated.has(c.name)).map(c => `${c.name}=${c.value}`),

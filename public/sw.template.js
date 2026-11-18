@@ -13,19 +13,73 @@ async function trimCache(cache, max) {
     const keys = await cache.keys()
     await Promise.all(keys.slice(0, Math.max(0, keys.length - max)).map(k => cache.delete(k)))
 }
+// Art is a whole picture or nothing: a partial (206) or an empty answer is never stored
+// and never served, because an <img> given one shows a white square, not the stand-in.
+function usableArt(response) {
+    return !!response && response.ok && response.status !== 206 && response.headers.get('content-length') !== '0'
+}
 function storeArtwork(cache, request, response) {
+    if (!usableArt(response)) return Promise.resolve()
     return cache.put(request, response).then(() => {
+        const href = new URL(request.url || request, self.location.origin)
+        const m = STEM_RE.exec(href.pathname)
+        if (m) stemIndex.get(ARTWORK_CACHE)?.stems.set(m[1], href.href)
         artworkPuts += 1
-        if (artworkPuts % ARTWORK_TRIM_EVERY === 0) return trimCache(cache, ARTWORK_MAX_ENTRIES)
+        if (artworkPuts % ARTWORK_TRIM_EVERY === 0) {
+            stemIndex.delete(ARTWORK_CACHE)
+            return trimCache(cache, ARTWORK_MAX_ENTRIES)
+        }
     })
 }
 // Saved copies win over browsed ones.
 async function matchArtwork(request) {
     const saved = await caches.open(SAVED_ARTWORK_CACHE)
     const hit = await saved.match(request)
-    if (hit) return hit
+    if (usableArt(hit)) return hit
     const browse = await caches.open(ARTWORK_CACHE)
-    return browse.match(request)
+    const browsed = await browse.match(request)
+    return usableArt(browsed) ? browsed : undefined
+}
+// The same song's art of the same size at any version, for when the asked-for version
+// is not stored and cannot be fetched (offline, or the server down). Art saved before
+// versions existed has no version in its url; older versions stay until the page
+// replaces them. Saved copies first, then the newest browsed one.
+// Listing a cache's keys is O(entries), so each cache is indexed once (stem -> newest key)
+// and kept while the worker lives. A copy the page stored after that is missing, so a miss
+// rebuilds the index, at most once per REINDEX_MS. Mirrors app/lib/offline.ts.
+const REINDEX_MS = 5000
+const stemIndex = new Map()
+const STEM_RE = /^(\/v1\/songs\/[^/]+\/artwork\/[^/]+)(\/[^/]+)?$/
+async function buildIndex(name) {
+    const cache = await caches.open(name)
+    const stems = new Map()
+    // keys() lists oldest first, so a later key of the same stem is the newer version.
+    for (const key of await cache.keys()) {
+        const m = STEM_RE.exec(new URL(key.url, self.location.origin).pathname)
+        if (m) stems.set(m[1], key.url)
+    }
+    const index = { built: Date.now(), stems }
+    stemIndex.set(name, index)
+    return index
+}
+async function indexedKey(name, stem) {
+    let index = stemIndex.get(name) || await buildIndex(name)
+    const hit = index.stems.get(stem)
+    if (hit) return hit
+    if (Date.now() - index.built < REINDEX_MS) return undefined
+    index = await buildIndex(name)
+    return index.stems.get(stem)
+}
+async function matchArtworkAnyVersion(request) {
+    const m = STEM_RE.exec(new URL(request.url).pathname)
+    if (!m) return undefined
+    for (const name of [SAVED_ARTWORK_CACHE, ARTWORK_CACHE]) {
+        const key = await indexedKey(name, m[1])
+        if (!key) continue
+        const found = await (await caches.open(name)).match(key)
+        if (usableArt(found)) return found
+        stemIndex.get(name)?.stems.delete(m[1]) // trimmed or replaced since it was indexed
+    }
 }
 // Unlike the shell cache, this name is not versioned with the app. Rename it when
 // copies already stored under the old name must go: activate deletes every cache
@@ -113,10 +167,13 @@ self.addEventListener('fetch', event => {
             caches.open(ARTWORK_CACHE).then(async cache => {
                 const cached = await matchArtwork(event.request)
                 if (cached) return cached
-                return fetch(event.request).then(r => {
-                    if (r.ok) storeArtwork(cache, event.request, r.clone())
-                    return r
-                }).catch(() => Response.error())
+                return fetch(event.request).then(async r => {
+                    if (usableArt(r)) {
+                        storeArtwork(cache, event.request, r.clone())
+                        return r
+                    }
+                    return (await matchArtworkAnyVersion(event.request)) ?? (r.ok ? Response.error() : r)
+                }).catch(async () => (await matchArtworkAnyVersion(event.request)) ?? Response.error())
             })
         )
         return

@@ -3,7 +3,7 @@ import { Switch } from "../../components/switch";
 import { getFrostedBars, setFrostedBars, getPerfOverlay, setPerfOverlay } from "../../lib/device-settings";
 import { useEffect, useRef, useState } from "react";
 import { AuthExpiredError, RefreshUnavailableError, changePassword, fetchLibrarySongs } from "../../lib/data";
-import { clearOfflineCache, getCachedSongIds, getStorageEstimate, formatBytes, getSongFile, uncacheSong, cacheSong, reportSaveResult, SaveOutcome } from "../../lib/offline";
+import { clearOfflineCache, getCachedSongIds, getStorageEstimate, formatBytes, getSongFile, uncacheSong, cacheSong, reportSaveResult, SaveOutcome, songsMissingSavedArtwork, refreshSavedArtwork } from "../../lib/offline";
 import { useToast } from "../../components/toast";
 import { clearServerOfflineSongs } from "../../lib/data";
 import { EVENTS } from "../../lib/events";
@@ -11,8 +11,6 @@ import { useOfflineSave } from "../../lib/offline-save-context";
 import Button from "../../components/button";
 import Input from "../../components/input";
 import { FaEye, FaEyeSlash } from "react-icons/fa";
-import { useSettings } from "../../lib/use-settings";
-import type { AudioFormat } from "../../lib/data";
 
 function PasswordField({ placeholder, value, onChange, inputRef }: {
     placeholder: string
@@ -103,6 +101,10 @@ interface AuditResult {
     healthy: number
     corrupt: string[]
     orphaned: string[]
+    /** Saved songs with no stored art; null when this connection cannot say (no Cache API on plain http). */
+    noArt: string[] | null
+    /** The check itself could not run. */
+    failed?: boolean
 }
 
 function CacheAudit() {
@@ -121,6 +123,7 @@ function CacheAudit() {
             const corrupt: string[] = []
             const orphaned: string[] = []
             let healthy = 0
+            const noArt = await songsMissingSavedArtwork(librarySongs, new Set(cachedIds))
 
             for (const id of cachedIds) {
                 if (!libraryIds.has(id)) {
@@ -134,9 +137,10 @@ function CacheAudit() {
                     healthy++
                 }
             }
-            setResult({ total: cachedIds.size, healthy, corrupt, orphaned })
-        } catch {
-            setResult({ total: 0, healthy: 0, corrupt: [], orphaned: [] })
+            setResult({ total: cachedIds.size, healthy, corrupt, orphaned, noArt })
+        } catch (err) {
+            console.warn('cache audit failed', err)
+            setResult({ total: 0, healthy: 0, corrupt: [], orphaned: [], noArt: [], failed: true })
         }
         setRunning(false)
     }
@@ -147,6 +151,11 @@ function CacheAudit() {
         if (!result) return
         setFixing(true)
         let stopped: SaveOutcome | null = null
+        if (result.noArt && result.noArt.length > 0) {
+            setFixProgress('restoring art…')
+            const ids = new Set(result.noArt)
+            await refreshSavedArtwork((await fetchLibrarySongs()).filter(s => ids.has(s.uuid)), ids)
+        }
         for (const id of result.orphaned) {
             setFixProgress(`removing orphan…`)
             await uncacheSong(id)
@@ -173,7 +182,7 @@ function CacheAudit() {
         await runAudit()
     }
 
-    const issues = result ? result.corrupt.length + result.orphaned.length : 0
+    const issues = result ? result.corrupt.length + result.orphaned.length + (result.noArt?.length ?? 0) : 0
 
     return (
         <div>
@@ -186,14 +195,21 @@ function CacheAudit() {
                 />
                 {result && (
                     <div className="text-xs space-y-1">
-                        <p className="text-gray-400">{result.total} cached, {result.healthy} healthy</p>
+                        {result.failed && <p className="text-red-400">check failed — could not read the saved songs</p>}
+                        {!result.failed && <p className="text-gray-400">{result.total} cached, {result.healthy} healthy</p>}
                         {result.corrupt.length > 0 && (
                             <p className="text-red-400">{result.corrupt.length} corrupt (empty/unreadable)</p>
                         )}
                         {result.orphaned.length > 0 && (
                             <p className="text-amber-400">{result.orphaned.length} orphaned (not in library)</p>
                         )}
-                        {issues === 0 && <p className="text-green-500">all clear</p>}
+                        {result.noArt && result.noArt.length > 0 && (
+                            <p className="text-amber-400">{result.noArt.length} missing art (needs the network to restore)</p>
+                        )}
+                        {!result.failed && result.noArt === null && (
+                            <p className="text-amber-400" data-testid="audit-art-unknown">art not checked — offline art needs https or localhost</p>
+                        )}
+                        {issues === 0 && !result.failed && result.noArt !== null && <p className="text-green-500">all clear</p>}
                         {issues > 0 && (
                             <Button
                                 text={fixing ? fixProgress || 'fixing…' : `fix ${issues} file${issues !== 1 ? 's' : ''}`}
@@ -204,48 +220,6 @@ function CacheAudit() {
                     </div>
                 )}
             </div>
-        </div>
-    )
-}
-
-function AudioFormatSetting() {
-    const { settings, settingsLoaded, saveSettings } = useSettings()
-    const [saving, setSaving] = useState(false)
-
-    async function handleChange(format: AudioFormat) {
-        if (format === settings.audio_format) return
-        setSaving(true)
-        try {
-            await saveSettings({ audio_format: format })
-        } finally {
-            setSaving(false)
-        }
-    }
-
-    const options: AudioFormat[] = ['mp3', 'm4a']
-
-    return (
-        <div>
-            <p className="text-gray-400 text-sm pb-2">audio format</p>
-            <div className="flex gap-2 w-full max-w-xs">
-                {options.map(fmt => (
-                    <button
-                        key={fmt}
-                        disabled={saving || !settingsLoaded}
-                        onClick={() => handleChange(fmt)}
-                        className={`flex-1 px-3 py-1.5 text-sm rounded-lg border transition-colors ${
-                            !settingsLoaded
-                                ? 'border-gray-200 dark:border-gray-700 text-gray-400'
-                                : settings.audio_format === fmt
-                                    ? 'bg-sky-500 text-white border-sky-500'
-                                    : 'border-gray-200 dark:border-gray-700 hover:border-sky-500 hover:text-sky-500'
-                        }`}
-                    >
-                        {fmt.toUpperCase()}
-                    </button>
-                ))}
-            </div>
-            <p className="text-xs text-gray-400 mt-1.5">format used when downloading new songs</p>
         </div>
     )
 }
@@ -326,7 +300,6 @@ export default function Page() {
     return (
         <main className="p-4">
             <div className="flex flex-col gap-8 py-4">
-                <AudioFormatSetting />
                 <div className="flex flex-col gap-8" data-testid="this-device">
                     <p className="text-sky-500 text-xs uppercase tracking-wide -mb-4">this device</p>
                     <FrostedBarsSetting />

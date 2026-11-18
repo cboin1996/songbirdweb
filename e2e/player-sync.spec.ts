@@ -307,6 +307,10 @@ test.describe('player state sync', () => {
 
             let refreshes = 0
             page.on('request', r => { if (r.url().includes('/v1/auth/refresh')) refreshes++ })
+            // A refresh counts as done once its answer is in: the token is fresh only then.
+            // Returning to the foreground again before that joins the refresh in flight,
+            // which is no new request and no new freshness, and the counts below read wrong.
+            const firstRefreshAnswered = page.waitForResponse(r => r.url().includes('/v1/auth/refresh'))
 
             // A page load says nothing about the token's age (the middleware lets an
             // unexpired token through, with a minute or ten left), so the first
@@ -314,6 +318,7 @@ test.describe('player state sync', () => {
             await setVisibility(page, 'hidden')
             await setVisibility(page, 'visible')
             await expect.poll(() => refreshes, { timeout: 5000 }).toBe(1)
+            expect((await firstRefreshAnswered).ok()).toBe(true)
 
             // Having just refreshed, the next return owes nothing. The state fetch
             // that follows every return is issued after the refresh decision, so

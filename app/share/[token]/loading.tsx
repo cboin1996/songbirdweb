@@ -1,6 +1,6 @@
 export default function Loading() {
     return (
-        <main className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 p-4">
+        <main className="skeleton-delay min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 p-4">
             <div className="flex flex-col items-center gap-6 max-w-sm w-full">
                 {/* artwork */}
                 <div className="w-60 h-60 rounded-2xl bg-gray-100 dark:bg-gray-800 animate-pulse shadow-xl" />

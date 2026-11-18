@@ -55,6 +55,10 @@ test.describe('share links', () => {
             // The track name should appear somewhere on the share page.
             await expect(page.getByText(song!.track, { exact: false }).first()).toBeVisible({ timeout: 10000 })
 
+            // The art is asked for at a versioned path, which the API serves immutably.
+            const src = await page.locator(`img[src*="/v1/share/${body.token}/artwork/full/"]`).first().getAttribute('src')
+            expect(src).toMatch(new RegExp(`/v1/share/${body.token}/artwork/full/\\d+$`))
+
             expect(errors, `Console errors: ${errors.join('\n')}`).toHaveLength(0)
         } finally {
             await api.dispose()

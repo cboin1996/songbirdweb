@@ -1,7 +1,7 @@
-import { BROWSE_ARTWORK_CACHE, OFFLINE_ARTWORK_CACHE, optimizerWidth } from './artwork'
+import { BROWSE_ARTWORK_CACHE, OFFLINE_ARTWORK_CACHE, ARTWORK_SMALL_PX, ARTWORK_LARGE_PX, optimizerWidth, parseArtworkPath, completeResponse } from './artwork'
 import {
     DOWNLOAD_URL, AuthExpiredError, RefreshUnavailableError,
-    addServerOfflineSong, ensureFreshToken, redirectToLogin, tryRefresh,
+    addServerOfflineSong, ensureFreshToken, redirectToLogin, tryRefresh, songArtworkUrl,
 } from './data'
 
 const AUDIO_DIR = 'audio'
@@ -205,7 +205,7 @@ export async function cacheSong(
 
     const contentLength = parseInt(res.headers.get('content-length') ?? '0', 10)
     const reader = res.body!.getReader()
-    const chunks: Uint8Array[] = []
+    const chunks: BlobPart[] = []
     let received = 0
 
     while (true) {
@@ -366,9 +366,10 @@ export async function clearOfflineCache(): Promise<void> {
     }
     try { await idbClearAll() } catch { /* nothing to clear */ }
     try {
-        if ('caches' in self) {
+        if ('caches' in globalThis) {
             await caches.delete(BROWSE_ARTWORK_CACHE)
             await caches.delete(OFFLINE_ARTWORK_CACHE)
+            forgetIndex()
         }
     } catch { /* nothing to clear */ }
 }
@@ -383,9 +384,52 @@ export async function getStorageEstimate(): Promise<StorageEstimate> {
     return { used: est.usage ?? 0, quota: est.quota ?? 0 }
 }
 
+// Which stored copy answers for a song and size, whatever its version. Listing a cache's
+// keys costs O(entries), so it is done once per cache and kept; the page's own stores and
+// deletes keep it current. A copy stored by the service worker after the index was built
+// is missing from it, so a miss rebuilds the index, at most once per REINDEX_MS: a list of
+// songs with no art then costs one scan, not one per song. A key trimmed away is dropped
+// when it is found dead. Mirrored in public/sw.template.js.
+const REINDEX_MS = 5000
+interface StemIndex { built: number; stems: Map<string, string> }
+const stemIndex = new Map<string, StemIndex>()
+
+async function buildIndex(cacheName: string): Promise<StemIndex> {
+    const stems = new Map<string, string>()
+    const cache = await caches.open(cacheName)
+    // keys() lists oldest first, so a later key of the same stem is the newer version.
+    for (const request of await cache.keys()) {
+        const parsed = parseArtworkPath(new URL(request.url).pathname)
+        if (parsed) stems.set(parsed.stem, request.url)
+    }
+    const index = { built: Date.now(), stems }
+    stemIndex.set(cacheName, index)
+    return index
+}
+
+async function indexedCopy(cacheName: string, stem: string): Promise<string | undefined> {
+    let index = stemIndex.get(cacheName) ?? await buildIndex(cacheName)
+    const hit = index.stems.get(stem)
+    if (hit) return hit
+    if (Date.now() - index.built < REINDEX_MS) return undefined
+    index = await buildIndex(cacheName)
+    return index.stems.get(stem)
+}
+
+function noteStored(cacheName: string, url: string): void {
+    const parsed = parseArtworkPath(url)
+    if (!parsed) return
+    stemIndex.get(cacheName)?.stems.set(parsed.stem, url)
+}
+
+export function forgetIndex(cacheName?: string): void {
+    if (cacheName) stemIndex.delete(cacheName)
+    else stemIndex.clear()
+}
+
 /** Drops every stored artwork copy of one song (all sizes and versions). */
 export async function dropStoredArtwork(songId: string): Promise<void> {
-    if (!('caches' in self)) return
+    if (!('caches' in globalThis)) return
     try {
         for (const name of [BROWSE_ARTWORK_CACHE, OFFLINE_ARTWORK_CACHE]) {
             const cache = await caches.open(name)
@@ -393,12 +437,18 @@ export async function dropStoredArtwork(songId: string): Promise<void> {
             await Promise.all(stored
                 .filter(r => new URL(r.url).pathname.startsWith(`/v1/songs/${songId}/artwork/`))
                 .map(r => cache.delete(r)))
+            forgetIndex(name)
         }
     } catch { /* non-fatal */ }
 }
 
+/** Whole pictures only: a partial or empty answer stored would show a white square offline. */
+async function isWholePicture(res: Response): Promise<boolean> {
+    return completeResponse(res) && (await res.clone().blob()).size > 0
+}
+
 export async function cacheArtworkUrls(urls: string[]): Promise<void> {
-    if (!('caches' in self)) return
+    if (!('caches' in globalThis)) return
     try {
         const cache = await caches.open(OFFLINE_ARTWORK_CACHE)
         await Promise.allSettled(urls.map(async url => {
@@ -407,8 +457,114 @@ export async function cacheArtworkUrls(urls: string[]): Promise<void> {
             // External URLs route through Next.js image proxy to avoid CORS
             const fetchUrl = url.startsWith('/') ? url : `/_next/image?url=${encodeURIComponent(url)}&w=${optimizerWidth(url)}&q=75`
             const res = await fetch(fetchUrl)
-            if (res.ok) await cache.put(url, res)
+            if (await isWholePicture(res)) {
+                await cache.put(url, res)
+                noteStored(OFFLINE_ARTWORK_CACHE, url)
+            }
         }))
+    } catch { /* non-fatal */ }
+}
+
+type ArtSong = { uuid: string; artwork_cached?: boolean; artwork_updated_at?: number | null; properties?: { artworkUrl100?: string } | null }
+
+/**
+ * Stores the large artwork of a song that is about to play (or is playing), while online,
+ * so the expanded player and the lock screen still have it offline. Browsing stores only
+ * the thumbnail; without this the large image exists only for songs saved on purpose.
+ * Goes to the capped browse cache, not the saved one. Failures are ignored.
+ */
+export async function warmLargeArtwork(song: ArtSong): Promise<void> {
+    if (!('caches' in globalThis) || (typeof navigator !== 'undefined' && !navigator.onLine)) return
+    try {
+        const url = songArtworkUrl(song.uuid, song.artwork_cached, song.properties?.artworkUrl100, ARTWORK_LARGE_PX, song.artwork_updated_at)
+        if (!url) return
+        // This exact url only: an older version stored is not this song's current art.
+        if (completeResponse(await caches.match(url))) return
+        // Local art: the service worker stores it on a good answer. Remote art goes through the optimizer, stored under its raw url.
+        const res = await fetch(url.startsWith('/') ? url : `/_next/image?url=${encodeURIComponent(url)}&w=${optimizerWidth(url)}&q=75`)
+        if (!url.startsWith('/') && await isWholePicture(res)) {
+            await (await caches.open(BROWSE_ARTWORK_CACHE)).put(url, res)
+            noteStored(BROWSE_ARTWORK_CACHE, url)
+        }
+    } catch { /* non-fatal */ }
+}
+
+/** A stored copy of the art at this url, or of the same song and size at any version (older saves have none). */
+export async function findStoredArtwork(url: string): Promise<Response | undefined> {
+    if (!('caches' in globalThis)) return undefined
+    const exact = await caches.match(url)
+    if (completeResponse(exact)) return exact
+    const stem = parseArtworkPath(url)?.stem
+    if (!stem) return undefined
+    for (const name of [OFFLINE_ARTWORK_CACHE, BROWSE_ARTWORK_CACHE]) {
+        const copy = await indexedCopy(name, stem)
+        if (!copy) continue
+        const found = await (await caches.open(name)).match(copy)
+        if (completeResponse(found)) return found
+        stemIndex.get(name)?.stems.delete(stem) // trimmed or replaced since it was indexed
+    }
+    return undefined
+}
+
+/** The two sizes a saved song keeps, at the url the library reports for it (none when it has no art at all). */
+function wantedSavedArtwork(song: ArtSong): string[] {
+    return [ARTWORK_SMALL_PX, ARTWORK_LARGE_PX]
+        .map(px => songArtworkUrl(song.uuid, !!song.artwork_cached, song.properties?.artworkUrl100, px, song.artwork_updated_at))
+        .filter((u): u is string => !!u)
+}
+
+async function hasAll(cache: Cache, urls: string[]): Promise<boolean> {
+    for (const url of urls) if (!(await cache.match(url))) return false
+    return true
+}
+
+/**
+ * Saved songs missing a stored copy of their art at the current url, either size.
+ * Offline-safe: reads the cache only. Null when the answer is unknown: this connection
+ * has no Cache API (plain http), or reading it failed. That is not the same as "none".
+ */
+export async function songsMissingSavedArtwork(songs: ArtSong[], savedIds: ReadonlySet<string>): Promise<string[] | null> {
+    if (!('caches' in globalThis)) return null
+    try {
+        const cache = await caches.open(OFFLINE_ARTWORK_CACHE)
+        const missing: string[] = []
+        for (const song of songs) {
+            if (!savedIds.has(song.uuid)) continue
+            if (!(await hasAll(cache, wantedSavedArtwork(song)))) missing.push(song.uuid)
+        }
+        return missing
+    } catch { return null }
+}
+
+/**
+ * Keeps the saved art of saved songs at the version the library reports. Art saved before
+ * versions existed (no version in its url), before a replace, or never stored (a save that
+ * lost its art fetch) is stored again at the current url, and only then are the older copies
+ * of that song and size dropped, so a failed fetch never leaves a saved song with nothing.
+ * Songs with remote (iTunes) art are covered too. Needs the network; offline it does
+ * nothing and the service worker answers with whichever version is stored.
+ */
+export async function refreshSavedArtwork(songs: ArtSong[], savedIds: ReadonlySet<string>): Promise<void> {
+    if (!('caches' in globalThis)) return
+    try {
+        const cache = await caches.open(OFFLINE_ARTWORK_CACHE)
+        const stored = (await cache.keys()).map(request => ({ request, path: new URL(request.url).pathname }))
+        for (const song of songs) {
+            if (!savedIds.has(song.uuid)) continue
+            const wanted = wantedSavedArtwork(song)
+            if (await hasAll(cache, wanted)) continue
+            await cacheArtworkUrls(wanted)
+            if (!song.artwork_cached) continue
+            for (const url of wanted) {
+                if (!(await cache.match(url))) continue
+                const stem = parseArtworkPath(url)?.stem
+                for (const old of stored) {
+                    if (old.path === url) continue
+                    if (old.path === stem || old.path.startsWith(`${stem}/`)) await cache.delete(old.request)
+                }
+            }
+        }
+        forgetIndex(OFFLINE_ARTWORK_CACHE)
     } catch { /* non-fatal */ }
 }
 

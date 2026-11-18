@@ -49,6 +49,10 @@ const ERROR_USER = process.env.E2E_ERROR_USERNAME!
 const ERROR_PASS = process.env.E2E_ERROR_PASSWORD!
 const OFFLINE_USER = process.env.E2E_OFFLINE_USERNAME!
 const OFFLINE_PASS = process.env.E2E_OFFLINE_PASSWORD!
+// A second user for the offline specs that run beside offline-songs on another worker.
+const OFFLINE_ART_USER = `${OFFLINE_USER}-art`
+const OFFLINE_LIBRARY_USER = `${OFFLINE_USER}-lib`
+const PREFETCH_USER = `${OFFLINE_USER}-prefetch`
 
 // Songs to import into the test user's library. no-tags.mp3 is intentionally
 // excluded — it's used by import.spec.ts to test the failed-import path.
@@ -203,6 +207,9 @@ async function globalSetup(config: FullConfig) {
         { username: SEARCH_USER, password: SEARCH_PASS },
         { username: ERROR_USER, password: ERROR_PASS },
         { username: OFFLINE_USER, password: OFFLINE_PASS },
+        { username: OFFLINE_ART_USER, password: OFFLINE_PASS },
+        { username: OFFLINE_LIBRARY_USER, password: OFFLINE_PASS },
+        { username: PREFETCH_USER, password: OFFLINE_PASS },
         ...(process.env.E2E_SEED_BENCH ? [{ username: BENCH_USER, password: BENCH_PASS }] : []),
     ]
 
@@ -251,6 +258,9 @@ async function globalSetup(config: FullConfig) {
         seedUser(SEARCH_USER, SEARCH_PASS, 'search-user', workers),
         seedUser(ERROR_USER, ERROR_PASS, 'error-user', workers),
         seedUser(OFFLINE_USER, OFFLINE_PASS, 'offline-user', workers),
+        seedUser(OFFLINE_ART_USER, OFFLINE_PASS, 'offline-art-user', workers),
+        seedUser(OFFLINE_LIBRARY_USER, OFFLINE_PASS, 'offline-library-user', workers),
+        seedUser(PREFETCH_USER, OFFLINE_PASS, 'prefetch-user', workers),
     ])
 }
 

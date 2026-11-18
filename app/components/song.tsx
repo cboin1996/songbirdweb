@@ -8,6 +8,7 @@ import { addToLibrary, removeFromLibrary, downloadSongToFile, createShareToken, 
 import { queryKeys } from "../lib/query-keys";
 import { cacheSong, uncacheSong } from "../lib/offline";
 import { FaBookmark, FaRegBookmark, FaEllipsisV, FaLock, FaCloudDownloadAlt } from "react-icons/fa";
+import { MdCloudOff } from "react-icons/md";
 import Image from "next/image";
 import { usePlayerActions, usePlayerSelector, usePlayerStateNow } from "./player";
 import { isCurrentSelector } from "../lib/player-store";
@@ -18,7 +19,7 @@ import { useUser } from "../lib/user-context";
 import { useOnline } from "../lib/use-online";
 import CommunityBadge from "./community-badge";
 
-function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cachedOffline: initialCachedOffline, onRemove, onCacheChange, compact, rank, isPrivate, playlists, onPlaylistAdd, selectMode, isSelected, onSelect, onLongPress, showSource, hasDraft, isEligible }: {
+function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cachedOffline: initialCachedOffline, onRemove, onCacheChange, compact, rank, isPrivate, playlists, onPlaylistAdd, selectMode, isSelected, onSelect, onLongPress, showSource, hasDraft, isEligible, unsavedOffline }: {
     song: DownloadedSong,
     selected: boolean,
     onClick: (e?: React.MouseEvent) => void,
@@ -38,6 +39,8 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
     showSource?: boolean,
     hasDraft?: boolean,
     isEligible?: boolean,
+    // Offline, a song that is listed but not saved on this device: dimmed, with the cloud-off icon.
+    unsavedOffline?: boolean,
 }) {
     useRenderCount('row')
     const { isAdmin } = useUser()
@@ -70,12 +73,21 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
             : pathname.includes(routes.download) ? { label: 'Downloads', href, id: 'downloads' }
             : { label: 'Library', href, id: 'library' }
     }
+    // The local copy failing falls back to the remote art; that failing too (offline, nothing
+    // stored) leaves the stand-in, never an empty box.
     const [artworkFailed, setArtworkFailed] = useState(false)
-    useEffect(() => { setArtworkFailed(false) }, [song.songId])
+    const [remoteFailed, setRemoteFailed] = useState(false)
+    useEffect(() => { setArtworkFailed(false); setRemoteFailed(false) }, [song.songId])
+    const onArtError = () => {
+        // Only a local copy has a fallback; any other source failing leaves the stand-in.
+        if (song.artworkCached && song.songId && !artworkFailed) setArtworkFailed(true)
+        else setRemoteFailed(true)
+    }
 
     const artSrc = (size: number): string | null => {
+        if (remoteFailed) return null
         if (artworkFailed) return song.properties?.artworkUrl100 ? artworkUrl(song.properties.artworkUrl100, size) : null
-        return songArtworkUrl(song.songId, song.artworkCached, song.properties?.artworkUrl100, size)
+        return songArtworkUrl(song.songId, song.artworkCached, song.properties?.artworkUrl100, size, song.artworkUpdatedAt)
     }
 
     async function handleLibraryToggle(e: React.MouseEvent) {
@@ -87,7 +99,7 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
             else await addToLibrary(song.songId)
             setInLibrary(prev => !prev)
             if (inLibrary) removeSongFromLibraryCache(queryClient, song.songId)
-            else addSongToLibraryCache(queryClient, { uuid: song.songId, properties: song.properties, artwork_cached: song.artworkCached })
+            else addSongToLibraryCache(queryClient, { uuid: song.songId, properties: song.properties, artwork_cached: song.artworkCached, artwork_updated_at: song.artworkUpdatedAt })
             if (inLibrary) {
                 onRemove?.()
                 onLibraryRemove(song.songId!)
@@ -97,13 +109,23 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
                     onCacheChange?.(song.songId, false)
                 }
             } else {
-                onLibraryAdd({ uuid: song.songId!, properties: song.properties, artwork_cached: song.artworkCached })
+                onLibraryAdd({ uuid: song.songId!, properties: song.properties, artwork_cached: song.artworkCached, artwork_updated_at: song.artworkUpdatedAt })
             }
         } catch {
             showToast(inLibrary ? 'could not remove from library, try again' : 'could not add to library, try again', true)
         }
         setLibraryPending(false)
     }
+
+    // The menu is placed from the button's position when it opens; a scroll (page or any list) moves the row away.
+    useEffect(() => {
+        if (!kebabOpen) return
+        const close = () => closeKebab()
+        document.addEventListener('scroll', close, true)
+        return () => document.removeEventListener('scroll', close, true)
+        // closeKebab only sets state and a ref
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [kebabOpen])
 
     function closeKebab() {
         setKebabOpen(false)
@@ -261,7 +283,7 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
                     className="whitespace-nowrap block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation">
                     Download
                 </button>
-                <button onClick={() => { closeKebab(); insertNext({ uuid: song.songId!, properties: song.properties, artwork_cached: song.artworkCached, source: pageSource() }) }}
+                <button onClick={() => { closeKebab(); insertNext({ uuid: song.songId!, properties: song.properties, artwork_cached: song.artworkCached, artwork_updated_at: song.artworkUpdatedAt, source: pageSource() }) }}
                     disabled={isCurrentSong}
                     className="whitespace-nowrap block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation">
                     Play next
@@ -363,6 +385,7 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
                     <FaCloudDownloadAlt size={iconSz} />
                 </button>
             )}
+            {unsavedOffline && <MdCloudOff role="img" aria-label="not saved offline" size={iconSz} className="text-gray-400" />}
             {!song.songId && (
                 <span className="text-red-700 text-xs">!</span>
             )}
@@ -387,6 +410,7 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
                 <div
                     data-testid="song-card"
                     data-song-id={song.songId}
+                    data-unsaved={unsavedOffline ? 'true' : undefined}
                     onClick={e => handleCardClick(e)}
                     onContextMenu={handleContextMenu}
                     role="button"
@@ -395,7 +419,7 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
                     onTouchStart={handleTouchStart}
                     onTouchEnd={cancelLongPress}
                     onTouchMove={cancelLongPress}
-                    className={`relative flex items-center gap-3 w-full text-left rounded-md p-3 transition-colors cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-900 touch-manipulation select-none ${isSelected ? 'bg-sky-50 dark:bg-sky-950/30' : selected ? 'bg-gray-100 dark:bg-gray-800' : ''}`}
+                    className={`${unsavedOffline ? 'opacity-50 ' : ''}relative flex items-center gap-3 w-full text-left rounded-md p-3 transition-colors cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-900 touch-manipulation select-none ${isSelected ? 'bg-sky-50 dark:bg-sky-950/30' : selected ? 'bg-gray-100 dark:bg-gray-800' : ''}`}
                 >
                     {checkboxOverlay}
                     {rank !== undefined && (
@@ -403,7 +427,7 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
                     )}
                     <div className={`shrink-0 transition-all ${selectMode ? 'ml-7' : ''}`}>
                         {artSrc(200) ? (
-                            <Image src={artSrc(200)!} alt="" width={48} height={48} className="rounded" unoptimized={song.artworkCached && !artworkFailed} onError={() => setArtworkFailed(true)} />
+                            <Image src={artSrc(200)!} alt="" width={48} height={48} className="rounded" unoptimized={song.artworkCached && !artworkFailed} onError={onArtError} />
                         ) : (
                             <div className="w-12 h-12 rounded bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-lg">🎵</div>
                         )}
@@ -437,6 +461,7 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
             <div
                 data-testid="song-card"
                 data-song-id={song.songId}
+                data-unsaved={unsavedOffline ? 'true' : undefined}
                 onClick={e => handleCardClick(e)}
                 onContextMenu={handleContextMenu}
                 role="button"
@@ -445,14 +470,14 @@ function SongInner({ song, selected, onClick, inLibrary: initialInLibrary, cache
                 onTouchStart={handleTouchStart}
                 onTouchEnd={cancelLongPress}
                 onTouchMove={cancelLongPress}
-                className={`relative dark:hover:bg-gray-900 hover:bg-gray-200 rounded-md p-2 w-full cursor-pointer touch-manipulation select-none ${isSelected ? 'bg-sky-50 dark:bg-sky-950/30' : selected ? 'bg-gray-300 dark:bg-gray-800' : ''}`}
+                className={`${unsavedOffline ? 'opacity-50 ' : ''}relative dark:hover:bg-gray-900 hover:bg-gray-200 rounded-md p-2 w-full cursor-pointer touch-manipulation select-none ${isSelected ? 'bg-sky-50 dark:bg-sky-950/30' : selected ? 'bg-gray-300 dark:bg-gray-800' : ''}`}
             >
                 {checkboxOverlay}
                 <div className="flex flex-row justify-between">
                     <div className={`flex flex-row rounded-lg min-w-0 transition-all ${selectMode ? 'ml-8' : ''}`}>
                         <div className="shrink-0">
                             {artSrc(400) ? (
-                                <Image className="rounded-md object-contain w-16 h-16 md:w-24 md:h-24" alt="" src={artSrc(200)!} width={96} height={96} unoptimized={song.artworkCached && !artworkFailed} onError={() => setArtworkFailed(true)} />
+                                <Image className="rounded-md object-contain w-16 h-16 md:w-24 md:h-24" alt="" src={artSrc(200)!} width={96} height={96} unoptimized={song.artworkCached && !artworkFailed} onError={onArtError} />
                             ) : (
                                 <div className="rounded-md w-16 h-16 md:w-24 md:h-24 bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-2xl">🎵</div>
                             )}
@@ -492,6 +517,7 @@ const Song = memo(SongInner, (prev, next) => (
     prev.song.songId === next.song.songId &&
     prev.song.properties === next.song.properties &&
     prev.song.artworkCached === next.song.artworkCached &&
+    prev.song.artworkUpdatedAt === next.song.artworkUpdatedAt &&
     prev.song.parentSongId === next.song.parentSongId &&
     prev.song.rootSongId === next.song.rootSongId &&
     prev.selected === next.selected &&
@@ -505,6 +531,7 @@ const Song = memo(SongInner, (prev, next) => (
     prev.showSource === next.showSource &&
     prev.hasDraft === next.hasDraft &&
     prev.isEligible === next.isEligible &&
+    prev.unsavedOffline === next.unsavedOffline &&
     prev.playlists === next.playlists
 ))
 
