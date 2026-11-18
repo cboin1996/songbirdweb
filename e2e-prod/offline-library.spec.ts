@@ -83,4 +83,18 @@ test.describe('Library offline view', () => {
     await expect(page).toHaveURL(/view=playlists/)
     await expect(page.getByTestId('library-filter')).toHaveCount(0)
   })
+
+  test('saved offline with nothing saved on this device says so and keeps the filter to turn it off', async ({ page }) => {
+    const lib = new LibraryPage(page)
+    await lib.goto()
+    await lib.waitForSongs()
+    await page.getByTestId('library-filter').click()
+    await expect(page.getByTestId('filter-saved')).toContainText(/^.*0 of \d+$/)
+    await page.getByTestId('filter-saved').click()
+    await expect(page.getByTestId('library-saved-empty')).toBeVisible()
+    await expect(page.getByTestId('library-filter')).toBeVisible()
+    await page.getByTestId('filter-saved').click()
+    await expect(page.getByTestId('library-saved-empty')).toHaveCount(0)
+    await expect(lib.songCards.first()).toBeVisible()
+  })
 })

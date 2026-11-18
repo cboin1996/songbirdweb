@@ -35,4 +35,12 @@ describe('LibraryFilterMenu', () => {
         fireEvent.mouseDown(screen.getByTestId('outside'))
         expect(screen.queryByRole('menu')).toBeNull()
     })
+
+    it('closes on Escape and hands focus back to the button', () => {
+        render(<LibraryFilterMenu savedOnly={false} onSavedOnlyChange={() => {}} savedCount={0} total={5} />)
+        fireEvent.click(screen.getByTestId('library-filter'))
+        fireEvent.keyDown(document, { key: 'Escape' })
+        expect(screen.queryByRole('menu')).toBeNull()
+        expect(document.activeElement).toBe(screen.getByTestId('library-filter'))
+    })
 })

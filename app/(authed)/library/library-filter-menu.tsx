@@ -16,6 +16,7 @@ type Props = {
 export default function LibraryFilterMenu({ savedOnly, onSavedOnlyChange, savedCount, total }: Props) {
     const [open, setOpen] = useState(false)
     const ref = useRef<HTMLDivElement>(null)
+    const buttonRef = useRef<HTMLButtonElement>(null)
     const active = savedOnly ? 1 : 0
 
     useEffect(() => {
@@ -24,7 +25,10 @@ export default function LibraryFilterMenu({ savedOnly, onSavedOnlyChange, savedC
             if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
         }
         function handleKey(e: KeyboardEvent) {
-            if (e.key === 'Escape') setOpen(false)
+            if (e.key === 'Escape') {
+                setOpen(false)
+                buttonRef.current?.focus()
+            }
         }
         document.addEventListener('mousedown', handleClick)
         document.addEventListener('keydown', handleKey)
@@ -37,6 +41,7 @@ export default function LibraryFilterMenu({ savedOnly, onSavedOnlyChange, savedC
     return (
         <div ref={ref}>
             <button
+                ref={buttonRef}
                 data-testid="library-filter"
                 aria-haspopup="menu"
                 aria-expanded={open}

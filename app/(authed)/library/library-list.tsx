@@ -723,18 +723,20 @@ export default function LibraryList() {
     rowHandlers.current = { playRow, playGenreRow, longPress, handleSelect, playAlbum }
     const playAlbumStable = useCallback((album: LibraryAlbum) => rowHandlers.current.playAlbum(album), [])
 
-    if (songsLoading && baseSongs.length === 0) return <div data-testid="library-skeleton"><LibraryLoading /></div>
-    if (baseSongs.length === 0 && songsError) {
+    // Judged on the whole library, not the filtered list: a filter that matches nothing
+    // keeps the toolbar, so the filter can be turned off again.
+    if (songsLoading && visibleSongs.length === 0) return <div data-testid="library-skeleton"><LibraryLoading /></div>
+    if (visibleSongs.length === 0 && songsError) {
         return (
             <div className="py-4">
                 <QueryError error={songsError} retry={refetchSongs} context="your library" />
             </div>
         )
     }
-    if (baseSongs.length === 0 && !online) {
+    if (visibleSongs.length === 0 && !online) {
         return <p className="text-gray-400 text-sm py-4">no songs saved offline — save songs while online to listen offline</p>
     }
-    if (baseSongs.length === 0) {
+    if (visibleSongs.length === 0) {
         return <p className="text-gray-400 text-sm py-4">library is empty</p>
     }
 
@@ -852,6 +854,12 @@ export default function LibraryList() {
                 <div className="my-4">
                     <QueryError error={songsError} retry={refetchSongs} context="your library" />
                 </div>
+            )}
+
+            {!deferredQuery && narrowToSaved && baseSongs.length === 0 && viewMode !== 'playlists' && (
+                <p data-testid="library-saved-empty" className="text-gray-400 text-sm py-8 text-center">
+                    {online ? 'no songs saved offline yet' : 'no songs saved offline — turn off the filter to see the rest'}
+                </p>
             )}
 
             {deferredQuery && displaySongs.length === 0 && viewMode !== 'playlists' && (
