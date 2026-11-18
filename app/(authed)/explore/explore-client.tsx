@@ -1,5 +1,5 @@
 'use client'
-import ExploreLoading from "./loading"
+import ExploreLoading from "./explore-skeleton"
 import { useIsDesktop } from "../../lib/use-is-desktop"
 import { useEffect, useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
