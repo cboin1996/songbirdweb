@@ -10,6 +10,7 @@ type Props = {
     total: number
 }
 
+// The menu spans the nearest positioned parent (filter + search), so it fits the screen.
 // One button for every library filter, with how many are on, so filters don't each
 // take a pill in the toolbar. New filters join the menu.
 export default function LibraryFilterMenu({ savedOnly, onSavedOnlyChange, savedCount, total }: Props) {
@@ -34,7 +35,7 @@ export default function LibraryFilterMenu({ savedOnly, onSavedOnlyChange, savedC
     }, [open])
 
     return (
-        <div ref={ref} className="relative">
+        <div ref={ref}>
             <button
                 data-testid="library-filter"
                 aria-haspopup="menu"
@@ -52,7 +53,7 @@ export default function LibraryFilterMenu({ savedOnly, onSavedOnlyChange, savedC
                 )}
             </button>
             {open && (
-                <div role="menu" className="absolute top-full left-0 mt-1 z-50 min-w-52 bg-surface border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl overflow-hidden py-1">
+                <div role="menu" className="absolute top-full left-0 right-0 mt-1 z-50 bg-surface border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl overflow-hidden py-1">
                     <button
                         role="menuitemcheckbox"
                         aria-checked={savedOnly}
@@ -61,8 +62,8 @@ export default function LibraryFilterMenu({ savedOnly, onSavedOnlyChange, savedC
                         className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-gray-50 dark:hover:bg-gray-800"
                     >
                         <span className="w-3 shrink-0 text-sky-500">{savedOnly && <FaCheck size={10} aria-hidden />}</span>
-                        <span className="flex-1">saved only</span>
-                        <span className="text-xs text-gray-400 tabular-nums">{savedCount} of {total}</span>
+                        <span className="flex-1 min-w-0 truncate">saved only</span>
+                        <span className="shrink-0 text-xs text-gray-400 tabular-nums">{savedCount} of {total}</span>
                     </button>
                 </div>
             )}

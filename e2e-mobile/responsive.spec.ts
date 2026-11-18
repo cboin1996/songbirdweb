@@ -22,6 +22,23 @@ test.describe('mobile responsive behaviors', () => {
     await expect(lib.selectedCount()).toBeVisible({ timeout: 3000 })
   })
 
+  test('library filter sits just left of search and its menu fits the screen', async ({ page }) => {
+    const filter = page.getByTestId('library-filter')
+    const search = page.getByTestId('library-search')
+    const f = (await filter.boundingBox())!
+    const s = (await search.boundingBox())!
+    expect(Math.abs((f.y + f.height / 2) - (s.y + s.height / 2))).toBeLessThan(4)
+    expect(f.x + f.width).toBeLessThanOrEqual(s.x)
+    expect(s.x - (f.x + f.width)).toBeLessThan(12)
+
+    await filter.click()
+    const menu = (await page.getByRole('menu').boundingBox())!
+    const vw = page.viewportSize()!.width
+    expect(menu.x).toBeGreaterThanOrEqual(0)
+    expect(menu.x + menu.width).toBeLessThanOrEqual(vw)
+    await expect(page.getByTestId('filter-saved')).toBeVisible()
+  })
+
   test('library toolbar is NOT sticky on mobile', async ({ page }) => {
     const toolbar = page.locator('div').filter({ has: page.getByRole('button', { name: /songs|artists|albums/ }) }).first()
 
