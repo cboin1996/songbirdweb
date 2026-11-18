@@ -763,7 +763,7 @@ export default function LibraryList() {
                 </div>
             )}
             {/* Toolbar */}
-            <div className="flex flex-wrap gap-3 items-center mb-2 py-2">
+            <div className="relative flex flex-wrap gap-3 items-center mb-2 py-2">
                 <button
                     onClick={playAll}
                     className="flex items-center gap-1.5 px-3 py-1 bg-sky-500 hover:bg-sky-400 text-white rounded-full text-sm font-medium transition-colors"
@@ -817,9 +817,9 @@ export default function LibraryList() {
                         </button>
                     ))}
                 </div>
-                {/* Select button(s): fixed on mobile; on desktop in the (sticky) toolbar, so they never cover the view buttons. */}
+                {/* Select button(s): fixed on mobile; on desktop they float just beneath the view buttons, right-aligned, out of the flow, so switching views never moves the buttons. */}
                 {viewMode === 'songs' && (
-                    <div className="fixed top-14 right-4 z-40 md:static md:z-auto flex items-center gap-2">
+                    <div className="fixed top-14 right-4 z-40 md:absolute md:top-full md:right-0 flex items-center gap-2">
                         {selectMode && (() => {
                             const totalSongs = [...songGrouped.values()].flat().length
                             const allSelected = selectedIds.size > 0 && selectedIds.size === totalSongs
