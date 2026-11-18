@@ -1191,7 +1191,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 const asked = song.uuid
                 const stored = (list: MediaArtwork[]) => storedMediaArtwork(list, url => findStoredArtwork(url), blob => URL.createObjectURL(blob))
                 // Art this device never stored: the music note (precached with the app), as online.
-                void stored(artwork).then(list => list.length ? list : stored([noArtArtwork(origin)])).then(list => {
+                const note = noArtArtwork(origin)
+                // A song with no art already asked for the note; a miss is not asked again.
+                void stored(artwork).then(list => list.length || artwork[0]?.src === note.src ? list : stored([note])).then(list => {
                     if (mediaSyncSong !== asked || mediaSyncSeq !== seq) { list.forEach(a => URL.revokeObjectURL(a.src)); return }
                     mediaBlobUrls = list.map(a => a.src)
                     if (list.length) navigator.mediaSession.metadata = describe(list)

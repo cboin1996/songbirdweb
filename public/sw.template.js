@@ -181,8 +181,10 @@ self.addEventListener('fetch', event => {
         return
     }
 
-    // Static JS/CSS chunks: cache-first (content-addressed in prod, safe to cache forever)
-    if (url.pathname.startsWith('/_next/static/')) {
+    // Static JS/CSS chunks: cache-first (content-addressed in prod, safe to cache forever).
+    // The shell's own files too: an install that could not fetch the no-art note stores it on
+    // its first online request instead.
+    if (url.pathname.startsWith('/_next/static/') || (url.origin === self.location.origin && SHELL_ASSETS.includes(url.pathname))) {
         event.respondWith(
             caches.open(SHELL_CACHE).then(async cache => {
                 const cached = await cache.match(event.request)

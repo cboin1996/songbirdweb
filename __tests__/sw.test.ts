@@ -112,6 +112,24 @@ describe('install', () => {
     })
 })
 
+describe('shell assets', () => {
+    it('stores the no-art note on its first online request when install could not fetch it', async () => {
+        let reachable = false
+        const sw = boot(async path => String(path).endsWith('/icon-no-art.png') && !reachable ? Promise.reject(new Error('net')) : ok())
+        expect(await sw.install()).toBe('installed')
+        const shell = [...sw.stores.values()][0]
+        expect([...shell.keys()].some(k => k.endsWith('/icon-no-art.png'))).toBe(false)
+        reachable = true
+        const first = await sw.request('/icon-no-art.png')
+        expect(first.handled).toBe(true)
+        expect([...shell.keys()].some(k => k.endsWith('/icon-no-art.png'))).toBe(true)
+        // Offline later, the stored copy answers.
+        reachable = false
+        const again = await sw.request('/icon-no-art.png')
+        expect(again.handled && again.response.ok).toBe(true)
+    })
+})
+
 describe('API answers', () => {
     it('keeps a copy of a GET and serves it when the network fails', async () => {
         let up = true
