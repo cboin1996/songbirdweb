@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 import { login, libraryIds, saveSongOffline, OFFLINE_LIBRARY_USERNAME, OFFLINE_PASSWORD } from '../e2e/helpers'
 import { LibraryPage, CommonPage } from '../e2e/pages'
 
-// The library offline: saved songs by default, "Show all" for the rest, a "Saved" chip online.
+// The library's "saved offline" filter, in the filter menu: on by default offline, off online.
 // Its own user: saving writes the account's server-side offline list, so a spec saving as
 // another worker's user would collide with it.
 test.describe('Library offline view', () => {
@@ -12,7 +12,7 @@ test.describe('Library offline view', () => {
     await login(page, OFFLINE_LIBRARY_USERNAME, OFFLINE_PASSWORD)
   })
 
-  test('offline shows saved songs with a count, Show all reveals the rest dimmed, tapping one says so', async ({ page, context }) => {
+  test('offline shows saved songs, the filter on with its count, turning saved offline off reveals the rest dimmed, tapping one says so', async ({ page, context }) => {
     test.setTimeout(120000)
     const lib = new LibraryPage(page)
     const common = new CommonPage(page)
@@ -31,12 +31,15 @@ test.describe('Library offline view', () => {
     await page.reload()
     await lib.waitForSongs()
 
-    await expect(page.getByTestId('offline-count')).toContainText(/offline — showing \d+ of \d+ saved/)
     await expect(lib.songById(savedId).first()).toBeVisible()
     await expect(lib.songById(unsavedId)).toHaveCount(0)
+    await expect(page.getByTestId('library-filter')).toHaveAttribute('aria-label', 'filter (1 on)')
 
-    await page.getByTestId('show-all-toggle').click()
-    await expect(page.getByTestId('offline-count')).toContainText(/offline — showing all \d+, \d+ saved/)
+    await page.getByTestId('library-filter').click()
+    await expect(page.getByTestId('filter-saved')).toHaveAttribute('aria-checked', 'true')
+    await expect(page.getByTestId('filter-saved')).toContainText(/[1-9]\d* of \d+/)
+    await page.getByTestId('filter-saved').click()
+    await expect(page.getByTestId('library-filter')).toHaveAttribute('aria-label', 'filter')
     const card = (id: string) => page.locator(`[data-testid="song-card"][data-song-id="${id}"]`)
     const unsaved = card(unsavedId).first()
     await expect(unsaved).toBeVisible()
@@ -50,7 +53,7 @@ test.describe('Library offline view', () => {
     await context.setOffline(false)
   })
 
-  test('online, the Saved chip narrows the library to saved songs', async ({ page }) => {
+  test('online, saved offline in the filter menu narrows the library to saved songs and shows the count', async ({ page }) => {
     test.setTimeout(90000)
     const lib = new LibraryPage(page)
 
@@ -60,10 +63,38 @@ test.describe('Library offline view', () => {
     expect(all.length).toBeGreaterThanOrEqual(3)
     await saveSongOffline(page, all[0])
 
-    await page.getByTestId('saved-chip').click()
+    await expect(page.getByTestId('library-filter')).toHaveAttribute('aria-label', 'filter')
+    await page.getByTestId('library-filter').click()
+    await expect(page.getByTestId('filter-saved')).toContainText(/[1-9]\d* of \d+/)
+    await page.getByTestId('filter-saved').click()
+    await expect(page.getByTestId('library-filter')).toHaveAttribute('aria-label', 'filter (1 on)')
     await expect(lib.songById(all[0]).first()).toBeVisible()
     await expect(lib.songById(all[1])).toHaveCount(0)
-    await page.getByTestId('saved-chip').click()
+    await page.getByTestId('filter-saved').click()
     await expect(lib.songById(all[1]).first()).toBeVisible()
+  })
+
+  test('the playlists view has no filter menu', async ({ page }) => {
+    const lib = new LibraryPage(page)
+    await lib.goto()
+    await lib.waitForSongs()
+    await expect(page.getByTestId('library-filter')).toBeVisible()
+    await lib.goto('playlists')
+    await expect(page).toHaveURL(/view=playlists/)
+    await expect(page.getByTestId('library-filter')).toHaveCount(0)
+  })
+
+  test('saved offline with nothing saved on this device says so and keeps the filter to turn it off', async ({ page }) => {
+    const lib = new LibraryPage(page)
+    await lib.goto()
+    await lib.waitForSongs()
+    await page.getByTestId('library-filter').click()
+    await expect(page.getByTestId('filter-saved')).toContainText(/^.*0 of \d+$/)
+    await page.getByTestId('filter-saved').click()
+    await expect(page.getByTestId('library-saved-empty')).toBeVisible()
+    await expect(page.getByTestId('library-filter')).toBeVisible()
+    await page.getByTestId('filter-saved').click()
+    await expect(page.getByTestId('library-saved-empty')).toHaveCount(0)
+    await expect(lib.songCards.first()).toBeVisible()
   })
 })

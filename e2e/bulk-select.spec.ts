@@ -27,6 +27,23 @@ test.describe('library bulk select', () => {
         await login(page, BULK_USERNAME, BULK_PASSWORD)
     })
 
+    test('desktop: Select floats beneath the view buttons and switching views does not move them', async ({ page }) => {
+        const lib = new LibraryPage(page)
+        await lib.goto()
+        await lib.waitForSongs()
+        const playlists = page.getByRole('button', { name: 'playlists', exact: true })
+        const p = (await playlists.boundingBox())!
+        const sel = (await lib.selectBtn.boundingBox())!
+        expect(sel.y).toBeGreaterThanOrEqual(p.y + p.height)
+        expect(Math.abs((sel.x + sel.width) - (p.x + p.width))).toBeLessThan(40)
+        await playlists.click()
+        await expect(page).toHaveURL(/view=playlists/)
+        await expect(lib.selectBtn).toHaveCount(0)
+        const after = (await playlists.boundingBox())!
+        expect(Math.abs(after.x - p.x)).toBeLessThan(1)
+        expect(Math.abs(after.y - p.y)).toBeLessThan(1)
+    })
+
     test('Select button enters select mode and reveals bulk action bar', async ({ page }) => {
         const lib = new LibraryPage(page)
         await lib.goto()

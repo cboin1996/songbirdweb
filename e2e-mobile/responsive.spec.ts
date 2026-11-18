@@ -1,5 +1,5 @@
 import { test, expect } from '../e2e/fixtures/test'
-import { login } from '../e2e/helpers'
+import { login, apiLogin, pickFirstLibrarySong, API_V1 } from '../e2e/helpers'
 import { LibraryPage, PlayerBar } from '../e2e/pages'
 
 const LIBRARY = '/library'
@@ -20,6 +20,49 @@ test.describe('mobile responsive behaviors', () => {
     await card.dispatchEvent('touchend')
 
     await expect(lib.selectedCount()).toBeVisible({ timeout: 3000 })
+  })
+
+  test('library: play all and the icons on top, search with the filter on its own row, menu fits the screen', async ({ page }) => {
+    const filter = page.getByTestId('library-filter')
+    const search = page.getByTestId('library-search')
+    const f = (await filter.boundingBox())!
+    const s = (await search.boundingBox())!
+    expect(Math.abs((f.y + f.height / 2) - (s.y + s.height / 2))).toBeLessThan(4)
+    expect(s.x + s.width).toBeLessThanOrEqual(f.x)
+    expect(f.x - (s.x + s.width)).toBeLessThan(12)
+    const play = (await page.getByRole('button', { name: /play all/ }).boundingBox())!
+    const save = (await page.getByTestId('save-all-offline').boundingBox())!
+    expect(Math.abs((play.y + play.height / 2) - (save.y + save.height / 2))).toBeLessThan(4)
+    expect(s.y).toBeGreaterThanOrEqual(play.y + play.height)
+    const vw0 = page.viewportSize()!.width
+    expect(f.x + f.width).toBeGreaterThan(vw0 * 0.75)
+
+    await filter.click()
+    const menu = (await page.getByRole('menu').boundingBox())!
+    const vw = page.viewportSize()!.width
+    expect(menu.x).toBeGreaterThanOrEqual(0)
+    expect(menu.x + menu.width).toBeLessThanOrEqual(vw)
+    await expect(page.getByTestId('filter-saved')).toBeVisible()
+  })
+
+  test('edits list opens on screen from the right-hand icon', async ({ page }) => {
+    // A real draft, not a mocked list: the browser's service worker can bypass page.route.
+    const api = await apiLogin()
+    const song = await pickFirstLibrarySong(api)
+    test.skip(!song, 'no library song to draft')
+    const draftUrl = `${API_V1}/edit/songs/${song!.uuid}/draft`
+    expect((await api.put(draftUrl, { data: {} })).ok()).toBe(true)
+    try {
+      await page.reload()
+      await new LibraryPage(page).waitForSongs()
+      await page.getByTestId('edits-in-progress').click()
+      const list = (await page.getByTestId('edits-list').boundingBox())!
+      const vw = page.viewportSize()!.width
+      expect(list.x).toBeGreaterThanOrEqual(0)
+      expect(list.x + list.width).toBeLessThanOrEqual(vw)
+    } finally {
+      await api.delete(draftUrl)
+    }
   })
 
   test('library toolbar is NOT sticky on mobile', async ({ page }) => {

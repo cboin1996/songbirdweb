@@ -17,10 +17,12 @@ import Song from "../../components/song"
 import { usePlayerActions, usePlayerSelector } from "../../components/player"
 import { routes } from "../../lib/routes"
 import { EVENTS } from "../../lib/events"
-import { FaPlay, FaPause, FaCloudDownloadAlt, FaCloudUploadAlt, FaMusic, FaBookmark, FaDownload, FaListUl } from "react-icons/fa"
+import { FaPlay, FaPause, FaSyncAlt, FaCloudDownloadAlt, FaCloudUploadAlt, FaMusic, FaBookmark, FaDownload, FaListUl } from "react-icons/fa"
 import { useToast } from "../../components/toast"
 import PlaylistsView from "./playlists-view"
 import EditsBanner from "./edits-banner"
+import LibraryFilterMenu from "./library-filter-menu"
+import CountBadge, { iconButtonClass } from "./count-badge"
 import QueryError from "../../components/query-error"
 import SearchInput from "../../components/search-input"
 import LetterRail from "./letter-rail"
@@ -100,8 +102,11 @@ const AlbumCard = memo(function AlbumCard({ album, isCompact, isActive, isPlayin
     )
 })
 
-// The publish badge's data is asked for this long after the list shows, so it never competes with first paint.
-const ELIGIBLE_DELAY_MS = 2500
+// The publish badge's data is asked for once the browser is idle after the list shows,
+// so it never competes with first paint, but waits at most this long.
+const ELIGIBLE_IDLE_CAP_MS = 1000
+// Safari has no requestIdleCallback; there a short wait stands in for idle.
+const ELIGIBLE_FALLBACK_MS = 300
 
 export default function LibraryList() {
   useRenderCount('list')
@@ -135,7 +140,12 @@ export default function LibraryList() {
     const [eligibleWanted, setEligibleWanted] = useState(false)
     useEffect(() => {
         if (songsLoading) return
-        const id = setTimeout(() => setEligibleWanted(true), ELIGIBLE_DELAY_MS)
+        const want = () => setEligibleWanted(true)
+        if (typeof window.requestIdleCallback === 'function') {
+            const id = window.requestIdleCallback(want, { timeout: ELIGIBLE_IDLE_CAP_MS })
+            return () => window.cancelIdleCallback(id)
+        }
+        const id = setTimeout(want, ELIGIBLE_FALLBACK_MS)
         return () => clearTimeout(id)
     }, [songsLoading])
     const { data: eligibleSongs = [] } = useQuery({
@@ -169,7 +179,9 @@ export default function LibraryList() {
     const playContextId = usePlayerSelector(s => s.playContext?.id)
     const sectionRefs = useRef<Record<string, HTMLElement | null>>({})
     const stickyHeaderRef = useRef<HTMLDivElement | null>(null)
-    const isDesktop = useIsDesktop()
+    // Crossing the breakpoint re-renders every row (compact vs full); deferred, that work
+    // yields to the resize instead of freezing it.
+    const isDesktop = useDeferredValue(useIsDesktop())
     const { savingAll, progress: saveAllProgress, failedIds, clearFailedIds, cachedIds, cachedIdsStatus, setCachedIds, cacheSongsById, refreshCachedIds, readSavedAfterLaunch } = useOfflineSave()
     const [offlineReady, setOfflineReady] = useState(false)
     const [syncPromptIds, setSyncPromptIds] = useState<string[]>([])
@@ -221,7 +233,7 @@ export default function LibraryList() {
     )
     // The saved set narrows the list only offline; online, a save or a drop must not
     // rebuild every derived list (and with them every row).
-    // Offline the list shows saved songs unless "Show all" is on; online a "Saved" chip does the same.
+    // One "saved offline" filter: on by default offline, off by default online (the filter menu).
     const [showAllOffline, setShowAllOffline] = useState(false)
     const [savedOnly, setSavedOnly] = useState(false)
     const narrowToSaved = online ? savedOnly : !showAllOffline
@@ -250,7 +262,7 @@ export default function LibraryList() {
             if (isOffline()) {
                 try {
                     const cached = await fetchLibrarySongs()
-                    // The whole copy stays: the saved narrowing happens in the view, so "Show all" has the rest.
+                    // The whole copy stays: the saved narrowing happens in the view, so turning "saved offline" off shows the rest.
                     if (cached.some(s => ids.has(s.uuid))) queryClient.setQueryData(queryKeys.librarySongs, cached)
                 } catch {}
             }
@@ -300,8 +312,8 @@ export default function LibraryList() {
             await publishSongs(ids)
             setPublishModalOpen(false)
             await Promise.all([
+                // Also refetches eligible: its key sits under librarySongs.
                 queryClient.invalidateQueries({ queryKey: queryKeys.librarySongs }),
-                queryClient.invalidateQueries({ queryKey: queryKeys.eligibleSongs }),
                 queryClient.invalidateQueries({ queryKey: queryKeys.library }),
                 queryClient.invalidateQueries({ queryKey: queryKeys.drafts }),
             ])
@@ -720,18 +732,20 @@ export default function LibraryList() {
     rowHandlers.current = { playRow, playGenreRow, longPress, handleSelect, playAlbum }
     const playAlbumStable = useCallback((album: LibraryAlbum) => rowHandlers.current.playAlbum(album), [])
 
-    if (songsLoading && baseSongs.length === 0) return <div data-testid="library-skeleton"><LibraryLoading /></div>
-    if (baseSongs.length === 0 && songsError) {
+    // Judged on the whole library, not the filtered list: a filter that matches nothing
+    // keeps the toolbar, so the filter can be turned off again.
+    if (songsLoading && visibleSongs.length === 0) return <div data-testid="library-skeleton"><LibraryLoading /></div>
+    if (visibleSongs.length === 0 && songsError) {
         return (
             <div className="py-4">
                 <QueryError error={songsError} retry={refetchSongs} context="your library" />
             </div>
         )
     }
-    if (baseSongs.length === 0 && !online) {
+    if (visibleSongs.length === 0 && !online) {
         return <p className="text-gray-400 text-sm py-4">no songs saved offline — save songs while online to listen offline</p>
     }
-    if (baseSongs.length === 0) {
+    if (visibleSongs.length === 0) {
         return <p className="text-gray-400 text-sm py-4">library is empty</p>
     }
 
@@ -739,15 +753,6 @@ export default function LibraryList() {
         <div ref={listContainerRef} className={`relative pr-7${selectMode ? ' select-none' : ''}`}>
             {/* Sticky header: toolbar + banners */}
             <div ref={stickyHeaderRef} className="md:sticky md:top-11 md:z-40 md:-mx-6 md:px-6 md:bg-[var(--background)]/90 md:backdrop-blur-md frosted-bar md:border-b border-gray-100 dark:border-gray-800 md:pt-2">
-            {online && syncPromptIds.length > 0 && (
-                <div className="mb-2 mt-2 px-3 py-2 rounded-lg bg-sky-50 dark:bg-sky-950/30 border border-sky-200 dark:border-sky-800 text-sky-700 dark:text-sky-400 text-xs flex items-center justify-between gap-3">
-                    <span>{syncPromptIds.length} song{syncPromptIds.length !== 1 ? 's' : ''} saved offline on another device</span>
-                    <div className="flex gap-2 shrink-0">
-                        <button onClick={() => setOfflineSyncModalOpen(true)} className="font-medium underline underline-offset-2 hover:no-underline">View</button>
-                        <button onClick={() => setSyncPromptIds([])} className="opacity-60 hover:opacity-100">Dismiss</button>
-                    </div>
-                </div>
-            )}
             {failedIds.size > 0 && (
                 <div className="mb-2 mt-2 px-3 py-2 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-xs flex items-center justify-between gap-3">
                     <span>{failedIds.size} song{failedIds.size !== 1 ? 's' : ''} failed to download offline</span>
@@ -757,38 +762,8 @@ export default function LibraryList() {
                     </div>
                 </div>
             )}
-            {/* Fixed Select button(s) */}
-            {viewMode === 'songs' && (
-                <div className="fixed top-14 right-4 z-40 flex items-center gap-2">
-                    {selectMode && (() => {
-                        const totalSongs = [...songGrouped.values()].flat().length
-                        const allSelected = selectedIds.size > 0 && selectedIds.size === totalSongs
-                        return (
-                            <button
-                                onClick={() => allSelected ? setSelectedIds(new Set()) : selectAllSongs()}
-                                className="flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors border bg-[var(--background)]/90 backdrop-blur-md text-gray-400 hover:text-sky-500 border-gray-200 dark:border-gray-800 hover:border-sky-500 min-h-[36px]"
-                            >
-                                {allSelected ? 'Deselect all' : 'Select all'}
-                            </button>
-                        )
-                    })()}
-                    <button
-                        onClick={selectMode ? exitSelectMode : () => enterSelectMode()}
-                        // On mobile, entering select mode is via long-press;
-                        // hide the entry-point button. Keep visible while in
-                        // select mode so users can cancel.
-                        className={`items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors border min-h-[36px] ${selectMode ? 'flex bg-sky-500 text-white border-sky-500' : viewMode === 'songs' ? 'hidden md:flex bg-[var(--background)]/90 backdrop-blur-md text-gray-400 hover:text-sky-500 border-gray-200 dark:border-gray-800 hover:border-sky-500' : 'hidden'}`}
-                    >
-                        {selectMode
-                            ? selectedIds.size > 0
-                                ? `${selectedIds.size} selected`
-                                : 'Cancel'
-                            : 'Select'}
-                    </button>
-                </div>
-            )}
             {/* Toolbar */}
-            <div className="flex flex-wrap gap-3 items-center mb-2 py-2">
+            <div className="relative flex flex-wrap gap-3 items-center mb-2 py-2">
                 <button
                     onClick={playAll}
                     className="flex items-center gap-1.5 px-3 py-1 bg-sky-500 hover:bg-sky-400 text-white rounded-full text-sm font-medium transition-colors"
@@ -796,53 +771,62 @@ export default function LibraryList() {
                     <FaPlay size={9} />
                     play all{deferredQuery ? ` (${displaySongs.length})` : ''}
                 </button>
-                <EditsBanner />
-                <button
-                    data-testid="save-all-offline"
-                    onClick={saveAllOffline}
-                    disabled={savingAll || !online}
-                    title={!online ? 'go online to save songs for offline listening' : 'save all songs for offline listening'}
-                    className="flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-gray-400 hover:text-sky-500 border border-gray-200 dark:border-gray-800 hover:border-sky-500"
-                >
-                    <FaCloudDownloadAlt size={12} />
-                    {savingAll ? `saving ${saveAllProgress.done}/${saveAllProgress.total}…` : !online ? 'offline' : 'save all offline'}
-                </button>
-                {online ? (
-                    <button
-                        data-testid="saved-chip"
-                        aria-pressed={savedOnly}
-                        onClick={() => setSavedOnly(v => !v)}
-                        className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-sm transition-colors border ${savedOnly ? 'bg-sky-500 text-white border-sky-500' : 'text-sky-500 border-gray-200 dark:border-gray-800 hover:border-sky-500'}`}
-                    >
-                        saved
-                    </button>
-                ) : (
-                    <>
-                        <span data-testid="offline-count" className="text-xs text-sky-500">
-                            {showAllOffline ? `offline — showing all ${visibleSongs.length}, ${savedCount} saved` : `offline — showing ${savedCount} of ${visibleSongs.length} saved`}
-                        </span>
+                {/* Desktop: search fills the line between play all and the icons. Mobile: play all and
+                    the icons share the top row, search takes its own row below. The filter rides on its
+                    right. The filter menu spans this pair, so it never runs past the screen edge. */}
+                <div className="relative flex items-center gap-1 flex-1 min-w-[9rem] order-2 basis-full md:order-none md:basis-auto">
+                    <SearchInput value={searchQuery} onChange={setSearchQuery} placeholder="search library…" testId="library-search" className="flex-1 min-w-0" />
+                    {/* Playlists list their own songs; the filters apply to the song views. */}
+                    {viewMode !== 'playlists' && (
+                        <LibraryFilterMenu
+                            savedOnly={narrowToSaved}
+                            onSavedOnlyChange={next => online ? setSavedOnly(next) : setShowAllOffline(!next)}
+                            savedCount={savedCount}
+                            total={visibleSongs.length}
+                        />
+                    )}
+                </div>
+                {/* Icons with counts, so the toolbar fits one line at every width. */}
+                <div className="relative md:static flex items-center gap-1 order-1 ml-auto md:order-none md:ml-0">
+                    <EditsBanner />
+                    {eligibleCount > 0 && (
                         <button
-                            data-testid="show-all-toggle"
-                            aria-pressed={showAllOffline}
-                            onClick={() => setShowAllOffline(v => !v)}
-                            className="px-3 py-1 rounded-full text-sm text-sky-500 hover:text-sky-600 border border-gray-200 dark:border-gray-800"
+                            data-testid="publish-eligible"
+                            onClick={openPublishModal}
+                            disabled={!online}
+                            aria-label={`${eligibleCount} ready to publish`}
+                            title={`${eligibleCount} ready to publish`}
+                            className={`${iconButtonClass} text-emerald-400 hover:text-emerald-300`}
                         >
-                            {showAllOffline ? 'show saved' : 'show all'}
+                            <FaCloudUploadAlt size={15} aria-hidden />
+                            <CountBadge n={eligibleCount} className="bg-emerald-500" />
                         </button>
-                    </>
-                )}
-                <SearchInput value={searchQuery} onChange={setSearchQuery} placeholder="search library…" testId="library-search" className="w-40 md:w-52" />
-                {eligibleCount > 0 && (
+                    )}
+                    {online && syncPromptIds.length > 0 && (
+                        <button
+                            data-testid="offline-sync"
+                            onClick={() => setOfflineSyncModalOpen(true)}
+                            aria-label={`${syncPromptIds.length} saved offline on another device`}
+                            title={`${syncPromptIds.length} saved offline on another device`}
+                            className={`${iconButtonClass} text-sky-500 hover:text-sky-400`}
+                        >
+                            <FaSyncAlt size={12} aria-hidden />
+                            <CountBadge n={syncPromptIds.length} />
+                        </button>
+                    )}
                     <button
-                        onClick={openPublishModal}
-                        disabled={!online}
-                        className="flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors disabled:opacity-50 text-emerald-400 hover:text-emerald-300 border border-emerald-500/40 hover:border-emerald-400"
+                        data-testid="save-all-offline"
+                        onClick={saveAllOffline}
+                        disabled={savingAll || !online}
+                        aria-label={savingAll ? `saving ${saveAllProgress.done} of ${saveAllProgress.total}` : 'save all offline'}
+                        title={!online ? 'go online to save songs for offline listening' : savingAll ? `saving ${saveAllProgress.done}/${saveAllProgress.total}…` : 'save all songs for offline listening'}
+                        className={`${iconButtonClass} text-gray-400 hover:text-sky-500 ${savingAll ? 'w-auto px-2 gap-1 text-sky-500' : ''}`}
                     >
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                        publish eligible ({eligibleCount})
+                        <FaCloudDownloadAlt size={15} aria-hidden />
+                        {savingAll && <span className="text-xs tabular-nums">{saveAllProgress.done}/{saveAllProgress.total}</span>}
                     </button>
-                )}
-                <div className="flex gap-1 ml-auto md:ml-auto justify-center md:justify-end w-full md:w-auto">
+                </div>
+                <div className="flex gap-1 order-3 md:order-none ml-auto md:ml-auto justify-center md:justify-end w-full md:w-auto">
                     {(['songs', 'artists', 'albums', 'genres', 'playlists'] as ViewMode[]).map(v => (
                         <button
                             key={v}
@@ -853,6 +837,36 @@ export default function LibraryList() {
                         </button>
                     ))}
                 </div>
+                {/* Select button(s): fixed on mobile; on desktop they float just beneath the view buttons, right-aligned, out of the flow, so switching views never moves the buttons. */}
+                {viewMode === 'songs' && (
+                    <div className="fixed top-14 right-4 z-40 md:absolute md:top-full md:right-0 flex items-center gap-2">
+                        {selectMode && (() => {
+                            const totalSongs = [...songGrouped.values()].flat().length
+                            const allSelected = selectedIds.size > 0 && selectedIds.size === totalSongs
+                            return (
+                                <button
+                                    onClick={() => allSelected ? setSelectedIds(new Set()) : selectAllSongs()}
+                                    className="flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors border bg-[var(--background)]/90 backdrop-blur-md text-gray-400 hover:text-sky-500 border-gray-200 dark:border-gray-800 hover:border-sky-500 min-h-[36px]"
+                                >
+                                    {allSelected ? 'Deselect all' : 'Select all'}
+                                </button>
+                            )
+                        })()}
+                        <button
+                            onClick={selectMode ? exitSelectMode : () => enterSelectMode()}
+                            // On mobile, entering select mode is via long-press;
+                            // hide the entry-point button. Keep visible while in
+                            // select mode so users can cancel.
+                            className={`items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors border min-h-[36px] ${selectMode ? 'flex bg-sky-500 text-white border-sky-500' : viewMode === 'songs' ? 'hidden md:flex bg-[var(--background)]/90 backdrop-blur-md text-gray-400 hover:text-sky-500 border-gray-200 dark:border-gray-800 hover:border-sky-500' : 'hidden'}`}
+                        >
+                            {selectMode
+                                ? selectedIds.size > 0
+                                    ? `${selectedIds.size} selected`
+                                    : 'Cancel'
+                                : 'Select'}
+                        </button>
+                    </div>
+                )}
             </div>
             </div>{/* end sticky header */}
 
@@ -860,6 +874,12 @@ export default function LibraryList() {
                 <div className="my-4">
                     <QueryError error={songsError} retry={refetchSongs} context="your library" />
                 </div>
+            )}
+
+            {!deferredQuery && narrowToSaved && baseSongs.length === 0 && viewMode !== 'playlists' && (
+                <p data-testid="library-saved-empty" className="text-gray-400 text-sm py-8 text-center">
+                    {online ? 'no songs saved offline yet' : 'no songs saved offline — turn off the filter to see the rest'}
+                </p>
             )}
 
             {deferredQuery && displaySongs.length === 0 && viewMode !== 'playlists' && (
@@ -1148,6 +1168,7 @@ export default function LibraryList() {
                     open={offlineSyncModalOpen}
                     onClose={() => setOfflineSyncModalOpen(false)}
                     title="Songs saved offline on another device"
+                    titleActions={<button onClick={() => { setSyncPromptIds([]); setOfflineSyncModalOpen(false) }} className="text-xs text-gray-400 hover:text-gray-200">dismiss</button>}
                     songs={syncPromptIds.flatMap(id => {
                         const s = songs.find(s => s.uuid === id)
                         return s ? [{ uuid: s.uuid, properties: s.properties, artwork_cached: s.artwork_cached, artwork_updated_at: s.artwork_updated_at } as PickerSong] : []
