@@ -102,8 +102,11 @@ const AlbumCard = memo(function AlbumCard({ album, isCompact, isActive, isPlayin
     )
 })
 
-// The publish badge's data is asked for this long after the list shows, so it never competes with first paint.
-const ELIGIBLE_DELAY_MS = 2500
+// The publish badge's data is asked for once the browser is idle after the list shows,
+// so it never competes with first paint, but waits at most this long.
+const ELIGIBLE_IDLE_CAP_MS = 1000
+// Safari has no requestIdleCallback; there a short wait stands in for idle.
+const ELIGIBLE_FALLBACK_MS = 300
 
 export default function LibraryList() {
   useRenderCount('list')
@@ -137,7 +140,12 @@ export default function LibraryList() {
     const [eligibleWanted, setEligibleWanted] = useState(false)
     useEffect(() => {
         if (songsLoading) return
-        const id = setTimeout(() => setEligibleWanted(true), ELIGIBLE_DELAY_MS)
+        const want = () => setEligibleWanted(true)
+        if (typeof window.requestIdleCallback === 'function') {
+            const id = window.requestIdleCallback(want, { timeout: ELIGIBLE_IDLE_CAP_MS })
+            return () => window.cancelIdleCallback(id)
+        }
+        const id = setTimeout(want, ELIGIBLE_FALLBACK_MS)
         return () => clearTimeout(id)
     }, [songsLoading])
     const { data: eligibleSongs = [] } = useQuery({

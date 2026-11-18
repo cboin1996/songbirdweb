@@ -18,6 +18,17 @@ test.describe('library page', () => {
         await lib.waitForSongs()
     })
 
+    test('publish icon shows soon after the list, not seconds later', async ({ page }) => {
+        await page.route('**/v1/library/eligible', route => route.fulfill({
+            json: [{ uuid: 'eligible-1', properties: null, eligible: true, missing_fields: [], artwork_cached: false }],
+        }))
+        const lib = new LibraryPage(page)
+        await lib.goto()
+        await lib.waitForSongs()
+        // Asked once the browser is idle after the list shows (capped at 1s), not after a fixed 2.5s wait.
+        await expect(page.getByTestId('publish-eligible')).toBeVisible({ timeout: 1800 })
+    })
+
     test('default view is songs tab (active state)', async ({ page }) => {
         const lib = new LibraryPage(page)
         await lib.goto()
