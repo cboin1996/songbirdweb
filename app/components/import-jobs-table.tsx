@@ -6,6 +6,7 @@ import { FaDove } from 'react-icons/fa6'
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { ImportJobResult, ImportJobsPage, listImportJobs, pollImportJob } from '../lib/data'
 import { routes } from '../lib/routes'
+import { queryKeys } from '../lib/query-keys'
 import { useDebouncedValue } from '../lib/use-debounce'
 import SearchInput from './search-input'
 import Spinner from './spinner'
@@ -45,6 +46,10 @@ export default function ImportJobsTable({
   const isPending = (s: string) => s === 'pending' || s === 'processing'
 
   function trackJob(job: ImportJobResult, replaceId?: string) {
+    if (job.status === 'done') {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.librarySongs })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.library })
+    }
     setActiveIds(prev => {
       const next = new Set(prev)
       if (replaceId) next.delete(replaceId)
@@ -90,6 +95,11 @@ export default function ImportJobsTable({
             const job = await pollImportJob(id)
             if (job) byId.set(id, job)
           }))
+        }
+        // A finished import is a new song in the library, and a new song to publish.
+        if ([...activeIdsRef.current].some(id => byId.get(id)?.status === 'done')) {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.librarySongs })
+          void queryClient.invalidateQueries({ queryKey: queryKeys.library })
         }
         setActiveIds(prev => {
           const next = new Set(prev)

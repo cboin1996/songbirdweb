@@ -198,6 +198,30 @@ test.describe('editor modal', () => {
         expect(abortErrors, `AbortErrors after close: ${abortErrors.join('\n')}`).toHaveLength(0)
     })
 
+    test('a draft saved by closing the editor shows on the library without a reload', async ({ page }) => {
+        const api = await apiLoginAs(EDITOR_USERNAME, EDITOR_PASSWORD)
+        const clearDrafts = async () => {
+            const list = await (await api.get(`${API_V1}/edit/drafts`)).json()
+            for (const d of list) await api.delete(`${API_V1}/edit/songs/${d.song_id}/draft`)
+        }
+        await clearDrafts()
+        try {
+            const editor = new EditorPage(page)
+            // The library loads first, and caches its (empty) list of drafts.
+            await editor.openFromLibrary()
+            await editor.propertiesTab.click()
+            const trackInput = editor.trackNameInput()
+            await expect(trackInput).not.toHaveValue('')
+            await trackInput.fill(`${await trackInput.inputValue()}-e2e-draft`)
+            await editor.closeBtn.click()
+            await expect(page).toHaveURL(/\/library/)
+            await expect(page.getByTestId('edits-in-progress')).toBeVisible({ timeout: 5000 })
+        } finally {
+            await clearDrafts()
+            await api.dispose()
+        }
+    })
+
     test('properties tab: editing track name auto-saves to draft', async ({ page }) => {
         const editor = new EditorPage(page)
         await editor.openFromLibrary()

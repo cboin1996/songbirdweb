@@ -52,5 +52,7 @@ export function removeSongFromLibraryCache(qc: QueryClient, songId: string): voi
     }
     qc.setQueryData<LibrarySong[]>(queryKeys.librarySongs, prev => prev?.filter(s => s.uuid !== songId))
     qc.setQueryData<LibraryEntry[]>(queryKeys.library, prev => prev?.filter(e => e.song_id !== songId))
+    // A removed song can no longer be published; drop it from that list too, with no request.
+    qc.setQueryData<{ uuid: string }[]>(queryKeys.eligibleSongs, prev => prev?.filter(s => s.uuid !== songId))
     storePatchedList(qc)
 }

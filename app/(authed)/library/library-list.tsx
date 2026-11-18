@@ -283,8 +283,6 @@ export default function LibraryList() {
                 queryClient.setQueryData(queryKeys.drafts, (prev: { song_id: string }[]) =>
                     prev ? prev.filter(d => d.song_id !== deleted) : []
                 )
-            } else {
-                queryClient.invalidateQueries({ queryKey: queryKeys.drafts })
             }
         }
         window.addEventListener(EVENTS.draftChanged, onDraftChanged)

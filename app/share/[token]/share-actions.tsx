@@ -3,6 +3,8 @@ import { useState } from 'react'
 import { FaPlay, FaPause, FaBookmark, FaRegBookmark } from 'react-icons/fa'
 import { addToLibrary, Properties } from '../../lib/data'
 import { usePlayer } from '../../components/player'
+import { useQueryClient } from '@tanstack/react-query'
+import { addSongToLibraryCache } from '../../lib/library-cache'
 
 export default function ShareActions({
     songId,
@@ -14,6 +16,7 @@ export default function ShareActions({
     downloadUrl: string
 }) {
     const { play, pause, current, isPlaying } = usePlayer()
+    const queryClient = useQueryClient()
     const [inLibrary, setInLibrary] = useState(false)
     const [libraryPending, setLibraryPending] = useState(false)
     const isCurrentSong = current?.uuid === songId
@@ -24,6 +27,7 @@ export default function ShareActions({
         setLibraryPending(true)
         try {
             await addToLibrary(songId)
+            addSongToLibraryCache(queryClient, { uuid: songId, properties })
             setInLibrary(true)
         } catch {}
         setLibraryPending(false)

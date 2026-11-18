@@ -8,6 +8,8 @@ import { routes } from "../lib/routes";
 import { FaCheckCircle } from "react-icons/fa";
 import { usePlayer } from "./player";
 import QueryError from "./query-error";
+import { useQueryClient } from "@tanstack/react-query";
+import { addSongToLibraryCache } from "../lib/library-cache";
 
 export default function DownloadViaUrl({ query }: { query: string }) {
     type Status = 'idle' | 'downloading' | 'ready' | 'saving' | 'done' | 'error'
@@ -20,6 +22,7 @@ export default function DownloadViaUrl({ query }: { query: string }) {
     const [artworkVersion, setArtworkVersion] = useState<number | null>(null)
     const [doneAction, setDoneAction] = useState<'library' | 'file' | null>(null)
     const { onLibraryAdd } = usePlayer()
+    const queryClient = useQueryClient()
 
     useEffect(() => {
         if (!query) return
@@ -50,7 +53,11 @@ export default function DownloadViaUrl({ query }: { query: string }) {
         setStatus('saving')
         try {
             await addToLibrary(songId)
-            if (properties) onLibraryAdd({ uuid: songId, properties, artwork_cached: artworkCached, artwork_updated_at: artworkVersion })
+            if (properties) {
+                // The library list is cached for minutes; it has to carry the song when it comes back on screen.
+                addSongToLibraryCache(queryClient, { uuid: songId, properties, artwork_cached: artworkCached, artwork_updated_at: artworkVersion })
+                onLibraryAdd({ uuid: songId, properties, artwork_cached: artworkCached, artwork_updated_at: artworkVersion })
+            }
             setDoneAction('library'); setStatus('done')
         } catch (e) {
             setStatus('error'); setErrorMsg('could not add to library'); setLastError(e instanceof Error ? e : new Error(String(e)))

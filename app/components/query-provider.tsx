@@ -33,6 +33,15 @@ export default function QueryProvider({ children }: { children: React.ReactNode 
         }
     }, [queryClient])
 
+    // A draft saved or discarded while the library is not on screen (the editor is its own page)
+    // still has to show when the library comes back: its cached drafts are marked stale here,
+    // so the next mount asks again, and a mounted list asks now.
+    useEffect(() => {
+        const changed = () => { void queryClient.invalidateQueries({ queryKey: queryKeys.drafts }) }
+        window.addEventListener(EVENTS.draftChanged, changed)
+        return () => window.removeEventListener(EVENTS.draftChanged, changed)
+    }, [queryClient])
+
     return (
         <QueryClientProvider client={queryClient}>
             {children}

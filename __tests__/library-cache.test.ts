@@ -21,6 +21,14 @@ const ids = (qc: QueryClient) => ({
 })
 
 describe('library cache patches', () => {
+    it('removing a song also takes it off the publish list, without a request', () => {
+        const qc = seeded()
+        qc.setQueryData(queryKeys.eligibleSongs, [{ uuid: 'a' }, { uuid: 'b' }])
+        removeSongFromLibraryCache(qc, 'a')
+        expect(qc.getQueryData(queryKeys.eligibleSongs)).toEqual([{ uuid: 'b' }])
+        expect(qc.getQueryState(queryKeys.eligibleSongs)?.isInvalidated).toBe(false)
+    })
+
     it('adds a song to both lists', () => {
         const qc = seeded()
         addSongToLibraryCache(qc, { uuid: 'c', properties: null })
