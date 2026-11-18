@@ -50,6 +50,10 @@ html[data-frosted="off"] .frosted-bar {
   opacity: 0;
   animation: skeleton-in 150ms ease-out 200ms forwards;
 }
+/* A navigation skeleton, already past its wait, fades straight in; the page's own skeleton
+   that follows it starts visible so the hand-off does not blink. */
+.skeleton-fade { animation: skeleton-in 150ms ease-out; }
+.skeleton-now { opacity: 1; }
 
 @keyframes song-highlight {
   0%   { background-color: rgb(14 165 233 / 0.25); }

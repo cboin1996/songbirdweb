@@ -62,6 +62,20 @@ test.describe('loading skeletons', () => {
         await expect(page.getByTestId('query-error-your-library').first()).toBeVisible({ timeout: 15000 })
     })
 
+    test('a slow click into explore shows its skeleton over the old page, then explore', async ({ page }) => {
+        const lib = new LibraryPage(page)
+        await page.goto(routes.library)
+        await lib.waitForSongs()
+        // Hold the route's own payload (the click, and any prefetch), not the data under it.
+        const h = hold(page, /\/explore\?_rsc=/)
+        await page.locator('nav a[href="/explore"]').first().click()
+        await h.waitHeld()
+        await expect(page.getByTestId('route-skeleton')).toBeVisible()
+        await h.answer(r => r.continue())
+        await expect(page).toHaveURL(/\/explore/)
+        await expect(page.getByTestId('route-skeleton')).toHaveCount(0)
+    })
+
     test('explore shows skeletons, then its content', async ({ page }) => {
         const h = hold(page, '**/v1/songs/explore*')
         await page.goto(routes.explore)

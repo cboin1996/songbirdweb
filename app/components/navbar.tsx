@@ -2,6 +2,7 @@ import Link from "next/link";
 import { FaDove, FaInfoCircle, FaUser } from "react-icons/fa";
 import LogoutButton from "./logout-button";
 import NavLinks from "./nav-links";
+import { PendingLink } from "./pending-route";
 import { routes } from "../lib/routes";
 
 export default function NavBar() {
@@ -15,9 +16,9 @@ export default function NavBar() {
                 <NavLinks />
             </div>
             <div className="flex flex-row gap-3 items-center">
-                <Link href={routes.info} className="hover:text-sky-600 p-2 -m-1 touch-manipulation">
+                <PendingLink href={routes.info} className="hover:text-sky-600 p-2 -m-1 touch-manipulation">
                     <FaInfoCircle size="16" />
-                </Link>
+                </PendingLink>
                 <Link href={routes.settings} className="hover:text-sky-600 p-2 -m-1 touch-manipulation">
                     <FaUser size="16" />
                 </Link>

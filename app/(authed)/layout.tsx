@@ -2,6 +2,7 @@ import NavBar from "../components/navbar";
 import { PlayerProvider } from "../components/player";
 import { ToastProvider } from "../components/toast";
 import { fetchCurrentUser } from "../lib/data";
+import { NavPendingProvider, PendingRoute } from "../components/pending-route";
 import { OfflineSaveProvider } from "../lib/offline-save-context";
 import { UserProvider } from "../lib/user-context";
 
@@ -15,8 +16,10 @@ export default async function AuthedGroupLayout({ children }: { children: React.
     return (
         <ToastProvider><OfflineSaveProvider><PlayerProvider>
             <UserProvider isAdmin={user?.role === 'admin'} username={user?.username ?? ''} userLoaded={user !== undefined}>
-                <NavBar />
-                {children}
+                <NavPendingProvider>
+                    <NavBar />
+                    <PendingRoute>{children}</PendingRoute>
+                </NavPendingProvider>
             </UserProvider>
         </PlayerProvider></OfflineSaveProvider></ToastProvider>
     )

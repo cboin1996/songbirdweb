@@ -1,6 +1,6 @@
 'use client'
 import { useState } from "react";
-import Link from "next/link";
+import { PendingLink } from "./pending-route";
 import { usePathname } from "next/navigation";
 import { FaBars, FaTimes } from "react-icons/fa";
 import { routes } from "../lib/routes";
@@ -40,9 +40,9 @@ export default function NavLinks() {
             )
         }
         return (
-            <Link key={l.href} href={l.href} className={linkClass(l.href)} onClick={onClick}>
+            <PendingLink key={l.href} href={l.href} className={linkClass(l.href)} onClick={onClick}>
                 {l.label}
-            </Link>
+            </PendingLink>
         )
     }
 
