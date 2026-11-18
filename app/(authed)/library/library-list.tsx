@@ -758,36 +758,6 @@ export default function LibraryList() {
                     </div>
                 </div>
             )}
-            {/* Fixed Select button(s) */}
-            {viewMode === 'songs' && (
-                <div className="fixed top-14 right-4 z-40 flex items-center gap-2">
-                    {selectMode && (() => {
-                        const totalSongs = [...songGrouped.values()].flat().length
-                        const allSelected = selectedIds.size > 0 && selectedIds.size === totalSongs
-                        return (
-                            <button
-                                onClick={() => allSelected ? setSelectedIds(new Set()) : selectAllSongs()}
-                                className="flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors border bg-[var(--background)]/90 backdrop-blur-md text-gray-400 hover:text-sky-500 border-gray-200 dark:border-gray-800 hover:border-sky-500 min-h-[36px]"
-                            >
-                                {allSelected ? 'Deselect all' : 'Select all'}
-                            </button>
-                        )
-                    })()}
-                    <button
-                        onClick={selectMode ? exitSelectMode : () => enterSelectMode()}
-                        // On mobile, entering select mode is via long-press;
-                        // hide the entry-point button. Keep visible while in
-                        // select mode so users can cancel.
-                        className={`items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors border min-h-[36px] ${selectMode ? 'flex bg-sky-500 text-white border-sky-500' : viewMode === 'songs' ? 'hidden md:flex bg-[var(--background)]/90 backdrop-blur-md text-gray-400 hover:text-sky-500 border-gray-200 dark:border-gray-800 hover:border-sky-500' : 'hidden'}`}
-                    >
-                        {selectMode
-                            ? selectedIds.size > 0
-                                ? `${selectedIds.size} selected`
-                                : 'Cancel'
-                            : 'Select'}
-                    </button>
-                </div>
-            )}
             {/* Toolbar */}
             <div className="flex flex-wrap gap-3 items-center mb-2 py-2">
                 <button
@@ -844,6 +814,36 @@ export default function LibraryList() {
                         </button>
                     ))}
                 </div>
+                {/* Select button(s): fixed on mobile; on desktop in the (sticky) toolbar, so they never cover the view buttons. */}
+                {viewMode === 'songs' && (
+                    <div className="fixed top-14 right-4 z-40 md:static md:z-auto flex items-center gap-2">
+                        {selectMode && (() => {
+                            const totalSongs = [...songGrouped.values()].flat().length
+                            const allSelected = selectedIds.size > 0 && selectedIds.size === totalSongs
+                            return (
+                                <button
+                                    onClick={() => allSelected ? setSelectedIds(new Set()) : selectAllSongs()}
+                                    className="flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors border bg-[var(--background)]/90 backdrop-blur-md text-gray-400 hover:text-sky-500 border-gray-200 dark:border-gray-800 hover:border-sky-500 min-h-[36px]"
+                                >
+                                    {allSelected ? 'Deselect all' : 'Select all'}
+                                </button>
+                            )
+                        })()}
+                        <button
+                            onClick={selectMode ? exitSelectMode : () => enterSelectMode()}
+                            // On mobile, entering select mode is via long-press;
+                            // hide the entry-point button. Keep visible while in
+                            // select mode so users can cancel.
+                            className={`items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors border min-h-[36px] ${selectMode ? 'flex bg-sky-500 text-white border-sky-500' : viewMode === 'songs' ? 'hidden md:flex bg-[var(--background)]/90 backdrop-blur-md text-gray-400 hover:text-sky-500 border-gray-200 dark:border-gray-800 hover:border-sky-500' : 'hidden'}`}
+                        >
+                            {selectMode
+                                ? selectedIds.size > 0
+                                    ? `${selectedIds.size} selected`
+                                    : 'Cancel'
+                                : 'Select'}
+                        </button>
+                    </div>
+                )}
             </div>
             </div>{/* end sticky header */}
 

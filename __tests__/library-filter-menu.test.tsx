@@ -4,9 +4,11 @@ import LibraryFilterMenu from '../app/(authed)/library/library-filter-menu'
 describe('LibraryFilterMenu', () => {
     it('shows how many filters are on without opening', () => {
         const { rerender } = render(<LibraryFilterMenu savedOnly={false} onSavedOnlyChange={() => {}} savedCount={2} total={5} />)
-        expect(screen.getByTestId('library-filter').textContent).toBe('filter')
+        expect(screen.getByRole('button', { name: 'filter' })).toBeTruthy()
+        expect(screen.queryByTestId('library-filter-count')).toBeNull()
         rerender(<LibraryFilterMenu savedOnly onSavedOnlyChange={() => {}} savedCount={2} total={5} />)
-        expect(screen.getByTestId('library-filter').textContent).toBe('filter · 1')
+        expect(screen.getByRole('button', { name: 'filter (1 on)' })).toBeTruthy()
+        expect(screen.getByTestId('library-filter-count').textContent).toBe('1')
     })
 
     it('lists saved only with its count, checked when on', () => {
