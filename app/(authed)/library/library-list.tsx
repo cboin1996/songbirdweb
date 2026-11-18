@@ -21,6 +21,7 @@ import { FaPlay, FaPause, FaCloudDownloadAlt, FaCloudUploadAlt, FaMusic, FaBookm
 import { useToast } from "../../components/toast"
 import PlaylistsView from "./playlists-view"
 import EditsBanner from "./edits-banner"
+import LibraryFilterMenu from "./library-filter-menu"
 import QueryError from "../../components/query-error"
 import SearchInput from "../../components/search-input"
 import LetterRail from "./letter-rail"
@@ -221,7 +222,7 @@ export default function LibraryList() {
     )
     // The saved set narrows the list only offline; online, a save or a drop must not
     // rebuild every derived list (and with them every row).
-    // Offline the list shows saved songs unless "Show all" is on; online a "Saved" chip does the same.
+    // One "saved only" filter: on by default offline, off by default online (the filter menu).
     const [showAllOffline, setShowAllOffline] = useState(false)
     const [savedOnly, setSavedOnly] = useState(false)
     const narrowToSaved = online ? savedOnly : !showAllOffline
@@ -250,7 +251,7 @@ export default function LibraryList() {
             if (isOffline()) {
                 try {
                     const cached = await fetchLibrarySongs()
-                    // The whole copy stays: the saved narrowing happens in the view, so "Show all" has the rest.
+                    // The whole copy stays: the saved narrowing happens in the view, so turning "saved only" off shows the rest.
                     if (cached.some(s => ids.has(s.uuid))) queryClient.setQueryData(queryKeys.librarySongs, cached)
                 } catch {}
             }
@@ -807,29 +808,19 @@ export default function LibraryList() {
                     <FaCloudDownloadAlt size={12} />
                     {savingAll ? `saving ${saveAllProgress.done}/${saveAllProgress.total}…` : !online ? 'offline' : 'save all offline'}
                 </button>
-                {online ? (
-                    <button
-                        data-testid="saved-chip"
-                        aria-pressed={savedOnly}
-                        onClick={() => setSavedOnly(v => !v)}
-                        className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-sm transition-colors border ${savedOnly ? 'bg-sky-500 text-white border-sky-500' : 'text-sky-500 border-gray-200 dark:border-gray-800 hover:border-sky-500'}`}
-                    >
-                        saved
-                    </button>
-                ) : (
-                    <>
-                        <span data-testid="offline-count" className="text-xs text-sky-500">
-                            {showAllOffline ? `offline — showing all ${visibleSongs.length}, ${savedCount} saved` : `offline — showing ${savedCount} of ${visibleSongs.length} saved`}
-                        </span>
-                        <button
-                            data-testid="show-all-toggle"
-                            aria-pressed={showAllOffline}
-                            onClick={() => setShowAllOffline(v => !v)}
-                            className="px-3 py-1 rounded-full text-sm text-sky-500 hover:text-sky-600 border border-gray-200 dark:border-gray-800"
-                        >
-                            {showAllOffline ? 'show saved' : 'show all'}
-                        </button>
-                    </>
+                {/* Playlists list their own songs; the filters apply to the song views. */}
+                {viewMode !== 'playlists' && (
+                    <LibraryFilterMenu
+                        savedOnly={narrowToSaved}
+                        onSavedOnlyChange={next => online ? setSavedOnly(next) : setShowAllOffline(!next)}
+                        savedCount={savedCount}
+                        total={visibleSongs.length}
+                    />
+                )}
+                {!online && (
+                    <span data-testid="offline-count" className="text-xs text-sky-500">
+                        {showAllOffline ? `offline — showing all ${visibleSongs.length}, ${savedCount} saved` : `offline — showing ${savedCount} of ${visibleSongs.length} saved`}
+                    </span>
                 )}
                 <SearchInput value={searchQuery} onChange={setSearchQuery} placeholder="search library…" testId="library-search" className="w-40 md:w-52" />
                 {eligibleCount > 0 && (
