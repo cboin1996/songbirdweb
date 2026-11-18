@@ -63,9 +63,9 @@ export function mediaSessionArtwork(
 
 /**
  * The lock-screen list once its art is known to load. The OS fetches the image itself and
- * shows a blank tile when that fails, without telling the page; so the page loads the
- * largest entry too (usually from the cache the player's own image filled), and a failure
- * swaps in the music note. The note itself is not checked.
+ * shows a blank tile when that fails, without telling the page; so the page checks the
+ * largest entry too (once per image per session), and a failure swaps in the music note.
+ * The note itself is not checked.
  */
 export async function loadableArtwork(
   list: MediaArtwork[],

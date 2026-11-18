@@ -89,6 +89,7 @@ const CACHED_API_PATHS = ['/v1/player/state', '/v1/songs/library', '/v1/library'
 const SHELL_PAGES = ['/offline', '/', '/library']
 // Stored with the pages: the lock screen's music note for a song with no stored art, offline.
 const SHELL_ASSETS = ['/icon-no-art.png']
+const ART_CHECK_HEADER = 'x-songbird-art-check'
 
 // Stores each shell page on its own. A page the server answers with a redirect
 // (signed out, /library goes to the sign-in page) or an error is skipped, not
@@ -133,6 +134,13 @@ self.addEventListener('activate', event => {
 
 self.addEventListener('fetch', event => {
     const url = new URL(event.request.url)
+
+    // The player checking whether the server still has a song's art, as the lock screen will
+    // ask for it: the OS's own fetch never reaches this worker, so a stored copy must not answer.
+    if (event.request.headers?.get?.(ART_CHECK_HEADER)) {
+        event.respondWith(fetch(event.request))
+        return
+    }
 
     // Artwork: check cache first, fall back to network, store on success
     // For /_next/image requests, also check the raw URL we pre-cached

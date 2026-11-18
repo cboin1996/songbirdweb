@@ -67,10 +67,10 @@ function boot(fetchImpl: (url: string) => Promise<FakeResponse>) {
             try { await work; return 'installed' } catch (e) { return e as Error }
         },
         // Whether the worker took the request over, and what it answered.
-        async request(path: string, init: { method?: string; mode?: string } = {}) {
+        async request(path: string, init: { method?: string; mode?: string; headers?: Record<string, string> } = {}) {
             let answered: Promise<FakeResponse> | undefined
             handlers.fetch({
-                request: { url: `https://songbird.test${path}`, method: init.method ?? 'GET', mode: init.mode ?? 'cors' },
+                request: { url: `https://songbird.test${path}`, method: init.method ?? 'GET', mode: init.mode ?? 'cors', headers: { get: (h: string) => init.headers?.[h] ?? null } },
                 respondWith: (p: Promise<FakeResponse>) => { answered = p },
             })
             return answered ? { handled: true as const, response: await answered } : { handled: false as const }
@@ -127,6 +127,17 @@ describe('shell assets', () => {
         reachable = false
         const again = await sw.request('/icon-no-art.png')
         expect(again.handled && again.response.ok).toBe(true)
+    })
+})
+
+describe('lock-screen art check', () => {
+    it('goes to the server past a stored copy: the OS fetch never sees the stored one', async () => {
+        const sw = boot(async () => new FakeResponse('', { status: 404 }))
+        await (await sw.open('songbird-artwork-saved-v1')).put('https://songbird.test/v1/songs/a/artwork/full/1', new FakeResponse('stored'))
+        const plain = await sw.request('/v1/songs/a/artwork/full/1')
+        expect(plain.handled && plain.response.ok).toBe(true)
+        const checked = await sw.request('/v1/songs/a/artwork/full/1', { headers: { 'x-songbird-art-check': '1' } })
+        expect(checked.handled && checked.response.status).toBe(404)
     })
 })
 
