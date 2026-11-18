@@ -26,7 +26,7 @@ import { createPlayerStore, type PlayerStore, type PlayerSnapshot, type RepeatMo
 import { createListenClock } from "../lib/listen-clock"
 import { useQueryClient } from "@tanstack/react-query"
 import { queryKeys } from "../lib/query-keys"
-import { mediaSessionArtwork, storedMediaArtwork, noArtArtwork, type MediaArtwork } from "../lib/artwork"
+import { mediaSessionArtwork, storedMediaArtwork, noArtArtwork, loadableArtwork, type MediaArtwork } from "../lib/artwork"
 import { isValidShuffleOrder } from "../lib/shuffle-order"
 import { EVENTS } from "../lib/events"
 import Slider from "./slider"
@@ -1158,6 +1158,15 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         removeFromQueue(idx)
     }
 
+    function imageLoads(src: string): Promise<boolean> {
+        return new Promise(resolve => {
+            const img = document.createElement('img') // `Image` here is next/image
+            img.onload = () => resolve(true)
+            img.onerror = () => resolve(false)
+            img.src = src
+        })
+    }
+
     function setMediaAction(action: MediaSessionAction, handler: MediaSessionActionHandler | null) {
         try { navigator.mediaSession.setActionHandler(action, handler) } catch {}
     }
@@ -1200,6 +1209,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 })
             } else {
                 navigator.mediaSession.metadata = describe(artwork)
+                // Art that fails to load (gone from the server, remote host down) gets the note,
+                // not the OS's blank tile.
+                const asked = song.uuid
+                void loadableArtwork(artwork, imageLoads, noArtArtwork(origin)).then(list => {
+                    if (list === artwork || mediaSyncSong !== asked || mediaSyncSeq !== seq) return
+                    navigator.mediaSession.metadata = describe(list)
+                })
             }
         }
         setMediaAction('play', () => resume())

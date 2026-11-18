@@ -1,4 +1,4 @@
-import { storedMediaArtwork, mediaSessionArtwork, normalizeArtworkSize, optimizerWidth } from '../app/lib/artwork'
+import { storedMediaArtwork, mediaSessionArtwork, loadableArtwork, noArtArtwork, normalizeArtworkSize, optimizerWidth } from '../app/lib/artwork'
 import { readdirSync, readFileSync, statSync } from 'fs'
 import { join } from 'path'
 import nextConfig from '../next.config'
@@ -117,5 +117,34 @@ describe('storedMediaArtwork (lock screen with no network)', () => {
   it('treats a lookup that throws as not stored', async () => {
     const out = await storedMediaArtwork([entry('http://x/a', 200)], async () => { throw new Error('boom') }, makeUrl)
     expect(out).toEqual([])
+  })
+})
+
+describe('loadableArtwork (art the OS would show as a blank tile)', () => {
+  const note = noArtArtwork('http://app')
+  const list = [
+    { src: 'http://app/v1/songs/a/artwork/thumb/1', sizes: '200x200', type: 'image/jpeg' },
+    { src: 'http://app/v1/songs/a/artwork/full/1', sizes: '600x600', type: 'image/jpeg' },
+  ]
+
+  it('keeps the art when its largest image loads, checking only that one', async () => {
+    const asked: string[] = []
+    const out = await loadableArtwork(list, async src => { asked.push(src); return true }, note)
+    expect(out).toBe(list)
+    expect(asked).toEqual(['http://app/v1/songs/a/artwork/full/1'])
+  })
+
+  it('swaps in the music note when the art fails to load', async () => {
+    expect(await loadableArtwork(list, async () => false, note)).toEqual([note])
+  })
+
+  it('treats a load that throws as failed', async () => {
+    expect(await loadableArtwork(list, async () => { throw new Error('x') }, note)).toEqual([note])
+  })
+
+  it('does not check the note itself', async () => {
+    const loads = jest.fn(async () => false)
+    expect(await loadableArtwork([note], loads, note)).toEqual([note])
+    expect(loads).not.toHaveBeenCalled()
   })
 })

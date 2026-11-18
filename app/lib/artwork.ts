@@ -61,6 +61,24 @@ export function mediaSessionArtwork(
   return out.length ? out : [noArtArtwork(origin)]
 }
 
+/**
+ * The lock-screen list once its art is known to load. The OS fetches the image itself and
+ * shows a blank tile when that fails, without telling the page; so the page loads the
+ * largest entry too (usually from the cache the player's own image filled), and a failure
+ * swaps in the music note. The note itself is not checked.
+ */
+export async function loadableArtwork(
+  list: MediaArtwork[],
+  loads: (src: string) => Promise<boolean>,
+  note: MediaArtwork,
+): Promise<MediaArtwork[]> {
+  const largest = list[list.length - 1]
+  if (!largest || largest.src === note.src) return list
+  let ok = false
+  try { ok = await loads(largest.src) } catch { ok = false }
+  return ok ? list : [note]
+}
+
 /** The remote art url inside an optimizer url, or the url itself: how a saved copy of remote art is keyed. */
 function storedKeyCandidates(src: string): string[] {
   try {
