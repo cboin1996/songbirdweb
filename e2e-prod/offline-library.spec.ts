@@ -12,7 +12,7 @@ test.describe('Library offline view', () => {
     await login(page, OFFLINE_LIBRARY_USERNAME, OFFLINE_PASSWORD)
   })
 
-  test('offline shows saved songs with a count, turning saved offline off reveals the rest dimmed, tapping one says so', async ({ page, context }) => {
+  test('offline shows saved songs, the filter on with its count, turning saved offline off reveals the rest dimmed, tapping one says so', async ({ page, context }) => {
     test.setTimeout(120000)
     const lib = new LibraryPage(page)
     const common = new CommonPage(page)
@@ -31,16 +31,15 @@ test.describe('Library offline view', () => {
     await page.reload()
     await lib.waitForSongs()
 
-    await expect(page.getByTestId('offline-count')).toContainText(/offline — showing \d+ of \d+ saved/)
     await expect(lib.songById(savedId).first()).toBeVisible()
     await expect(lib.songById(unsavedId)).toHaveCount(0)
     await expect(page.getByTestId('library-filter')).toHaveAttribute('aria-label', 'filter (1 on)')
 
     await page.getByTestId('library-filter').click()
     await expect(page.getByTestId('filter-saved')).toHaveAttribute('aria-checked', 'true')
+    await expect(page.getByTestId('filter-saved')).toContainText(/[1-9]\d* of \d+/)
     await page.getByTestId('filter-saved').click()
     await expect(page.getByTestId('library-filter')).toHaveAttribute('aria-label', 'filter')
-    await expect(page.getByTestId('offline-count')).toContainText(/offline — showing all \d+, \d+ saved/)
     const card = (id: string) => page.locator(`[data-testid="song-card"][data-song-id="${id}"]`)
     const unsaved = card(unsavedId).first()
     await expect(unsaved).toBeVisible()

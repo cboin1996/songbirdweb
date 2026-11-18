@@ -780,11 +780,6 @@ export default function LibraryList() {
                     <FaCloudDownloadAlt size={12} />
                     {savingAll ? `saving ${saveAllProgress.done}/${saveAllProgress.total}…` : !online ? 'offline' : 'save all offline'}
                 </button>
-                {!online && (
-                    <span data-testid="offline-count" className="text-xs text-sky-500">
-                        {showAllOffline ? `offline — showing all ${visibleSongs.length}, ${savedCount} saved` : `offline — showing ${savedCount} of ${visibleSongs.length} saved`}
-                    </span>
-                )}
                 {/* Filter sits left of search, together, on every width. The menu spans this pair,
                     so it never runs past the screen edge. */}
                 <div className="relative flex items-center gap-1">
