@@ -40,14 +40,18 @@ test.describe('offline mode', () => {
         await expect(page.getByText(/needs internet/i)).toBeVisible()
     })
 
-    test('save all offline button hidden when offline (no cached songs)', async ({ page }) => {
+    // Offline with nothing saved, the toolbar stays (the filter is how to see the rest);
+    // saving needs the network, so the button is there but disabled.
+    test('offline with no saved songs keeps the toolbar, says nothing is saved, save all disabled', async ({ page }) => {
         const lib = new LibraryPage(page)
         const common = new CommonPage(page)
         await lib.goto()
         await expect(lib.saveAllOfflineBtn).toBeVisible({ timeout: 10000 })
         await expect(lib.saveAllOfflineBtn).not.toBeDisabled()
         await common.goOffline()
-        await expect(lib.saveAllOfflineBtn).not.toBeVisible({ timeout: 5000 })
+        await expect(lib.saveAllOfflineBtn).toBeDisabled({ timeout: 5000 })
+        await expect(page.getByTestId('library-saved-empty')).toBeVisible()
+        await expect(page.getByTestId('library-filter')).toBeVisible()
     })
 
     // === Tier 1 OfflineGuard pages ===
