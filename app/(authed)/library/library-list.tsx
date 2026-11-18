@@ -29,7 +29,7 @@ import LetterRail from "./letter-rail"
 import { useIsDesktop } from "../../lib/use-is-desktop"
 import { useFilteredSongs } from "../../lib/use-filtered-songs"
 import { ALPHABET, letterKey, groupSongsByLetter, groupSongsByGenre, groupAlbumsByLetter, type LibraryAlbum } from "../../lib/library-grouping"
-import { removeSongFromLibraryCache } from "../../lib/library-cache"
+import { removeSongsFromLibraryCache } from "../../lib/library-cache"
 
 type ViewMode = 'songs' | 'artists' | 'albums' | 'genres' | 'playlists'
 
@@ -209,7 +209,6 @@ export default function LibraryList() {
         const handler = () => {
             setCachedIds(new Set())
             setSyncPromptIds([])
-            if (!isOffline()) queryClient.invalidateQueries({ queryKey: queryKeys.librarySongs })
         }
         window.addEventListener(EVENTS.offlineCleared, handler)
         return () => window.removeEventListener(EVENTS.offlineCleared, handler)
@@ -626,7 +625,7 @@ export default function LibraryList() {
         }
         setCachedIds(prev => { const next = new Set(prev); ids.forEach(id => next.delete(id)); return next })
         setSyncPromptIds(prev => prev.filter(x => !selectedIds.has(x)))
-        for (const id of ids) removeSongFromLibraryCache(queryClient, id)
+        removeSongsFromLibraryCache(queryClient, ids)
         setStoredSongs(prev => prev?.filter(s => !selectedIds.has(s.uuid)))
         exitSelectMode()
         setBulkLoading(false)

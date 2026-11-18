@@ -1,7 +1,7 @@
 // A song added to or removed from the library is patched into the cached lists;
 // nothing is refetched.
 import { QueryClient } from '@tanstack/react-query'
-import { addSongToLibraryCache, createAppQueryClient, removeSongFromLibraryCache } from '../app/lib/library-cache'
+import { addSongToLibraryCache, createAppQueryClient, removeSongFromLibraryCache, removeSongsFromLibraryCache } from '../app/lib/library-cache'
 import { queryKeys } from '../app/lib/query-keys'
 import { cacheLibraryData } from '../app/lib/offline-db'
 import { forgetLastWritten } from '../app/lib/write-if-changed'
@@ -21,6 +21,37 @@ const ids = (qc: QueryClient) => ({
 })
 
 describe('library cache patches', () => {
+    it('removing songs also takes them off the drafts list, the server lists drafts only for library songs', () => {
+        const qc = seeded()
+        qc.setQueryData(queryKeys.drafts, [{ song_id: 'a' }, { song_id: 'b' }])
+        removeSongFromLibraryCache(qc, 'a')
+        expect(qc.getQueryData(queryKeys.drafts)).toEqual([{ song_id: 'b' }])
+    })
+
+    it('removes many songs in one pass, with one write of the stored copy', async () => {
+        const qc = seeded()
+        removeSongsFromLibraryCache(qc, ['a', 'b'])
+        expect(ids(qc)).toEqual({ songs: [], entries: [] })
+        await Promise.resolve()
+        expect((cacheLibraryData as jest.Mock).mock.calls.length).toBeLessThanOrEqual(1)
+    })
+
+    it('adding a song marks drafts stale: a draft may come back with it', () => {
+        const qc = seeded()
+        qc.setQueryData(queryKeys.drafts, [])
+        addSongToLibraryCache(qc, { uuid: 'c', properties: null })
+        expect(qc.getQueryState(queryKeys.drafts)?.isInvalidated).toBe(true)
+    })
+
+    it('a patch does not hide an earlier stale mark on a list nobody is watching', () => {
+        const qc = seeded()
+        void qc.invalidateQueries({ queryKey: queryKeys.librarySongs })
+        expect(qc.getQueryState(queryKeys.librarySongs)?.isInvalidated).toBe(true)
+        addSongToLibraryCache(qc, { uuid: 'c', properties: null })
+        expect(ids(qc).songs).toContain('c')
+        expect(qc.getQueryState(queryKeys.librarySongs)?.isInvalidated).toBe(true)
+    })
+
     it('removing a song also takes it off the publish list, without a request', () => {
         const qc = seeded()
         qc.setQueryData(queryKeys.eligibleSongs, [{ uuid: 'a' }, { uuid: 'b' }])

@@ -43,6 +43,14 @@ export default function ImportJobsTable({
   const total = pageData?.total ?? 0
   const counts = pageData?.status_counts ?? {}
 
+  // Leaving the page with an import still running: nothing here will see it finish, so the lists
+  // it will land in are marked stale (no request) and the library asks again when it opens.
+  useEffect(() => () => {
+    if (activeIdsRef.current.size === 0) return
+    void queryClient.invalidateQueries({ queryKey: queryKeys.librarySongs, refetchType: 'none' })
+    void queryClient.invalidateQueries({ queryKey: queryKeys.library, refetchType: 'none' })
+  }, [queryClient])
+
   const isPending = (s: string) => s === 'pending' || s === 'processing'
 
   function trackJob(job: ImportJobResult, replaceId?: string) {

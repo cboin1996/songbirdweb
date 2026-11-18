@@ -4,6 +4,7 @@ import { LibrarySong, artworkUrl, songArtworkUrl } from './data'
 import { ARTWORK_SMALL_PX, ARTWORK_LARGE_PX } from './artwork'
 import { saveSongsOffline, reportSaveResult, getCachedSongIds, cacheArtworkUrls } from './offline'
 import { useToast } from '../components/toast'
+import { EVENTS } from './events'
 
 interface OfflineSaveProgress {
     done: number
@@ -73,6 +74,14 @@ export function OfflineSaveProvider({ children }: { children: React.ReactNode })
     }, [])
 
     const savedNow = useCallback(() => cachedRef.current, [])
+    // "Clear offline" runs on the settings page, where no library is mounted to hear it. The
+    // saved set lives here, so it is emptied here; otherwise the library that comes back would
+    // show the cleared songs as saved and tell the server they still are.
+    useEffect(() => {
+        const cleared = () => setCachedIds(new Set())
+        window.addEventListener(EVENTS.offlineCleared, cleared)
+        return () => window.removeEventListener(EVENTS.offlineCleared, cleared)
+    }, [setCachedIds])
     const dropSaved = useCallback((songId: string) => {
         if (!cachedRef.current.has(songId)) return
         console.debug('saved song has no playable file; no longer listed as saved', songId)

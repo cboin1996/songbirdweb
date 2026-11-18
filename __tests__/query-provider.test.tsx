@@ -16,4 +16,23 @@ describe('QueryProvider', () => {
         window.dispatchEvent(new CustomEvent(EVENTS.draftChanged))
         expect(qc.getQueryState(queryKeys.drafts)?.isInvalidated).toBe(true)
     })
+
+    it('a discard announces itself twice; only the first asks again', () => {
+        let qc!: QueryClient
+        function Grab() { qc = useQueryClient(); return null }
+        render(<QueryProvider><Grab /></QueryProvider>)
+        const spy = jest.spyOn(qc, 'invalidateQueries')
+        window.dispatchEvent(new CustomEvent(EVENTS.draftChanged))
+        window.dispatchEvent(new CustomEvent(EVENTS.draftChanged, { detail: { deleted: 'x' } }))
+        expect(spy).toHaveBeenCalledTimes(1)
+    })
+
+    it('marks the library list stale when offline copies are cleared elsewhere', () => {
+        let qc!: QueryClient
+        function Grab() { qc = useQueryClient(); return null }
+        render(<QueryProvider><Grab /></QueryProvider>)
+        qc.setQueryData(queryKeys.librarySongs, [])
+        window.dispatchEvent(new CustomEvent(EVENTS.offlineCleared))
+        expect(qc.getQueryState(queryKeys.librarySongs)?.isInvalidated).toBe(true)
+    })
 })

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { createAppQueryClient } from '../lib/library-cache'
 import { EVENTS } from '../lib/events'
 import { queryKeys } from '../lib/query-keys'
+import { isOffline } from '../lib/offline-signal'
 
 export default function QueryProvider({ children }: { children: React.ReactNode }) {
     const [queryClient] = useState(createAppQueryClient)
@@ -33,11 +34,26 @@ export default function QueryProvider({ children }: { children: React.ReactNode 
         }
     }, [queryClient])
 
+    // Offline copies cleared (on the settings page): the library's list may have been the device's
+    // copy. Mark it stale; a mounted library asks again now unless the device is offline.
+    useEffect(() => {
+        const cleared = () => {
+            void queryClient.invalidateQueries({ queryKey: queryKeys.librarySongs, refetchType: isOffline() ? 'none' : 'active' })
+        }
+        window.addEventListener(EVENTS.offlineCleared, cleared)
+        return () => window.removeEventListener(EVENTS.offlineCleared, cleared)
+    }, [queryClient])
+
     // A draft saved or discarded while the library is not on screen (the editor is its own page)
     // still has to show when the library comes back: its cached drafts are marked stale here,
     // so the next mount asks again, and a mounted list asks now.
     useEffect(() => {
-        const changed = () => { void queryClient.invalidateQueries({ queryKey: queryKeys.drafts }) }
+        const changed = (e: Event) => {
+            // A discard announces itself twice: the delete (no detail), then the list's optimistic
+            // removal (with detail). One refetch is enough.
+            if ((e as CustomEvent).detail?.deleted) return
+            void queryClient.invalidateQueries({ queryKey: queryKeys.drafts })
+        }
         window.addEventListener(EVENTS.draftChanged, changed)
         return () => window.removeEventListener(EVENTS.draftChanged, changed)
     }, [queryClient])
