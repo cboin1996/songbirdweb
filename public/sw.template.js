@@ -87,6 +87,8 @@ async function matchArtworkAnyVersion(request) {
 const API_CACHE = 'songbird-api-v2'
 const CACHED_API_PATHS = ['/v1/player/state', '/v1/songs/library', '/v1/library']
 const SHELL_PAGES = ['/offline', '/', '/library']
+// Stored with the pages: the lock screen's music note for a song with no stored art, offline.
+const SHELL_ASSETS = ['/icon-no-art.png']
 
 // Stores each shell page on its own. A page the server answers with a redirect
 // (signed out, /library goes to the sign-in page) or an error is skipped, not
@@ -100,7 +102,7 @@ async function precacheShell() {
     const offline = await fetch('/offline')
     if (!storable(offline)) throw new Error('/offline could not be stored')
     await cache.put('/offline', offline)
-    await Promise.all(SHELL_PAGES.filter(path => path !== '/offline').map(async path => {
+    await Promise.all([...SHELL_PAGES.filter(path => path !== '/offline'), ...SHELL_ASSETS].map(async path => {
         try {
             const r = await fetch(path)
             if (storable(r)) await cache.put(path, r)

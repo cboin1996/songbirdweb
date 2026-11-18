@@ -48,6 +48,11 @@ describe('mediaSessionArtwork', () => {
       { src: 'https://x/600x600bb.jpg', sizes: '600x600', type: 'image/jpeg' },
     ])
   })
+  it('gives a song with no art the music note, not an empty list (iOS shows a blank tile)', () => {
+    expect(mediaSessionArtwork({ uuid: 'abc', artwork_cached: false }, () => null, 'http://app')).toEqual([
+      { src: 'http://app/icon-no-art.png', sizes: '512x512', type: 'image/png' },
+    ])
+  })
 })
 
 describe('optimizerWidth', () => {

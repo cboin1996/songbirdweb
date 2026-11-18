@@ -26,7 +26,7 @@ import { createPlayerStore, type PlayerStore, type PlayerSnapshot, type RepeatMo
 import { createListenClock } from "../lib/listen-clock"
 import { useQueryClient } from "@tanstack/react-query"
 import { queryKeys } from "../lib/query-keys"
-import { mediaSessionArtwork, storedMediaArtwork } from "../lib/artwork"
+import { mediaSessionArtwork, storedMediaArtwork, noArtArtwork, type MediaArtwork } from "../lib/artwork"
 import { isValidShuffleOrder } from "../lib/shuffle-order"
 import { EVENTS } from "../lib/events"
 import Slider from "./slider"
@@ -1186,10 +1186,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             mediaBlobUrls = []
             if (offlineNow) {
                 // The OS cannot reach the service worker's cache, so offline it is given only
-                // copies this device stored, as blob: urls; none stored, no art entry at all.
+                // copies this device stored, as blob: urls.
                 navigator.mediaSession.metadata = describe([])
                 const asked = song.uuid
-                void storedMediaArtwork(artwork, url => findStoredArtwork(url), blob => URL.createObjectURL(blob)).then(list => {
+                const stored = (list: MediaArtwork[]) => storedMediaArtwork(list, url => findStoredArtwork(url), blob => URL.createObjectURL(blob))
+                // Art this device never stored: the music note (precached with the app), as online.
+                void stored(artwork).then(list => list.length ? list : stored([noArtArtwork(origin)])).then(list => {
                     if (mediaSyncSong !== asked || mediaSyncSeq !== seq) { list.forEach(a => URL.revokeObjectURL(a.src)); return }
                     mediaBlobUrls = list.map(a => a.src)
                     if (list.length) navigator.mediaSession.metadata = describe(list)

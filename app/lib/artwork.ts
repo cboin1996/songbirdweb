@@ -33,10 +33,18 @@ export function completeResponse(res: Response | undefined): res is Response {
 
 export interface MediaArtwork { src: string; sizes: string; type: string }
 
+/** The music note on a grey tile, as the library shows for a song with no art. Its name fits the
+ * auth proxy's `icon-*.png` exclusion, so it loads signed out and when the OS fetches it itself. */
+export const NO_ART_PATH = '/icon-no-art.png'
+
+export function noArtArtwork(origin: string): MediaArtwork {
+  return { src: `${origin}${NO_ART_PATH}`, sizes: '512x512', type: 'image/png' }
+}
+
 /**
  * The lock-screen artwork list: only sizes the app also stores for offline, at most
  * two. A song with a local copy has a thumbnail and a full image; a remote one has
- * its large image only.
+ * its large image only. A song with no art gets the music note, not the OS's blank tile.
  */
 export function mediaSessionArtwork(
   song: { uuid: string; artwork_cached?: boolean },
@@ -50,7 +58,7 @@ export function mediaSessionArtwork(
     if (!url) continue
     out.push({ src: url.startsWith('/') ? `${origin}${url}` : url, sizes: `${s}x${s}`, type: 'image/jpeg' })
   }
-  return out
+  return out.length ? out : [noArtArtwork(origin)]
 }
 
 /** The remote art url inside an optimizer url, or the url itself: how a saved copy of remote art is keyed. */
@@ -65,7 +73,7 @@ function storedKeyCandidates(src: string): string[] {
  * The lock-screen list for a device with no network: the OS fetches a lock-screen
  * image itself and cannot reach the service worker's cache, so only art the device has
  * stored is offered, as a `blob:` url of that copy, at the sizes it stored. Nothing stored
- * gives an empty list: no entry, rather than a white square.
+ * gives an empty list; the player then offers the stored music note instead.
  */
 export async function storedMediaArtwork(
   list: MediaArtwork[],

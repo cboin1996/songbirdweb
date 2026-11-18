@@ -82,18 +82,19 @@ const ok = () => new FakeResponse('<html>')
 const redirected = () => new FakeResponse('<html>sign in', { redirected: true })
 
 describe('install', () => {
-    it('stores each shell page that came back as a success', async () => {
+    it('stores each shell page that came back as a success, and the no-art music note', async () => {
         const sw = boot(async () => ok())
         expect(await sw.install()).toBe('installed')
         const shell = [...sw.stores.values()][0]
-        expect([...shell.keys()].sort()).toEqual(['/', '/library', '/offline'])
+        // The note is what the lock screen shows offline for a song with no stored art.
+        expect([...shell.keys()].sort()).toEqual(['/', '/icon-no-art.png', '/library', '/offline'])
     })
 
     it('does not store a page that came by redirect, and still installs', async () => {
         const sw = boot(async path => path === '/library' ? redirected() : ok())
         expect(await sw.install()).toBe('installed')
         const shell = [...sw.stores.values()][0]
-        expect([...shell.keys()].sort()).toEqual(['/', '/offline'])
+        expect([...shell.keys()].sort()).toEqual(['/', '/icon-no-art.png', '/offline'])
     })
 
     it('still installs when a page other than /offline cannot be fetched', async () => {
